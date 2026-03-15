@@ -24,7 +24,7 @@ export function Elimination() {
 
   if (eliminationNoVotes) {
     return (
-      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-6">
+      <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
         <p
           className="animate-fade-in font-[family-name:var(--font-literary)] text-[1.2rem]"
           style={{ color: "var(--ink)" }}
@@ -36,7 +36,7 @@ export function Elimination() {
   }
 
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-6">
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
       {step >= 1 && (
         <p
           className="animate-fade-in font-[family-name:var(--font-literary)] text-[1.2rem]"

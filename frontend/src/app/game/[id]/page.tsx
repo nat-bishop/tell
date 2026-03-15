@@ -54,7 +54,7 @@ function JoinScreen({
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full border-b bg-transparent py-2 text-center font-[family-name:var(--font-literary)] text-[1.1rem] outline-none"
+          className="w-full border-b bg-transparent py-2 min-h-[44px] text-center font-[family-name:var(--font-literary)] text-[1.1rem] outline-none"
           style={{ color: "var(--ink)", borderColor: "var(--rule)" }}
           placeholder="your name"
           autoFocus
@@ -63,7 +63,7 @@ function JoinScreen({
       <button
         onClick={handleJoin}
         disabled={joining || !name.trim()}
-        className="font-[family-name:var(--font-literary)] text-[1.1rem] transition-opacity hover:opacity-70 disabled:opacity-30"
+        className="font-[family-name:var(--font-literary)] text-[1.1rem] py-2 px-4 min-h-[44px] transition-opacity hover:opacity-70 disabled:opacity-30"
         style={{ color: "var(--ink)" }}
       >
         {joining ? "joining..." : "enter \u2192"}

@@ -36,7 +36,7 @@ export function Vote() {
   });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="chat-scroll flex flex-col gap-6">
       <div className="max-h-[40vh] space-y-7 overflow-y-auto">
         {answerEntries.map((entry, i) => (
           <Dialogue
@@ -47,10 +47,7 @@ export function Vote() {
           />
         ))}
         {messages.length > 0 && (
-          <div
-            className="my-6 mx-auto w-12"
-            style={{ borderTop: "1px solid var(--rule)" }}
-          />
+          <hr className="divider" />
         )}
         {messages.map((msg, i) => (
           <Dialogue
@@ -62,10 +59,7 @@ export function Vote() {
         ))}
       </div>
 
-      <div
-        className="mx-auto w-12"
-        style={{ borderTop: "1px solid var(--rule)" }}
-      />
+      <hr className="divider" />
 
       <div className="flex flex-col gap-4">
         <span
@@ -81,7 +75,7 @@ export function Vote() {
               key={p.id}
               onClick={() => !hasVoted && setSelected(p.id)}
               disabled={hasVoted}
-              className="flex items-center py-2 pl-3 text-left transition-all"
+              className="flex items-center py-3 pl-3 text-left transition-all min-h-[44px]"
               style={{
                 borderLeft:
                   selected === p.id

@@ -33,7 +33,7 @@ export function GameOver() {
           }) => (
             <div
               key={p.id}
-              className="flex items-center gap-4 animate-fade-in"
+              className="flex items-center gap-4 min-h-[44px] animate-fade-in"
             >
               <span
                 className="w-24 font-[family-name:var(--font-literary-sc)] text-[0.9rem] tracking-[0.08em]"

@@ -46,7 +46,7 @@ export function Lobby() {
         <button
           onClick={handleStart}
           disabled={!canStart}
-          className="font-[family-name:var(--font-literary)] text-[1.1rem] transition-opacity disabled:opacity-30"
+          className="font-[family-name:var(--font-literary)] text-[1.1rem] py-2 px-4 transition-opacity disabled:opacity-30"
           style={{ color: "var(--ink)" }}
         >
           begin

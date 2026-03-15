@@ -48,17 +48,14 @@ export function Chat() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 space-y-7 overflow-y-auto pb-4"
+        className="chat-scroll flex-1 space-y-7 overflow-y-auto pb-4"
       >
         {answerEntries.map((entry, i) => (
           <Dialogue key={`answer-${i}`} alias={entry.alias} text={entry.text} />
         ))}
 
         {answerEntries.length > 0 && messages.length > 0 && (
-          <div
-            className="my-6 mx-auto w-12"
-            style={{ borderTop: "1px solid var(--rule)" }}
-          />
+          <hr className="divider" />
         )}
 
         {messages.map((msg, i) => (
@@ -80,13 +77,13 @@ export function Chat() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             rows={1}
-            className="flex-1 resize-none bg-transparent font-[family-name:var(--font-literary)] text-[1.1rem] leading-[1.6] outline-none"
+            className="flex-1 resize-none bg-transparent font-[family-name:var(--font-literary)] text-[1.1rem] leading-[1.6] min-h-[44px] outline-none"
             style={{ color: "var(--ink)" }}
             placeholder="speak..."
           />
           <button
             onClick={handleSend}
-            className="shrink-0 font-[family-name:var(--font-literary)] text-[0.9rem] transition-opacity hover:opacity-70"
+            className="shrink-0 font-[family-name:var(--font-literary)] text-[0.9rem] min-h-[44px] px-2 transition-opacity hover:opacity-70"
             style={{ color: "var(--dim)" }}
           >
             send &rarr;

@@ -45,7 +45,7 @@ export function Prompt() {
             onChange={(e) => setAnswer(e.target.value)}
             maxLength={280}
             rows={3}
-            className="w-full resize-none border-b bg-transparent px-0 py-2 font-[family-name:var(--font-literary)] text-[1.1rem] leading-[1.6] outline-none"
+            className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-[family-name:var(--font-literary)] text-[1.1rem] leading-[1.6] outline-none"
             style={{
               color: "var(--ink)",
               borderColor: "var(--rule)",
@@ -58,7 +58,7 @@ export function Prompt() {
             </SystemText>
             <button
               onClick={handleSubmit}
-              className="font-[family-name:var(--font-literary)] text-[1rem] transition-opacity hover:opacity-70"
+              className="font-[family-name:var(--font-literary)] text-[1rem] min-h-[44px] px-2 transition-opacity hover:opacity-70"
               style={{ color: "var(--ink)" }}
             >
               submit &rarr;
