@@ -10,8 +10,7 @@ export function Timer({ remaining, total }: { remaining: number; total: number }
           backgroundColor: isWarning ? 'var(--warm)' : 'var(--rule)',
         }}
       />
-      <span className="shrink-0 pr-3 pl-1 font-[family-name:var(--font-system)] text-xs"
-        style={{ color: isWarning ? 'var(--warm)' : 'var(--dim)' }}>
+      <span className={`shrink-0 pr-3 pl-1 font-system text-xs ${isWarning ? 'text-warm' : 'text-dim'}`}>
         {remaining}
       </span>
     </div>

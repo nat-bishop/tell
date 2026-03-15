@@ -11,6 +11,7 @@ dependencies = [
     "logfire[fastapi]>=4.16.0",
     "sse-starlette==3.3.2",
     "structlog>=24.1.0",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.optional-dependencies]

@@ -101,6 +101,18 @@ input::placeholder, textarea::placeholder {
   opacity: 0.7;
 }
 
+/* Font utility classes */
+.font-literary { font-family: var(--font-literary); }
+.font-literary-sc { font-family: var(--font-literary-sc); }
+.font-system { font-family: var(--font-system); }
+
+/* Color utility classes */
+.text-ink { color: var(--ink); }
+.text-dim { color: var(--dim); }
+.text-warm { color: var(--warm); }
+.border-rule { border-color: var(--rule); }
+.bg-page { background-color: var(--page); }
+
 /* Focus styles */
 input:focus, textarea:focus {
   border-color: var(--ink) !important;

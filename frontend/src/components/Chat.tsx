@@ -2,11 +2,13 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
+import { useAnswerEntries } from "@/hooks/useAnswerEntries";
 import { sendChat } from "@/api/actions";
 import { Dialogue } from "./Dialogue";
 
-export function Chat() {
-  const { gameId, playerId, answers, messages, players } = useGameStore();
+export function Chat({ spectator = false }: { spectator?: boolean }) {
+  const { gameId, playerId, messages } = useGameStore();
+  const answerEntries = useAnswerEntries();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -38,11 +40,6 @@ export function Chat() {
     }
   };
 
-  const answerEntries = Object.entries(answers).map(([pid, text]) => {
-    const player = players.find((p) => p.id === pid);
-    return { alias: player?.alias || "???", text };
-  });
-
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col">
       <div
@@ -67,29 +64,26 @@ export function Chat() {
         ))}
       </div>
 
-      <div
-        className="sticky bottom-0 border-t pt-3 pb-4"
-        style={{ borderColor: "var(--rule)", backgroundColor: "var(--page)" }}
-      >
-        <div className="flex items-end gap-3">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            className="flex-1 resize-none bg-transparent font-[family-name:var(--font-literary)] text-[1.1rem] leading-[1.6] min-h-[44px] outline-none"
-            style={{ color: "var(--ink)" }}
-            placeholder="speak..."
-          />
-          <button
-            onClick={handleSend}
-            className="shrink-0 font-[family-name:var(--font-literary)] text-[0.9rem] min-h-[44px] px-2 transition-opacity hover:opacity-70"
-            style={{ color: "var(--dim)" }}
-          >
-            send &rarr;
-          </button>
+      {!spectator && (
+        <div className="sticky bottom-0 border-t pt-3 pb-4 border-rule bg-page">
+          <div className="flex items-end gap-3">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              className="flex-1 resize-none bg-transparent font-literary text-[1.1rem] leading-[1.6] min-h-[44px] text-ink outline-none"
+              placeholder="speak..."
+            />
+            <button
+              onClick={handleSend}
+              className="shrink-0 font-literary text-[0.9rem] min-h-[44px] px-2 text-dim transition-opacity hover:opacity-70"
+            >
+              send &rarr;
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

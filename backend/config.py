@@ -6,8 +6,13 @@ import os
 import tomllib
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _CONFIG_PATH = _PROJECT_ROOT / "config.toml"
+
+# Load .env so API keys are available to pydantic-ai and other libs
+load_dotenv(_PROJECT_ROOT / ".env")
 
 
 def _load_toml() -> dict:
@@ -61,5 +66,5 @@ class Settings:
         )
 
         # Operational (env-only)
-        self.backend_port: int = int(os.environ.get("BACKEND_PORT", "8001"))
+        self.backend_port: int = int(os.environ.get("BACKEND_PORT", "8501"))
         self.log_level: str = os.environ.get("TELL_LOG_LEVEL", "INFO")

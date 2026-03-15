@@ -6,31 +6,32 @@ import { useGameStore } from "./useGameStore";
 
 export function useGameEvents(gameId: string, playerId: string) {
   const connectionRef = useRef<{ close: () => void } | null>(null);
-  const store = useGameStore();
 
   useEffect(() => {
     if (!gameId || !playerId) return;
 
+    // Use getState() to avoid subscribing to the entire store
+    const store = useGameStore.getState();
+    const lastSeq = store.lastSeq;
+
     connectionRef.current = connectGameEvents(gameId, playerId, {
-      onStateSync: store.onStateSync,
-      onPlayerJoined: store.onPlayerJoined,
-      onPlayerDisconnected: store.onPlayerDisconnected,
-      onPlayerReconnected: store.onPlayerReconnected,
-      onPhaseChanged: store.onPhaseChanged,
-      onChatMessage: store.onChatMessage,
-      onAnswerSubmitted: store.onAnswerSubmitted,
-      onVoteCast: store.onVoteCast,
-      onVoteResults: store.onVoteResults,
-      onElimination: store.onElimination,
-      onGameOver: store.onGameOver,
-      onTimerTick: store.onTimerTick,
-      onHostChanged: store.onHostChanged,
-    });
+      onStateSync: useGameStore.getState().onStateSync,
+      onPlayerJoined: useGameStore.getState().onPlayerJoined,
+      onPlayerDisconnected: useGameStore.getState().onPlayerDisconnected,
+      onPlayerReconnected: useGameStore.getState().onPlayerReconnected,
+      onPhaseChanged: useGameStore.getState().onPhaseChanged,
+      onChatMessage: useGameStore.getState().onChatMessage,
+      onAnswerSubmitted: useGameStore.getState().onAnswerSubmitted,
+      onVoteCast: useGameStore.getState().onVoteCast,
+      onVoteResults: useGameStore.getState().onVoteResults,
+      onElimination: useGameStore.getState().onElimination,
+      onGameOver: useGameStore.getState().onGameOver,
+      onTimerTick: useGameStore.getState().onTimerTick,
+      onHostChanged: useGameStore.getState().onHostChanged,
+    }, lastSeq);
 
     return () => {
       connectionRef.current?.close();
     };
-    // Zustand actions are stable — only reconnect when IDs change
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameId, playerId]);
 }

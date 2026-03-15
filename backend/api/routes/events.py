@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.api.deps import get_connection_manager, get_game_repository
 from backend.services.game_logic import build_state_sync
+from schemas.api_models import HostChangedEvent
 from schemas.game_state import PlayerRole
 
 router = APIRouter()
@@ -34,26 +35,20 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
 
     async def event_generator():
         try:
-            # Send initial state sync or replay missed events
+            # Replay missed events, or fall back to full state sync
+            send_full_sync = True
             if last_seq > 0:
                 missed = cm.get_events_after(game_id, last_seq)
                 if missed is not None:
+                    send_full_sync = False
                     for event in missed:
                         yield {
                             "id": str(event.seq),
                             "event": event.event_type,
                             "data": event.model_dump_json(),
                         }
-                else:
-                    # Too many missed — send full sync
-                    sync_data = build_state_sync(session.state, player_id, session.next_seq())
-                    yield {
-                        "id": str(sync_data["seq"]),
-                        "event": "state_sync",
-                        "data": json.dumps(sync_data),
-                    }
-            else:
-                # First connection — full state sync
+
+            if send_full_sync:
                 sync_data = build_state_sync(session.state, player_id, session.next_seq())
                 yield {
                     "id": str(sync_data["seq"]),
@@ -75,25 +70,31 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                         "data": event.model_dump_json(),
                     }
                 except asyncio.TimeoutError:
-                    # Send keep-alive comment
                     yield {"comment": "ping"}
         finally:
             cm.disconnect(game_id, player_id)
-            # Mark player as disconnected
             repo_session = repo.get(game_id)
             if repo_session:
+                # Mark disconnected and check host promotion in one pass
+                was_host = False
                 for p in repo_session.state.players:
                     if p.id == player_id:
                         p.is_connected = False
+                        was_host = p.is_host
+                        if was_host:
+                            p.is_host = False
                         break
-                # Check if disconnected player was host — promote next human
-                disconnected = next((p for p in repo_session.state.players if p.id == player_id), None)
-                if disconnected and disconnected.is_host:
-                    disconnected.is_host = False
-                    # Find next connected human
+
+                if was_host:
                     for p in repo_session.state.players:
                         if p.id != player_id and p.is_connected and p.role == PlayerRole.HUMAN:
                             p.is_host = True
+                            event = HostChangedEvent(
+                                seq=repo_session.next_seq(),
+                                new_host_id=p.id,
+                                new_host_alias=p.alias,
+                            )
+                            await cm.broadcast(game_id, event)
                             break
 
     return EventSourceResponse(event_generator(), ping=15)

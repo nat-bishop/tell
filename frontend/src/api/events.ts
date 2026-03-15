@@ -1,19 +1,23 @@
 import { BASE_URL } from "./client";
 
+// Callbacks accept parsed JSON — type safety is enforced by the store, not the transport layer
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type EventHandler = (data: any) => void;
+
 export interface GameEventCallbacks {
-  onStateSync: (data: Record<string, unknown>) => void;
-  onPlayerJoined: (data: Record<string, unknown>) => void;
-  onPlayerDisconnected: (data: Record<string, unknown>) => void;
-  onPlayerReconnected: (data: Record<string, unknown>) => void;
-  onPhaseChanged: (data: Record<string, unknown>) => void;
-  onChatMessage: (data: Record<string, unknown>) => void;
-  onAnswerSubmitted: (data: Record<string, unknown>) => void;
-  onVoteCast: (data: Record<string, unknown>) => void;
-  onVoteResults: (data: Record<string, unknown>) => void;
-  onElimination: (data: Record<string, unknown>) => void;
-  onGameOver: (data: Record<string, unknown>) => void;
-  onTimerTick: (data: Record<string, unknown>) => void;
-  onHostChanged: (data: Record<string, unknown>) => void;
+  onStateSync: EventHandler;
+  onPlayerJoined: EventHandler;
+  onPlayerDisconnected: EventHandler;
+  onPlayerReconnected: EventHandler;
+  onPhaseChanged: EventHandler;
+  onChatMessage: EventHandler;
+  onAnswerSubmitted: EventHandler;
+  onVoteCast: EventHandler;
+  onVoteResults: EventHandler;
+  onElimination: EventHandler;
+  onGameOver: EventHandler;
+  onTimerTick: EventHandler;
+  onHostChanged: EventHandler;
 }
 
 export function connectGameEvents(
@@ -25,7 +29,7 @@ export function connectGameEvents(
   const url = `${BASE_URL}/games/${gameId}/events?player_id=${playerId}&last_seq=${lastSeq}`;
   const es = new EventSource(url);
 
-  const eventMap: Record<string, (data: Record<string, unknown>) => void> = {
+  const eventMap: Record<string, EventHandler> = {
     state_sync: callbacks.onStateSync,
     player_joined: callbacks.onPlayerJoined,
     player_disconnected: callbacks.onPlayerDisconnected,

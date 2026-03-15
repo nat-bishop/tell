@@ -5,7 +5,7 @@ import { useGameStore } from "@/hooks/useGameStore";
 import { submitAnswer } from "@/api/actions";
 import { SystemText } from "./SystemText";
 
-export function Prompt() {
+export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
   const {
     gameId,
     playerId,
@@ -31,25 +31,22 @@ export function Prompt() {
     <div className="flex flex-col items-center gap-8 pt-8">
       <SystemText>round {roundNumber}</SystemText>
 
-      <p
-        className="max-w-md text-center font-[family-name:var(--font-literary)] text-[1.3rem] italic leading-[1.6]"
-        style={{ color: "var(--ink)" }}
-      >
+      <p className="max-w-md text-center font-literary text-[1.3rem] italic leading-[1.6] text-ink">
         {promptText}
       </p>
 
-      {!hasSubmitted ? (
+      {readOnly ? (
+        <SystemText>
+          {answerCount} of {totalCount} answered
+        </SystemText>
+      ) : !hasSubmitted ? (
         <div className="w-full max-w-md">
           <textarea
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             maxLength={280}
             rows={3}
-            className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-[family-name:var(--font-literary)] text-[1.1rem] leading-[1.6] outline-none"
-            style={{
-              color: "var(--ink)",
-              borderColor: "var(--rule)",
-            }}
+            className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.1rem] leading-[1.6] text-ink outline-none border-rule"
             placeholder="your answer..."
           />
           <div className="mt-4 flex items-center justify-between">
@@ -58,8 +55,7 @@ export function Prompt() {
             </SystemText>
             <button
               onClick={handleSubmit}
-              className="font-[family-name:var(--font-literary)] text-[1rem] min-h-[44px] px-2 transition-opacity hover:opacity-70"
-              style={{ color: "var(--ink)" }}
+              className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70"
             >
               submit &rarr;
             </button>

@@ -8,9 +8,9 @@ import random
 import structlog
 
 from backend.api.deps import get_connection_manager, get_game_repository, get_settings
-from backend.llm.agents import AIPlayerDeps, generate_answer, generate_chat_message, decide_vote
+from backend.llm.agents import AIPlayerDeps, decide_vote, generate_answer, generate_chat_message
 from backend.llm.personalities import PERSONALITIES, Personality
-from backend.services.game_logic import get_alive_players
+from backend.services.game_logic import get_alive_players, make_phase_changed_event
 from schemas.api_models import AnswerSubmittedEvent, ChatMessageEvent, VoteCastEvent
 from schemas.game_state import ChatMessage, GamePhase, PlayerRole
 
@@ -30,8 +30,10 @@ def assign_personalities(game_id: str, ai_player_ids: list[str]) -> None:
         pid: personalities[i % len(personalities)]
         for i, pid in enumerate(ai_player_ids)
     }
-    log.info("ai_personalities_assigned", game_id=game_id,
-             assignments={pid: p.name for pid, p in _personality_map[game_id].items()})
+    log.info(
+        "ai_personalities_assigned", game_id=game_id,
+        assignments={pid: p.name for pid, p in _personality_map[game_id].items()},
+    )
 
 
 def get_personality(game_id: str, player_id: str) -> Personality:
@@ -61,9 +63,9 @@ def _build_deps(game_id: str, player_id: str) -> AIPlayerDeps | None:
 
     if state.current_round:
         current_prompt = state.current_round.prompt_text
-        # Map player_id answers to alias answers for context
+        player_map = {p.id: p for p in state.players}
         for pid, answer in state.current_round.answers.items():
-            p = next((p for p in state.players if p.id == pid), None)
+            p = player_map.get(pid)
             if p:
                 all_answers[p.alias] = answer
         for msg in state.current_round.messages:
@@ -100,26 +102,17 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
     if phase == GamePhase.PROMPT:
         for player in ai_players:
             delay = random.uniform(3, 15)
-            task = asyncio.create_task(
-                _ai_answer_task(game_id, player.id, delay)
-            )
-            tasks.append(task)
+            tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.CHAT:
         for player in ai_players:
             num_messages = random.randint(2, 5)
-            task = asyncio.create_task(
-                _ai_chat_task(game_id, player.id, num_messages)
-            )
-            tasks.append(task)
+            tasks.append(asyncio.create_task(_ai_chat_task(game_id, player.id, num_messages)))
 
     elif phase == GamePhase.VOTE:
         for player in ai_players:
             delay = random.uniform(2, 10)
-            task = asyncio.create_task(
-                _ai_vote_task(game_id, player.id, delay)
-            )
-            tasks.append(task)
+            tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
 
     _ai_tasks[game_id] = tasks
 
@@ -137,13 +130,11 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     try:
         await asyncio.sleep(delay)
 
-        # Generate answer OUTSIDE the lock
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
         answer_text = await generate_answer(deps)
 
-        # Acquire lock and write
         cm = get_connection_manager()
         repo = get_game_repository()
         settings = get_settings()
@@ -152,11 +143,11 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         async with lock:
             session = repo.get(game_id)
             if not session or session.state.phase != GamePhase.PROMPT:
-                return  # Phase changed, discard
+                return
 
             state = session.state
             if not state.current_round or player_id in state.current_round.answers:
-                return  # Already answered
+                return
 
             state.current_round.answers[player_id] = answer_text
 
@@ -164,33 +155,24 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
             answer_count = len(state.current_round.answers)
             total_count = len(alive)
 
-            event = AnswerSubmittedEvent(
+            await cm.broadcast(game_id, AnswerSubmittedEvent(
                 seq=session.next_seq(),
                 player_id=player_id,
                 answer_count=answer_count,
                 total_count=total_count,
-            )
-            await cm.broadcast(game_id, event)
+            ))
 
             log.info("ai_answer_submitted", game_id=game_id, player_id=player_id)
 
             # Check if all answered — trigger early transition
             if answer_count >= total_count:
                 from backend.api.deps import get_timer_manager
-                get_timer_manager().cancel_timer(game_id)
-
                 from backend.services.game_logic import transition_to_chat
-                from schemas.api_models import PhaseChangedEvent
-
+                get_timer_manager().cancel_timer(game_id)
                 transition_to_chat(state, settings.chat_duration)
-                phase_event = PhaseChangedEvent(
-                    seq=session.next_seq(),
-                    phase=state.phase.value,
-                    round_number=state.round_number,
-                    phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
-                    answers=state.current_round.answers,
-                )
-                await cm.broadcast(game_id, phase_event)
+                await cm.broadcast(game_id, make_phase_changed_event(
+                    state, session.next_seq(), answers=state.current_round.answers,
+                ))
                 need_chat_timer = True
             else:
                 need_chat_timer = False
@@ -210,16 +192,13 @@ async def _ai_chat_task(game_id: str, player_id: str, num_messages: int) -> None
     """AI player sends chat messages at random intervals."""
     try:
         for i in range(num_messages):
-            delay = random.uniform(5, 25)
-            await asyncio.sleep(delay)
+            await asyncio.sleep(random.uniform(5, 25))
 
-            # Generate message OUTSIDE the lock
             deps = _build_deps(game_id, player_id)
             if not deps:
                 return
             message_text = await generate_chat_message(deps)
 
-            # Acquire lock and write
             cm = get_connection_manager()
             repo = get_game_repository()
             lock = cm.get_lock(game_id)
@@ -227,7 +206,7 @@ async def _ai_chat_task(game_id: str, player_id: str, num_messages: int) -> None
             async with lock:
                 session = repo.get(game_id)
                 if not session or session.state.phase != GamePhase.CHAT:
-                    return  # Phase changed, stop
+                    return
 
                 state = session.state
                 if not state.current_round:
@@ -237,20 +216,18 @@ async def _ai_chat_task(game_id: str, player_id: str, num_messages: int) -> None
                 if not player:
                     return
 
-                msg = ChatMessage(
+                state.current_round.messages.append(ChatMessage(
                     player_id=player_id,
                     player_alias=player.alias,
                     text=message_text,
-                )
-                state.current_round.messages.append(msg)
+                ))
 
-                event = ChatMessageEvent(
+                await cm.broadcast(game_id, ChatMessageEvent(
                     seq=session.next_seq(),
                     player_id=player_id,
                     player_alias=player.alias,
                     text=message_text,
-                )
-                await cm.broadcast(game_id, event)
+                ))
 
                 log.info("ai_chat_sent", game_id=game_id, player_id=player_id, msg_num=i + 1)
 
@@ -265,13 +242,11 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
     try:
         await asyncio.sleep(delay)
 
-        # Generate vote decision OUTSIDE the lock
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
         vote_alias = await decide_vote(deps)
 
-        # Acquire lock and write
         cm = get_connection_manager()
         repo = get_game_repository()
         lock = cm.get_lock(game_id)
@@ -279,11 +254,11 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
         async with lock:
             session = repo.get(game_id)
             if not session or session.state.phase != GamePhase.VOTE:
-                return  # Phase changed, discard
+                return
 
             state = session.state
             if not state.current_round or player_id in state.current_round.votes:
-                return  # Already voted
+                return
 
             # Resolve alias to player_id
             target = next(
@@ -291,7 +266,6 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
                 None,
             )
             if not target:
-                # Fallback: vote for random alive player (not self)
                 candidates = [p for p in state.players if p.is_alive and p.id != player_id]
                 if not candidates:
                     return
@@ -303,22 +277,19 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
             vote_count = len(state.current_round.votes)
             total_count = len(alive)
 
-            event = VoteCastEvent(
+            await cm.broadcast(game_id, VoteCastEvent(
                 seq=session.next_seq(),
                 voter_id=player_id,
                 vote_count=vote_count,
                 total_count=total_count,
-            )
-            await cm.broadcast(game_id, event)
+            ))
 
             log.info("ai_vote_cast", game_id=game_id, player_id=player_id, target=target.alias)
 
-            # Check if all voted — trigger early transition
             if vote_count >= total_count:
                 from backend.api.deps import get_timer_manager
-                get_timer_manager().cancel_timer(game_id)
-
                 from backend.api.routes.actions import _do_vote_resolution
+                get_timer_manager().cancel_timer(game_id)
                 await _do_vote_resolution(game_id, session)
 
     except asyncio.CancelledError:

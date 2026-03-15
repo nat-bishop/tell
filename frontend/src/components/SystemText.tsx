@@ -1,7 +1,6 @@
 export function SystemText({ children }: { children: React.ReactNode }) {
   return (
-    <div className="font-[family-name:var(--font-system)] text-[0.75rem]"
-      style={{ color: 'var(--dim)' }}>
+    <div className="font-system text-[0.75rem] text-dim">
       {children}
     </div>
   );

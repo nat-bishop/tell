@@ -18,7 +18,7 @@ frontend/node_modules/.installed: frontend/package.json
 
 # ── Dev servers ─────────────────────────────────────────────────────
 
-BACKEND_PORT ?= 8001
+BACKEND_PORT ?= 8501
 
 define check-port
 	@if netstat -ano 2>/dev/null | grep -q ':$(BACKEND_PORT).*LISTEN'; then \
@@ -40,13 +40,14 @@ backend: .installed-py ## Start FastAPI backend
 	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level warning --port $(BACKEND_PORT)
 
 frontend: frontend/node_modules/.installed ## Start Next.js dev server
-	cd frontend && npm run dev
+	cd frontend && PORT=3500 npm run dev
 
 dev: .installed-py frontend/node_modules/.installed ## Start backend + frontend together
 	$(check-port)
-	@trap 'kill 0' EXIT; \
+	@trap 'kill 0; rm -f .dev.pid' EXIT; \
 	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level warning --port $(BACKEND_PORT) & \
-	cd frontend && npm run dev
+	echo $$! > .dev.pid; \
+	cd frontend && PORT=3500 npm run dev
 
 # ── Test ────────────────────────────────────────────────────────────
 
@@ -70,6 +71,18 @@ lint: .installed-py ## Lint + format Python (ruff check --fix + ruff format)
 codegen: .installed-py frontend/node_modules/.installed ## Regenerate frontend types from backend OpenAPI spec
 	uv run python scripts/export-openapi.py
 	cd frontend && npm run codegen
+
+# ── Stop ──────────────────────────────────────────────────────────
+
+.PHONY: down
+
+down: ## Kill dev servers started by `make dev`
+	@if [ -f .dev.pid ]; then \
+		kill $$(cat .dev.pid) 2>/dev/null && echo "Stopped backend" || echo "Process already gone"; \
+		rm -f .dev.pid; \
+	else \
+		echo "No .dev.pid file — nothing to stop"; \
+	fi
 
 # ── Clean ───────────────────────────────────────────────────────────
 

@@ -25,10 +25,7 @@ export function Elimination() {
   if (eliminationNoVotes) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
-        <p
-          className="animate-fade-in font-[family-name:var(--font-literary)] text-[1.2rem]"
-          style={{ color: "var(--ink)" }}
-        >
+        <p className="animate-fade-in font-literary text-[1.2rem] text-ink">
           no consensus reached.
         </p>
       </div>
@@ -38,10 +35,7 @@ export function Elimination() {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
       {step >= 1 && (
-        <p
-          className="animate-fade-in font-[family-name:var(--font-literary)] text-[1.2rem]"
-          style={{ color: "var(--ink)" }}
-        >
+        <p className="animate-fade-in font-literary text-[1.2rem] text-ink">
           {eliminationTieMessage
             ? eliminationTieMessage
             : `${eliminatedAlias} received ${eliminationVoteCount} vote${eliminationVoteCount !== 1 ? "s" : ""}.`}
@@ -49,18 +43,18 @@ export function Elimination() {
       )}
 
       {step >= 2 && (
-        <span className="animate-fade-in" style={{ color: "var(--dim)" }}>
+        <span className="animate-fade-in text-dim">
           &middot;
         </span>
       )}
 
       {step >= 3 && (
-        <p className="animate-elimination-reveal font-[family-name:var(--font-literary)] text-[1.2rem]">
-          <span style={{ color: "var(--ink)" }}>{eliminatedAlias} was </span>
-          <span style={{ color: wasHuman ? "var(--warm)" : "var(--ink)" }}>
+        <p className="animate-elimination-reveal font-literary text-[1.2rem]">
+          <span className="text-ink">{eliminatedAlias} was </span>
+          <span className={wasHuman ? "text-warm" : "text-ink"}>
             {wasHuman ? "human" : "ai"}
           </span>
-          <span style={{ color: "var(--ink)" }}>.</span>
+          <span className="text-ink">.</span>
         </p>
       )}
     </div>

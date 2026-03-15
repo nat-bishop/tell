@@ -43,10 +43,7 @@ function JoinScreen({
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-8">
-      <h1
-        className="font-[family-name:var(--font-literary)] text-[3rem] font-normal"
-        style={{ color: "var(--ink)" }}
-      >
+      <h1 className="font-literary text-[3rem] font-normal text-ink">
         tell
       </h1>
       <div className="w-full max-w-xs">
@@ -54,8 +51,7 @@ function JoinScreen({
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="w-full border-b bg-transparent py-2 min-h-[44px] text-center font-[family-name:var(--font-literary)] text-[1.1rem] outline-none"
-          style={{ color: "var(--ink)", borderColor: "var(--rule)" }}
+          className="w-full border-b bg-transparent py-2 min-h-[44px] text-center font-literary text-[1.1rem] text-ink outline-none border-rule"
           placeholder="your name"
           autoFocus
         />
@@ -63,8 +59,7 @@ function JoinScreen({
       <button
         onClick={handleJoin}
         disabled={joining || !name.trim()}
-        className="font-[family-name:var(--font-literary)] text-[1.1rem] py-2 px-4 min-h-[44px] transition-opacity hover:opacity-70 disabled:opacity-30"
-        style={{ color: "var(--ink)" }}
+        className="font-literary text-[1.1rem] py-2 px-4 min-h-[44px] text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
       >
         {joining ? "joining..." : "enter \u2192"}
       </button>
@@ -72,9 +67,23 @@ function JoinScreen({
   );
 }
 
+function EliminatedBanner() {
+  const { myAlias } = useGameStore();
+  return (
+    <div className="mb-6 text-center">
+      <p className="font-literary text-[1rem] text-dim">
+        {myAlias} was voted off. watching the game unfold.
+      </p>
+    </div>
+  );
+}
+
 function GameContent() {
-  const { phase, phaseDeadline } = useGameStore();
+  const { phase, phaseDeadline, playerId, players } = useGameStore();
   const remaining = useTimer(phaseDeadline);
+
+  const myPlayer = players.find((p) => p.id === playerId);
+  const isAlive = myPlayer?.is_alive ?? true;
 
   const totalDurations: Record<string, number> = {
     prompt: 45,
@@ -90,10 +99,13 @@ function GameContent() {
         <Timer remaining={remaining} total={total} />
       )}
       <Stage>
+        {!isAlive && phase !== "game_over" && phase !== "elimination" && (
+          <EliminatedBanner />
+        )}
         {phase === "lobby" && <Lobby />}
-        {phase === "prompt" && <Prompt />}
-        {phase === "chat" && <Chat />}
-        {phase === "vote" && <Vote />}
+        {phase === "prompt" && <Prompt readOnly={!isAlive} />}
+        {phase === "chat" && <Chat spectator={!isAlive} />}
+        {phase === "vote" && <Vote spectator={!isAlive} />}
         {phase === "elimination" && <Elimination />}
         {phase === "game_over" && <GameOver />}
       </Stage>

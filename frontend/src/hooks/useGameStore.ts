@@ -1,5 +1,9 @@
 import { create } from "zustand";
 
+// --- Types matching backend SSE event models ---
+
+export type GamePhase = "lobby" | "prompt" | "chat" | "vote" | "elimination" | "game_over";
+
 export interface PlayerInfo {
   id: string;
   alias: string;
@@ -18,7 +22,95 @@ export interface ChatMsg {
   timestamp?: string;
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+export interface RevealedPlayer {
+  id: string;
+  alias: string;
+  role: string;
+  is_alive: boolean;
+  eliminated_round?: number;
+}
+
+interface StateSyncData {
+  seq: number;
+  phase: GamePhase;
+  players: PlayerInfo[];
+  round_number: number;
+  prompt_text: string | null;
+  prompt_category: string | null;
+  answers: Record<string, string>;
+  messages: ChatMsg[];
+  my_answer: string | null;
+  winner: string | null;
+  is_host: boolean;
+  phase_deadline: string | null;
+}
+
+interface PlayerEventData {
+  seq: number;
+  player_id: string;
+  alias?: string;
+  player_count?: number;
+}
+
+interface PhaseChangedData {
+  seq: number;
+  phase: GamePhase;
+  round_number: number;
+  prompt_text?: string;
+  prompt_category?: string;
+  phase_deadline?: string;
+  answers?: Record<string, string>;
+}
+
+interface ChatMessageData {
+  seq: number;
+  player_id: string;
+  player_alias: string;
+  text: string;
+  is_answer?: boolean;
+}
+
+interface CountData {
+  seq: number;
+  answer_count?: number;
+  total_count?: number;
+  vote_count?: number;
+}
+
+interface VoteResultsData {
+  seq: number;
+  votes: Record<string, string>;
+  vote_tallies: Record<string, number>;
+}
+
+interface EliminationData {
+  seq: number;
+  eliminated_id: string | null;
+  eliminated_alias: string | null;
+  was_human: boolean | null;
+  vote_count: number;
+  tie: boolean;
+  tie_message: string | null;
+  no_votes: boolean;
+}
+
+interface GameOverData {
+  seq: number;
+  winner: string;
+  players: RevealedPlayer[];
+}
+
+interface HostChangedData {
+  seq: number;
+  new_host_id: string;
+}
+
+interface SeqData {
+  seq: number;
+}
+
+// --- Store ---
+
 interface GameState {
   // Identity
   gameId: string | null;
@@ -27,7 +119,7 @@ interface GameState {
   isHost: boolean;
 
   // Game state
-  phase: string;
+  phase: GamePhase;
   players: PlayerInfo[];
   roundNumber: number;
   promptText: string | null;
@@ -60,33 +152,32 @@ interface GameState {
   voteTallies: Record<string, number> | null;
 
   // Game over
-  revealedPlayers: any[] | null;
+  revealedPlayers: RevealedPlayer[] | null;
 
   // Actions
   setIdentity: (gameId: string, playerId: string, alias: string) => void;
-  onStateSync: (data: any) => void;
-  onPlayerJoined: (data: any) => void;
-  onPlayerDisconnected: (data: any) => void;
-  onPlayerReconnected: (data: any) => void;
-  onPhaseChanged: (data: any) => void;
-  onChatMessage: (data: any) => void;
-  onAnswerSubmitted: (data: any) => void;
-  onVoteCast: (data: any) => void;
-  onVoteResults: (data: any) => void;
-  onElimination: (data: any) => void;
-  onGameOver: (data: any) => void;
-  onTimerTick: (data: any) => void;
-  onHostChanged: (data: any) => void;
+  onStateSync: (data: StateSyncData) => void;
+  onPlayerJoined: (data: PlayerEventData) => void;
+  onPlayerDisconnected: (data: PlayerEventData) => void;
+  onPlayerReconnected: (data: PlayerEventData) => void;
+  onPhaseChanged: (data: PhaseChangedData) => void;
+  onChatMessage: (data: ChatMessageData) => void;
+  onAnswerSubmitted: (data: CountData) => void;
+  onVoteCast: (data: CountData) => void;
+  onVoteResults: (data: VoteResultsData) => void;
+  onElimination: (data: EliminationData) => void;
+  onGameOver: (data: GameOverData) => void;
+  onTimerTick: (data: SeqData) => void;
+  onHostChanged: (data: HostChangedData) => void;
   reset: () => void;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 const initialState = {
   gameId: null as string | null,
   playerId: null as string | null,
   myAlias: null as string | null,
   isHost: false,
-  phase: "lobby",
+  phase: "lobby" as GamePhase,
   players: [] as PlayerInfo[],
   roundNumber: 0,
   promptText: null as string | null,
@@ -111,7 +202,7 @@ const initialState = {
   eliminationNoVotes: false,
   voteResults: null as Record<string, string> | null,
   voteTallies: null as Record<string, number> | null,
-  revealedPlayers: null as any[] | null, // eslint-disable-line @typescript-eslint/no-explicit-any
+  revealedPlayers: null as RevealedPlayer[] | null,
 };
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -145,7 +236,7 @@ export const useGameStore = create<GameState>((set, get) => ({
         ...s.players.filter((p) => p.id !== data.player_id),
         {
           id: data.player_id,
-          alias: data.alias,
+          alias: data.alias || "???",
           is_alive: true,
           is_connected: true,
           is_host: false,
@@ -214,15 +305,15 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   onAnswerSubmitted: (data) =>
     set({
-      answerCount: data.answer_count,
-      totalCount: data.total_count,
+      answerCount: data.answer_count || 0,
+      totalCount: data.total_count || 0,
       lastSeq: data.seq,
     }),
 
   onVoteCast: (data) =>
     set({
-      voteCount: data.vote_count,
-      voteTotalCount: data.total_count,
+      voteCount: data.vote_count || 0,
+      voteTotalCount: data.total_count || 0,
       lastSeq: data.seq,
     }),
 
@@ -234,7 +325,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     }),
 
   onElimination: (data) =>
-    set({
+    set((s) => ({
       eliminatedId: data.eliminated_id,
       eliminatedAlias: data.eliminated_alias,
       wasHuman: data.was_human,
@@ -243,12 +334,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       eliminationTieMessage: data.tie_message,
       eliminationNoVotes: data.no_votes,
       lastSeq: data.seq,
-      players: get().players.map((p) =>
+      players: s.players.map((p) =>
         p.id === data.eliminated_id
-          ? { ...p, is_alive: false, eliminated_round: get().roundNumber }
+          ? { ...p, is_alive: false, eliminated_round: s.roundNumber }
           : p,
       ),
-    }),
+    })),
 
   onGameOver: (data) =>
     set({

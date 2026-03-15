@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-import random
 import uuid
 
 from fastapi import APIRouter, HTTPException
 
-from backend.api.deps import get_connection_manager, get_game_repository, get_settings, get_timer_manager
-from backend.services.ai_scheduler import assign_personalities, on_phase_change as ai_on_phase_change
+from backend.api.deps import (
+    get_connection_manager,
+    get_game_repository,
+    get_settings,
+    get_timer_manager,
+)
+from backend.services.ai_scheduler import assign_personalities
+from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
 from backend.services.game_logic import (
-    build_state_sync,
     check_game_over,
     get_alive_players,
     make_game_over_event,
+    make_phase_changed_event,
     resolve_votes,
     transition_to_chat,
     transition_to_elimination,
@@ -28,7 +33,6 @@ from schemas.api_models import (
     ChatMessageEvent,
     JoinGameRequest,
     JoinGameResponse,
-    PhaseChangedEvent,
     PlayerJoinedEvent,
     SendChatRequest,
     StartGameRequest,
@@ -83,26 +87,18 @@ async def _handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
                     state.current_round.answers[p.id] = "[no response]"
 
             transition_to_chat(state, settings.chat_duration)
-            event = PhaseChangedEvent(
-                seq=session.next_seq(),
-                phase=state.phase.value,
-                round_number=state.round_number,
-                phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
-                answers=state.current_round.answers if state.current_round else {},
+            answers = state.current_round.answers if state.current_round else {}
+            await cm.broadcast(
+                game_id, make_phase_changed_event(state, session.next_seq(), answers=answers)
             )
-            await cm.broadcast(game_id, event)
             await _start_phase_timer(game_id, GamePhase.CHAT)
             await ai_on_phase_change(game_id, GamePhase.CHAT)
 
         elif expired_phase == GamePhase.CHAT:
             transition_to_vote(state, settings.vote_duration)
-            event = PhaseChangedEvent(
-                seq=session.next_seq(),
-                phase=state.phase.value,
-                round_number=state.round_number,
-                phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
+            await cm.broadcast(
+                game_id, make_phase_changed_event(state, session.next_seq())
             )
-            await cm.broadcast(game_id, event)
             await _start_phase_timer(game_id, GamePhase.VOTE)
             await ai_on_phase_change(game_id, GamePhase.VOTE)
 
@@ -140,19 +136,26 @@ async def _after_elimination(game_id: str, session) -> None:
         state.phase_deadline = None
         event = make_game_over_event(state, winner, session.next_seq)
         await cm.broadcast(game_id, event)
+        # Clean up game resources
+        from backend.services.ai_scheduler import cleanup_game as ai_cleanup
+        ai_cleanup(game_id)
+        cm.cleanup_game(game_id)
         return
 
     # Next round
     transition_to_prompt(state, settings.prompt_duration)
-    event = PhaseChangedEvent(
-        seq=session.next_seq(),
-        phase=state.phase.value,
-        round_number=state.round_number,
-        prompt_text=state.current_round.prompt_text if state.current_round else None,
-        prompt_category=state.current_round.prompt_category if state.current_round else None,
-        phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
+    await cm.broadcast(
+        game_id,
+        make_phase_changed_event(
+            state, session.next_seq(),
+            prompt_text=(
+                state.current_round.prompt_text if state.current_round else None
+            ),
+            prompt_category=(
+                state.current_round.prompt_category if state.current_round else None
+            ),
+        ),
     )
-    await cm.broadcast(game_id, event)
     await _start_phase_timer(game_id, GamePhase.PROMPT)
     await ai_on_phase_change(game_id, GamePhase.PROMPT)
 
@@ -236,10 +239,6 @@ async def start_game(game_id: str, req: StartGameRequest):
         existing_aliases = {p.alias for p in state.players}
         ai_aliases = generate_aliases(ai_count, existing_aliases)
 
-        from backend.llm.personalities import PERSONALITIES
-
-        personalities = random.sample(PERSONALITIES, min(ai_count, len(PERSONALITIES)))
-
         for i in range(ai_count):
             ai_player = Player(
                 id=f"ai-{uuid.uuid4().hex[:8]}",
@@ -267,15 +266,18 @@ async def start_game(game_id: str, req: StartGameRequest):
 
         # Transition to first prompt
         transition_to_prompt(state, settings.prompt_duration)
-        event = PhaseChangedEvent(
-            seq=session.next_seq(),
-            phase=state.phase.value,
-            round_number=state.round_number,
-            prompt_text=state.current_round.prompt_text if state.current_round else None,
-            prompt_category=state.current_round.prompt_category if state.current_round else None,
-            phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
+        await cm.broadcast(
+            game_id,
+            make_phase_changed_event(
+                state, session.next_seq(),
+                prompt_text=(
+                    state.current_round.prompt_text if state.current_round else None
+                ),
+                prompt_category=(
+                    state.current_round.prompt_category if state.current_round else None
+                ),
+            ),
         )
-        await cm.broadcast(game_id, event)
 
     # Start phase timer OUTSIDE the lock
     await _start_phase_timer(game_id, GamePhase.PROMPT)
@@ -332,14 +334,12 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
         if answer_count >= total_count:
             get_timer_manager().cancel_timer(game_id)
             transition_to_chat(state, settings.chat_duration)
-            phase_event = PhaseChangedEvent(
-                seq=session.next_seq(),
-                phase=state.phase.value,
-                round_number=state.round_number,
-                phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
-                answers=state.current_round.answers,
+            await cm.broadcast(
+                game_id,
+                make_phase_changed_event(
+                    state, session.next_seq(), answers=state.current_round.answers
+                ),
             )
-            await cm.broadcast(game_id, phase_event)
             early_transition = True
         else:
             early_transition = False
@@ -398,7 +398,6 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
     """Cast a vote for who you think is human."""
     cm = get_connection_manager()
     repo = get_game_repository()
-    settings = get_settings()
     lock = cm.get_lock(game_id)
 
     async with lock:

@@ -6,8 +6,8 @@ import { SystemText } from "./SystemText";
 
 export function Lobby() {
   const { gameId, playerId, players, isHost } = useGameStore();
-  const humanCount = players.filter((p) => p.is_alive).length;
-  const canStart = humanCount >= 2;
+  const playerCount = players.filter((p) => p.is_alive).length;
+  const canStart = playerCount >= 2;
 
   const handleStart = async () => {
     if (gameId && playerId) {
@@ -17,10 +17,7 @@ export function Lobby() {
 
   return (
     <div className="flex flex-col items-center gap-8 pt-16">
-      <h1
-        className="font-[family-name:var(--font-literary)] text-[3rem] font-normal"
-        style={{ color: "var(--ink)" }}
-      >
+      <h1 className="font-literary text-[3rem] font-normal text-ink">
         tell
       </h1>
 
@@ -28,26 +25,24 @@ export function Lobby() {
         {players.map((p) => (
           <div key={p.id} className="flex items-center gap-2 animate-fade-in">
             <span
-              className="font-[family-name:var(--font-literary-sc)] text-[1rem] tracking-[0.08em]"
-              style={{ color: p.is_connected ? "var(--ink)" : "var(--dim)" }}
+              className={`font-literary-sc text-[1rem] tracking-[0.08em] ${p.is_connected ? 'text-ink' : 'text-dim'}`}
             >
               {p.alias}
             </span>
             {p.is_connected && (
-              <span style={{ color: "var(--dim)" }}>&middot;</span>
+              <span className="text-dim">&middot;</span>
             )}
           </div>
         ))}
       </div>
 
-      <SystemText>{humanCount} connected</SystemText>
+      <SystemText>{playerCount} connected</SystemText>
 
       {isHost && (
         <button
           onClick={handleStart}
           disabled={!canStart}
-          className="font-[family-name:var(--font-literary)] text-[1.1rem] py-2 px-4 transition-opacity disabled:opacity-30"
-          style={{ color: "var(--ink)" }}
+          className="font-literary text-[1.1rem] py-2 px-4 text-ink transition-opacity disabled:opacity-30"
         >
           begin
         </button>
