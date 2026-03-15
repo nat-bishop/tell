@@ -1,1 +1,11 @@
-.git
+__pycache__/
+*.pyc
+.env
+.installed-py
+node_modules/
+.next/
+frontend/src/types/generated/
+frontend/src/types/openapi.json
+.venv/
+*.egg-info/
+dist/
