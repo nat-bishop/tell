@@ -8,6 +8,7 @@ import uuid
 from fastapi import APIRouter, HTTPException
 
 from backend.api.deps import get_connection_manager, get_game_repository, get_settings, get_timer_manager
+from backend.services.ai_scheduler import assign_personalities, on_phase_change as ai_on_phase_change
 from backend.services.game_logic import (
     build_state_sync,
     check_game_over,
@@ -91,6 +92,7 @@ async def _handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             )
             await cm.broadcast(game_id, event)
             await _start_phase_timer(game_id, GamePhase.CHAT)
+            await ai_on_phase_change(game_id, GamePhase.CHAT)
 
         elif expired_phase == GamePhase.CHAT:
             transition_to_vote(state, settings.vote_duration)
@@ -102,6 +104,7 @@ async def _handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             )
             await cm.broadcast(game_id, event)
             await _start_phase_timer(game_id, GamePhase.VOTE)
+            await ai_on_phase_change(game_id, GamePhase.VOTE)
 
         elif expired_phase == GamePhase.VOTE:
             await _do_vote_resolution(game_id, session)
@@ -151,6 +154,7 @@ async def _after_elimination(game_id: str, session) -> None:
     )
     await cm.broadcast(game_id, event)
     await _start_phase_timer(game_id, GamePhase.PROMPT)
+    await ai_on_phase_change(game_id, GamePhase.PROMPT)
 
 
 @router.post("/{game_id}/join", response_model=JoinGameResponse)
@@ -254,6 +258,10 @@ async def start_game(game_id: str, req: StartGameRequest):
             )
             await cm.broadcast(game_id, event)
 
+        # Assign AI personalities
+        ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI]
+        assign_personalities(game_id, ai_player_ids)
+
         # Calculate max rounds
         state.max_rounds = max(3, human_count + 1)
 
@@ -271,6 +279,9 @@ async def start_game(game_id: str, req: StartGameRequest):
 
     # Start phase timer OUTSIDE the lock
     await _start_phase_timer(game_id, GamePhase.PROMPT)
+
+    # Schedule AI actions for the prompt phase
+    await ai_on_phase_change(game_id, GamePhase.PROMPT)
 
     return {"status": "started", "round": state.round_number}
 
@@ -335,6 +346,7 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
 
     if early_transition:
         await _start_phase_timer(game_id, GamePhase.CHAT)
+        await ai_on_phase_change(game_id, GamePhase.CHAT)
 
     return {"status": "ok"}
 

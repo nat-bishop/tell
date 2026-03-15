@@ -10,6 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from backend.api.deps import get_connection_manager, get_game_repository
 from backend.services.game_logic import build_state_sync
+from schemas.game_state import PlayerRole
 
 router = APIRouter()
 
@@ -85,5 +86,14 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                     if p.id == player_id:
                         p.is_connected = False
                         break
+                # Check if disconnected player was host — promote next human
+                disconnected = next((p for p in repo_session.state.players if p.id == player_id), None)
+                if disconnected and disconnected.is_host:
+                    disconnected.is_host = False
+                    # Find next connected human
+                    for p in repo_session.state.players:
+                        if p.id != player_id and p.is_connected and p.role == PlayerRole.HUMAN:
+                            p.is_host = True
+                            break
 
     return EventSourceResponse(event_generator(), ping=15)
