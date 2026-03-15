@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -37,7 +37,7 @@ class ChatMessage(BaseModel):
     player_alias: str
     text: str
     is_answer: bool = False  # True for prompt answers, False for chat messages
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RoundState(BaseModel):
