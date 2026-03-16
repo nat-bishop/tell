@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from fastapi import APIRouter, HTTPException
 
 from backend.api.deps import get_connection_manager, get_game_repository, get_settings
@@ -11,6 +12,8 @@ from schemas.api_models import CreateGameRequest, CreateGameResponse, GameInfoRe
 from schemas.game_state import TellGameState
 
 router = APIRouter()
+
+log = structlog.get_logger(__name__)
 
 
 @router.post("", response_model=CreateGameResponse)
@@ -23,6 +26,7 @@ async def create_game(req: CreateGameRequest | None = None):
     # Ensure connection infrastructure exists
     cm = get_connection_manager()
     cm.get_lock(game_id)
+    log.info("game_created", game_id=game_id)
     return CreateGameResponse(
         game_id=game_id,
         join_url=f"/game/{game_id}",

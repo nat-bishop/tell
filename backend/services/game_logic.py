@@ -12,7 +12,7 @@ from schemas.api_models import (
     PhaseChangedEvent,
     VoteResultsEvent,
 )
-from schemas.constants import MISSING_ALIAS, NO_RESPONSE
+from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
     GamePhase,
     Player,

@@ -70,3 +70,6 @@ class Settings:
         # Operational (env-only)
         self.backend_port: int = int(os.environ.get("BACKEND_PORT", "8501"))
         self.log_level: str = os.environ.get("TELL_LOG_LEVEL", "INFO")
+
+        # Debug routes enabled when log level is DEBUG
+        self.debug: bool = self.log_level.upper() == "DEBUG"

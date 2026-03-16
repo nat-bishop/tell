@@ -20,16 +20,15 @@ frontend/node_modules/.installed: frontend/package.json
 
 BACKEND_PORT ?= 8501
 FRONTEND_PORT ?= 3500
-UV_LOG_LEVEL := $(shell echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z)
 
-# Kill anything on a given port. Fast path: pidfile or nothing running.
-# Slow path (PowerShell) only when an orphan is detected on the port.
+# Kill anything on a given port.
+# Uses taskkill /T to kill the entire process tree (prevents zombie children on Windows).
 define kill-port
 	@if [ -f .$(1).pid ]; then \
-		kill $$(cat .$(1).pid) 2>/dev/null; rm -f .$(1).pid; \
+		taskkill //F //T //PID $$(cat .$(1).pid) 2>/dev/null; rm -f .$(1).pid; \
 	fi; \
 	if netstat -ano 2>/dev/null | grep -q ':$(2).*LISTEN'; then \
-		powershell -Command "Get-NetTCPConnection -LocalPort $(2) -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$$_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>/dev/null; \
+		powershell -Command "Get-NetTCPConnection -LocalPort $(2) -ErrorAction SilentlyContinue | ForEach-Object { taskkill /F /T /PID \$$_.OwningProcess 2>\$$null }" 2>/dev/null; \
 		for i in 1 2 3 4 5; do \
 			netstat -ano 2>/dev/null | grep -q ':$(2).*LISTEN' || break; \
 			sleep 1; \
@@ -41,7 +40,7 @@ endef
 
 backend: .installed-py ## Start FastAPI backend
 	$(call kill-port,backend,$(BACKEND_PORT))
-	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level $(UV_LOG_LEVEL) --port $(BACKEND_PORT)
+	$(ENV_PREFIX) PYTHONUNBUFFERED=1 uv run uvicorn backend.main:app --reload --log-level $$(echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z) --port $(BACKEND_PORT)
 
 frontend: frontend/node_modules/.installed ## Start Next.js dev server
 	$(call kill-port,frontend,$(FRONTEND_PORT))
@@ -50,8 +49,8 @@ frontend: frontend/node_modules/.installed ## Start Next.js dev server
 dev: .installed-py frontend/node_modules/.installed ## Start backend + frontend together
 	$(call kill-port,backend,$(BACKEND_PORT))
 	$(call kill-port,frontend,$(FRONTEND_PORT))
-	@trap 'kill 0; rm -f .backend.pid' EXIT; \
-	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level $(UV_LOG_LEVEL) --port $(BACKEND_PORT) & \
+	@trap 'taskkill //F //T //PID $$(cat .backend.pid) 2>/dev/null; rm -f .backend.pid; kill 0 2>/dev/null' EXIT; \
+	$(ENV_PREFIX) PYTHONUNBUFFERED=1 uv run uvicorn backend.main:app --reload --log-level $$(echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z) --port $(BACKEND_PORT) & \
 	echo $$! > .backend.pid; \
 	$(ENV_PREFIX) cd frontend && PORT=$(FRONTEND_PORT) npm run dev
 

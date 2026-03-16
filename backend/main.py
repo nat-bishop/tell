@@ -65,14 +65,16 @@ def configure_logging() -> None:
         uv_logger.propagate = False
 
 
-configure_logging()
-
 # --- Logfire observability (opt-in via TELL_LOGFIRE_ENABLED=true) ---
 _settings = Settings()
 if _settings.logfire_enabled:
     logfire.configure(service_name="tell")
     logfire.instrument_pydantic_ai()
     logfire.instrument_google_genai()
+
+# Configure structlog AFTER logfire — logfire/OTel reconfigures the logging system,
+# so our handlers must be set up last to survive.
+configure_logging()
 
 app = FastAPI(
     title="Tell",
@@ -107,6 +109,12 @@ if _settings.logfire_enabled:
 app.include_router(game_router, prefix="/games", tags=["games"])
 app.include_router(events_router, prefix="/games", tags=["events"])
 app.include_router(actions_router, prefix="/games", tags=["actions"])
+
+if _settings.debug:
+    from backend.api.routes.debug import router as debug_router
+
+    app.include_router(debug_router, prefix="/debug", tags=["debug"])
+    structlog.get_logger("backend.main").info("debug_routes_enabled")
 
 
 @app.get("/health")

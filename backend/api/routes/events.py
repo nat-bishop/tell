@@ -16,6 +16,8 @@ from schemas.game_state import PlayerRole
 
 router = APIRouter()
 
+log = structlog.get_logger(__name__)
+
 
 @router.get("/{game_id}/events")
 async def game_events(game_id: str, player_id: str, request: Request, last_seq: int = 0):
@@ -30,6 +32,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
 
     cm = get_connection_manager()
     queue = cm.connect(game_id, player_id)
+    log.info("sse_connected")
 
     # Mark player as connected
     for p in session.state.players:
@@ -45,6 +48,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                 missed = cm.get_events_after(game_id, last_seq)
                 if missed is not None:
                     send_full_sync = False
+                    log.debug("sse_replay", event_count=len(missed))
                     for event in missed:
                         yield {
                             "id": str(event.seq),
@@ -53,6 +57,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                         }
 
             if send_full_sync:
+                log.debug("sse_full_sync")
                 sync_data = build_state_sync(session.state, player_id, session.next_seq())
                 yield {
                     "id": str(sync_data["seq"]),
@@ -76,6 +81,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                 except asyncio.TimeoutError:
                     yield {"comment": "ping"}
         finally:
+            log.info("sse_disconnected")
             cm.disconnect(game_id, player_id)
             repo_session = repo.get(game_id)
             if repo_session:
@@ -93,6 +99,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                     for p in repo_session.state.players:
                         if p.id != player_id and p.is_connected and p.role == PlayerRole.HUMAN:
                             p.is_host = True
+                            log.info("host_promoted", new_host_id=p.id)
                             event = HostChangedEvent(
                                 seq=repo_session.next_seq(),
                                 new_host_id=p.id,

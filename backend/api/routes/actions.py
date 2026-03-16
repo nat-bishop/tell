@@ -101,6 +101,7 @@ async def _handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
 
         state = session.state
         round_state = state.current_round
+        log.info("phase_expired", phase=expired_phase.value)
 
         if expired_phase == GamePhase.PROMPT:
             fill_missing_answers(state)
@@ -278,6 +279,11 @@ async def _do_vote_resolution(game_id: str, session) -> None:
 
     state, vote_results, elimination = resolve_votes(state, session.next_seq)
     await cm.broadcast(game_id, vote_results)
+    log.info(
+        "vote_resolved",
+        eliminated_alias=elimination.eliminated_alias,
+        was_human=elimination.was_human,
+    )
 
     # Generate verdict
     if elimination.eliminated_id and state.current_round:
@@ -319,6 +325,7 @@ async def _after_elimination(game_id: str, session) -> None:
 
     winner = check_game_over(state)
     if winner:
+        log.info("game_over", winner=winner)
         state.phase = GamePhase.GAME_OVER
         state.winner = winner
         state.phase_deadline = None
@@ -389,6 +396,7 @@ async def join_game(game_id: str, req: JoinGameRequest):
             player_count=len(state.players),
         )
         await cm.broadcast(game_id, event)
+        log.info("player_joined", alias=alias, player_count=len(state.players))
 
     return JoinGameResponse(player_id=player_id, alias=alias, game_id=game_id)
 
@@ -470,6 +478,12 @@ async def start_game(game_id: str, req: StartGameRequest):
     await _start_phase_timer(game_id, GamePhase.PROMPT)
     await ai_on_phase_change(game_id, GamePhase.PROMPT)
 
+    log.info(
+        "game_started",
+        player_count=len(state.players),
+        ai_count=ai_count,
+        max_rounds=state.max_rounds,
+    )
     return {"status": "started", "round": state.round_number}
 
 
@@ -517,6 +531,12 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
             total_count=total_count,
         )
         await cm.broadcast(game_id, event)
+        log.info(
+            "answer_submitted",
+            player_id=req.player_id,
+            answer_count=answer_count,
+            total_count=total_count,
+        )
 
         # Check if all answered — early transition
         if answer_count >= total_count:
@@ -593,6 +613,11 @@ async def nominate_player(game_id: str, req: NominateRequest):
             raise HTTPException(status_code=400, detail="Invalid nomination target")
 
         round_state.nominations[req.player_id] = req.target_id
+        log.info(
+            "nomination_cast",
+            player_id=req.player_id,
+            target_id=req.target_id,
+        )
 
         alive = get_alive_players(state)
         nom_count = len(round_state.nominations)
@@ -722,6 +747,7 @@ async def submit_question(game_id: str, req: SubmitQuestionRequest):
                 total=expected,
             ),
         )
+        log.info("question_submitted", player_id=req.player_id, count=q_count, total=expected)
 
         # Early-complete
         if q_count >= expected:
@@ -840,6 +866,9 @@ async def submit_response(game_id: str, req: SubmitResponseRequest):
                 total=expected,
             ),
         )
+        log.info(
+            "response_submitted", player_id=req.player_id, count=responded_count, total=expected
+        )
 
         # Early-complete
         if responded_count >= expected:
@@ -920,6 +949,9 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
             total_count=total_count,
         )
         await cm.broadcast(game_id, event)
+        log.info(
+            "vote_cast", player_id=req.player_id, vote_count=vote_count, total_count=total_count
+        )
 
         # NO early-complete for REVIEW — always runs full timer
 

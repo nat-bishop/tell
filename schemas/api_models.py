@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
+from schemas.game_state import TellGameState
+
 # --- Base event ---
 
 
@@ -223,3 +225,12 @@ class GameInfoResponse(BaseModel):
     phase: str
     player_count: int
     max_players: int
+
+
+# --- Debug models ---
+
+
+class SeedGameRequest(BaseModel):
+    state: TellGameState
+    start_timers: bool = True
+    trigger_ai: bool = True
