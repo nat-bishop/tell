@@ -11,7 +11,7 @@ from pydantic_ai import Agent
 from backend.api.deps import get_settings
 from backend.llm.personalities import Personality
 
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
 
 @dataclass

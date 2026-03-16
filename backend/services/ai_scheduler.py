@@ -14,7 +14,7 @@ from backend.services.game_logic import get_alive_players, make_phase_changed_ev
 from schemas.api_models import AnswerSubmittedEvent, ChatMessageEvent, VoteCastEvent
 from schemas.game_state import ChatMessage, GamePhase, PlayerRole
 
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
 # Store personality assignments per game: game_id -> {player_id -> Personality}
 _personality_map: dict[str, dict[str, Personality]] = {}

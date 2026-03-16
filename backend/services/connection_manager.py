@@ -9,7 +9,7 @@ import structlog
 
 from schemas.api_models import GameEvent
 
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
 
 class ConnectionManager:

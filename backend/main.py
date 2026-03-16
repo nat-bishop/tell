@@ -29,11 +29,11 @@ def configure_logging() -> None:
         structlog.processors.TimeStamper(fmt="iso"),
     ]
 
-    # Configure structlog for direct structlog.get_logger() usage
+    # Configure structlog — events pass through shared processors then into stdlib
     structlog.configure(
         processors=[
             *shared_processors,
-            structlog.dev.ConsoleRenderer(colors=True),
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,

@@ -7,7 +7,7 @@ from typing import Awaitable, Callable
 
 import structlog
 
-log = structlog.get_logger()
+log = structlog.get_logger(__name__)
 
 
 class TimerManager:
