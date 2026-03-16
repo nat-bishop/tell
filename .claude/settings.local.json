@@ -11,7 +11,9 @@
       "Bash(uv run ruff check*)",
       "mcp__plugin_playwright_playwright__browser_install",
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Skill(commit-commands:commit-push-pr)",
+      "Bash(git add:*)"
     ]
   }
 }
