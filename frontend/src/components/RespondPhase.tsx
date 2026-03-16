@@ -141,12 +141,12 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
           </div>
         </div>
       ) : (
-        <div>
+        <>
           <SystemText>response submitted</SystemText>
           <SystemText>
             {responseCount} of {responseTotal} responded
           </SystemText>
-        </div>
+        </>
       )}
     </div>
   );
