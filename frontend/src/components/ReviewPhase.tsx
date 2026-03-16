@@ -1,27 +1,42 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useGameStore, type PlayerInfo } from "@/hooks/useGameStore";
-import { Spotlight } from "./Spotlight";
-import { Gallery } from "./Gallery";
-import { VoteOverlay } from "./VoteOverlay";
+import { castVote } from "@/api/actions";
 import { SystemText } from "./SystemText";
 
-function TripletCard({ player }: { player: PlayerInfo }) {
-  const { answers, questions, players, roundType, synthesis, nominatedId } =
-    useGameStore();
+function PlayerCard({
+  player,
+  voted,
+  canVote,
+  onToggle,
+  delay,
+}: {
+  player: PlayerInfo;
+  voted: boolean;
+  canVote: boolean;
+  onToggle: () => void;
+  delay: number;
+}) {
+  const answer = useGameStore((s) => s.answers[player.id]);
+  const questions = useGameStore((s) => s.questions);
+  const roundType = useGameStore((s) => s.roundType);
+  const synthesis = useGameStore((s) => s.synthesis);
+  const nominatedId = useGameStore((s) => s.nominatedId);
 
-  const answer = answers[player.id];
   const myQuestion = questions.find((q) => q.target_id === player.id);
 
-  // For interrogation spotlight on nominee: show synthesis instead of individual question
   const isNominee = roundType === "interrogation" && player.id === nominatedId;
   const questionText = isNominee ? synthesis : myQuestion?.question;
   const responseText = myQuestion?.response;
 
-  return (
-    <div className="border-b border-rule pb-4">
-      <div className="font-literary-sc text-[0.85rem] tracking-[0.08em] text-ink">
+  const content = (
+    <>
+      <div
+        className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
+          voted ? "text-warm" : "text-ink"
+        }`}
+      >
         {player.alias}
       </div>
       {answer && (
@@ -49,54 +64,102 @@ function TripletCard({ player }: { player: PlayerInfo }) {
           </div>
         </>
       )}
+    </>
+  );
+
+  const baseClass = `border p-4 animate-fade-in transition-colors duration-150 ${
+    !voted ? "border-rule" : ""
+  }`;
+  const style = {
+    animationDelay: `${delay}ms`,
+    borderColor: voted ? "var(--warm)" : undefined,
+  };
+
+  return canVote ? (
+    <button
+      onClick={onToggle}
+      className={`${baseClass} cursor-pointer text-left w-full`}
+      style={style}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className={baseClass} style={style}>
+      {content}
     </div>
   );
 }
 
 export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
-  const { players, roundType, nominatedId } = useGameStore();
+  const { gameId, playerId, players, voteCount, voteTotalCount } =
+    useGameStore();
   const alivePlayers = players.filter((p) => p.is_alive);
+  const aliveCount = alivePlayers.length;
+  const maxVotes = Math.min(3, Math.max(1, aliveCount - 1));
 
-  // For interrogation: spotlight on nominee first, then gallery
-  const spotlightDuration = alivePlayers.length * 5;
-  const [showGallery, setShowGallery] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const sendVotes = useCallback(
+    (targets: string[]) => {
+      if (!gameId || !playerId) return;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        castVote(gameId, playerId, targets);
+      }, 500);
+    },
+    [gameId, playerId],
+  );
 
   useEffect(() => {
-    const timer = setTimeout(
-      () => setShowGallery(true),
-      spotlightDuration * 1000,
-    );
-    return () => clearTimeout(timer);
-  }, [spotlightDuration]);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
-  // Determine spotlight order: for interrogation, nominee first
-  let spotlightPlayers = alivePlayers;
-  if (roundType === "interrogation" && nominatedId) {
-    const nominee = alivePlayers.find((p) => p.id === nominatedId);
-    const rest = alivePlayers.filter((p) => p.id !== nominatedId);
-    if (nominee) spotlightPlayers = [nominee, ...rest];
-  }
+  const toggleVote = (pid: string) => {
+    setSelected((prev) => {
+      let next: string[];
+      if (prev.includes(pid)) {
+        next = prev.filter((id) => id !== pid);
+      } else if (prev.length < maxVotes) {
+        next = [...prev, pid];
+      } else {
+        return prev;
+      }
+      sendVotes(next);
+      useGameStore.setState({ myVotes: next });
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <SystemText>review &amp; vote</SystemText>
+      <SystemText>{spectator ? "review" : "who is human?"}</SystemText>
 
-      {!showGallery ? (
-        <Spotlight
-          players={spotlightPlayers}
-          renderContent={(p) => <TripletCard player={p} />}
-          secondsPerPlayer={5}
-        />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {alivePlayers.map((p, i) => (
+          <PlayerCard
+            key={p.id}
+            player={p}
+            voted={selected.includes(p.id)}
+            canVote={!spectator && p.id !== playerId}
+            onToggle={() => toggleVote(p.id)}
+            delay={i * 60}
+          />
+        ))}
+      </div>
+
+      {!spectator ? (
+        <div className="flex items-center justify-between">
+          <SystemText>
+            {selected.length} of {maxVotes} votes cast
+          </SystemText>
+          <SystemText>
+            {voteCount} of {voteTotalCount} voted
+          </SystemText>
+        </div>
       ) : (
-        <Gallery
-          players={alivePlayers}
-          renderCard={(p) => <TripletCard player={p} />}
-        />
-      )}
-
-      {!spectator && <VoteOverlay />}
-
-      {spectator && (
         <SystemText>voting in progress</SystemText>
       )}
     </div>

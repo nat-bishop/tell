@@ -2,9 +2,7 @@
 
 import { useState } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
-import { useAnswerEntries } from "@/hooks/useAnswerEntries";
 import { submitQuestion } from "@/api/actions";
-import { Dialogue } from "./Dialogue";
 import { SystemText } from "./SystemText";
 
 export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
@@ -12,6 +10,7 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
     gameId,
     playerId,
     players,
+    answers,
     assignments,
     roundType,
     nominatedId,
@@ -19,11 +18,11 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
     questionTotal,
     myQuestionSubmitted,
   } = useGameStore();
-  const answerEntries = useAnswerEntries();
   const [question, setQuestion] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   const hasSubmitted = submitted || myQuestionSubmitted;
+  const alivePlayers = players.filter((p) => p.is_alive);
 
   // Determine target
   let targetId: string | null = null;
@@ -34,11 +33,6 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   } else {
     targetId = playerId ? assignments[playerId] || null : null;
   }
-
-  const targetPlayer = players.find((p) => p.id === targetId);
-  const targetAnswer = answerEntries.find(
-    (e) => e.alias === targetPlayer?.alias,
-  );
 
   const handleSubmit = async () => {
     if (!gameId || !playerId || !question.trim() || hasSubmitted) return;
@@ -62,84 +56,87 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
     );
   }
 
-  if (spectator) {
-    return (
-      <div className="flex flex-col items-center gap-6 pt-8">
-        <SystemText>question phase</SystemText>
-        <div className="w-full space-y-5">
-          {answerEntries.map((entry, i) => (
-            <Dialogue key={i} alias={entry.alias} text={entry.text} animate={false} />
-          ))}
-        </div>
+  return (
+    <div className="flex flex-col gap-6 pt-4">
+      {/* Player answer cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {alivePlayers.map((p) => {
+          const answer = answers[p.id];
+          const isTarget = p.id === targetId;
+          return (
+            <div
+              key={p.id}
+              className={`border p-4 ${isTarget ? "" : "border-rule"}`}
+              style={isTarget ? { borderColor: "var(--warm)" } : undefined}
+            >
+              <div
+                className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
+                  isTarget ? "text-warm" : "text-ink"
+                }`}
+              >
+                {p.alias}
+              </div>
+              {isTarget && !spectator && (
+                <div className="mt-0.5 font-system text-[0.65rem] text-warm">
+                  your target
+                </div>
+              )}
+              {answer && (
+                <div className="mt-1 font-literary text-[1rem] leading-[1.5] text-ink">
+                  {answer}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!spectator && (
+        <>
+          <hr className="divider" />
+
+          {!hasSubmitted ? (
+            <div className="w-full">
+              <textarea
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+                maxLength={200}
+                rows={2}
+                className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
+                placeholder={
+                  roundType === "interrogation"
+                    ? "your question for the nominee..."
+                    : "your anonymous question..."
+                }
+              />
+              <div className="mt-3 flex items-center justify-between">
+                <SystemText>
+                  {questionCount} of {questionTotal} submitted
+                </SystemText>
+                <button
+                  onClick={handleSubmit}
+                  disabled={!question.trim()}
+                  className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
+                >
+                  ask &rarr;
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <SystemText>question submitted</SystemText>
+              <SystemText>
+                {questionCount} of {questionTotal} submitted
+              </SystemText>
+            </div>
+          )}
+        </>
+      )}
+
+      {spectator && (
         <SystemText>
           {questionCount} of {questionTotal} submitted
         </SystemText>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-6 pt-4">
-      {/* Show all answers */}
-      <div className="space-y-5 max-h-[35vh] overflow-y-auto chat-scroll">
-        {answerEntries.map((entry, i) => (
-          <Dialogue
-            key={i}
-            alias={entry.alias}
-            text={entry.text}
-            animate={false}
-          />
-        ))}
-      </div>
-
-      <hr className="divider" />
-
-      {/* Target highlight + question input */}
-      {targetPlayer && targetAnswer && (
-        <div className="border-l-2 pl-4" style={{ borderColor: "var(--warm)" }}>
-          <div className="font-literary-sc text-[0.85rem] tracking-[0.08em] text-warm">
-            {targetPlayer.alias}
-          </div>
-          <div className="mt-1 font-literary text-[1rem] text-ink">
-            {targetAnswer.text}
-          </div>
-        </div>
-      )}
-
-      {!hasSubmitted ? (
-        <div className="w-full">
-          <textarea
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            maxLength={200}
-            rows={2}
-            className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
-            placeholder={
-              roundType === "interrogation"
-                ? "your question for the nominee..."
-                : "your anonymous question..."
-            }
-          />
-          <div className="mt-3 flex items-center justify-between">
-            <SystemText>
-              {questionCount} of {questionTotal} submitted
-            </SystemText>
-            <button
-              onClick={handleSubmit}
-              disabled={!question.trim()}
-              className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
-            >
-              ask &rarr;
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div>
-          <SystemText>question submitted</SystemText>
-          <SystemText>
-            {questionCount} of {questionTotal} submitted
-          </SystemText>
-        </div>
       )}
     </div>
   );
