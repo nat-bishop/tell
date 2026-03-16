@@ -3,7 +3,7 @@ SHELL := /bin/bash
 
 # Load .env if it exists — set -a exports all sourced vars to subprocesses
 ifneq (,$(wildcard .env))
-  ENV_PREFIX := set -a && source .env && set +a &&
+  ENV_PREFIX := set -a && . ./.env && set +a &&
 endif
 
 # ── Auto-install sentinels ──────────────────────────────────────────
@@ -19,35 +19,41 @@ frontend/node_modules/.installed: frontend/package.json
 # ── Dev servers ─────────────────────────────────────────────────────
 
 BACKEND_PORT ?= 8501
+FRONTEND_PORT ?= 3500
+UV_LOG_LEVEL := $(shell echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z)
 
-define check-port
-	@if netstat -ano 2>/dev/null | grep -q ':$(BACKEND_PORT).*LISTEN'; then \
-		echo ""; \
-		echo "  ERROR: Port $(BACKEND_PORT) is already in use."; \
-		echo "  Another process is listening on that port. Find it with:"; \
-		echo "    netstat -ano | grep :$(BACKEND_PORT)"; \
-		echo "  Or use a different port:"; \
-		echo "    make $@ BACKEND_PORT=8002"; \
-		echo ""; \
-		exit 1; \
+# Kill anything on a given port. Fast path: pidfile or nothing running.
+# Slow path (PowerShell) only when an orphan is detected on the port.
+define kill-port
+	@if [ -f .$(1).pid ]; then \
+		kill $$(cat .$(1).pid) 2>/dev/null; rm -f .$(1).pid; \
+	fi; \
+	if netstat -ano 2>/dev/null | grep -q ':$(2).*LISTEN'; then \
+		powershell -Command "Get-NetTCPConnection -LocalPort $(2) -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$$_.OwningProcess -Force -ErrorAction SilentlyContinue }" 2>/dev/null; \
+		for i in 1 2 3 4 5; do \
+			netstat -ano 2>/dev/null | grep -q ':$(2).*LISTEN' || break; \
+			sleep 1; \
+		done; \
 	fi
 endef
 
 .PHONY: backend frontend dev
 
 backend: .installed-py ## Start FastAPI backend
-	$(check-port)
-	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level warning --port $(BACKEND_PORT)
+	$(call kill-port,backend,$(BACKEND_PORT))
+	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level $(UV_LOG_LEVEL) --port $(BACKEND_PORT)
 
 frontend: frontend/node_modules/.installed ## Start Next.js dev server
-	cd frontend && PORT=3500 npm run dev
+	$(call kill-port,frontend,$(FRONTEND_PORT))
+	$(ENV_PREFIX) cd frontend && PORT=$(FRONTEND_PORT) npm run dev
 
 dev: .installed-py frontend/node_modules/.installed ## Start backend + frontend together
-	$(check-port)
-	@trap 'kill 0; rm -f .dev.pid' EXIT; \
-	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level warning --port $(BACKEND_PORT) & \
-	echo $$! > .dev.pid; \
-	cd frontend && PORT=3500 npm run dev
+	$(call kill-port,backend,$(BACKEND_PORT))
+	$(call kill-port,frontend,$(FRONTEND_PORT))
+	@trap 'kill 0; rm -f .backend.pid' EXIT; \
+	$(ENV_PREFIX) uv run uvicorn backend.main:app --reload --log-level $(UV_LOG_LEVEL) --port $(BACKEND_PORT) & \
+	echo $$! > .backend.pid; \
+	$(ENV_PREFIX) cd frontend && PORT=$(FRONTEND_PORT) npm run dev
 
 # ── Test ────────────────────────────────────────────────────────────
 
@@ -76,13 +82,10 @@ codegen: .installed-py frontend/node_modules/.installed ## Regenerate frontend t
 
 .PHONY: down
 
-down: ## Kill dev servers started by `make dev`
-	@if [ -f .dev.pid ]; then \
-		kill $$(cat .dev.pid) 2>/dev/null && echo "Stopped backend" || echo "Process already gone"; \
-		rm -f .dev.pid; \
-	else \
-		echo "No .dev.pid file — nothing to stop"; \
-	fi
+down: ## Kill dev servers
+	$(call kill-port,backend,$(BACKEND_PORT))
+	$(call kill-port,frontend,$(FRONTEND_PORT))
+	@echo "Stopped"
 
 # ── Clean ───────────────────────────────────────────────────────────
 

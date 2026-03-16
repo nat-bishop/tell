@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 .env
 .installed-py
-.dev.pid
+*.pid
 node_modules/
 .next/
 frontend/src/types/generated/
