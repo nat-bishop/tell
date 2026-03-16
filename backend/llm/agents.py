@@ -3,16 +3,24 @@ votes, nominations, synthesis, and verdicts."""
 
 from __future__ import annotations
 
+import asyncio
 import random
 from dataclasses import dataclass
 
 import structlog
-from pydantic_ai import Agent
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ModelMessage
 
 from backend.api.deps import get_settings
 from backend.llm.personalities import Personality
 
 log = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Deps
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -34,11 +42,64 @@ class AIPlayerDeps:
     nominated_alias: str | None = None
     synthesis: str | None = None
     hot_seat_response: str | None = None
+    # Action-specific context injected by the caller
+    action_prompt: str = ""
 
 
-def _build_game_context(deps: AIPlayerDeps) -> str:
-    """Build game context string for the system prompt."""
-    context_parts = [
+# ---------------------------------------------------------------------------
+# Structured output models
+# ---------------------------------------------------------------------------
+
+
+class NominationResponse(BaseModel):
+    target_alias: str = Field(description="Alias of the player you nominate (e.g. UNIT-7)")
+    reasoning: str = Field(description="Brief reasoning (1 sentence)")
+
+    @field_validator("target_alias")
+    @classmethod
+    def check_alias(cls, v: str, info: ValidationInfo) -> str:
+        valid = info.context
+        if valid and v not in valid:
+            raise ValueError(f"'{v}' not valid. Choose from: {', '.join(valid)}")
+        return v
+
+
+class VoteResponse(BaseModel):
+    targets: list[str] = Field(description="Player aliases you suspect are human")
+    reasoning: str = Field(description="Brief reasoning (1 sentence)")
+
+    @field_validator("targets")
+    @classmethod
+    def check_targets(cls, v: list[str], info: ValidationInfo) -> list[str]:
+        valid = info.context
+        if valid:
+            bad = [t for t in v if t not in valid]
+            if bad:
+                raise ValueError(f"Invalid: {bad}. Choose from: {', '.join(valid)}")
+        return v
+
+
+# ---------------------------------------------------------------------------
+# Module-level agent
+# ---------------------------------------------------------------------------
+
+ai_agent: Agent[AIPlayerDeps, str] = Agent(
+    output_type=str,
+    deps_type=AIPlayerDeps,
+    retries=2,
+    validation_context=lambda ctx: [
+        a for a in ctx.deps.alive_players if a != ctx.deps.player_alias
+    ],
+)
+
+
+@ai_agent.instructions
+def _build_instructions(ctx: RunContext[AIPlayerDeps]) -> str:
+    """Dynamic system prompt — personality + game context. Static per game, cacheable."""
+    deps = ctx.deps
+    parts = [
+        deps.personality.answer_system_prompt,
+        "",
         f"You are {deps.player_alias} in a multiplayer game called Tell.",
         "All players claim to be robots. Some are secretly human.",
         f"This is round {deps.round_number}. Round type: {deps.round_type}.",
@@ -46,50 +107,30 @@ def _build_game_context(deps: AIPlayerDeps) -> str:
     ]
 
     if deps.all_answers:
-        context_parts.append("\nAnswers from this round:")
+        parts.append("\nAnswers from this round:")
         for alias, answer in deps.all_answers.items():
-            context_parts.append(f"  {alias}: {answer}")
+            parts.append(f"  {alias}: {answer}")
 
     if deps.questions:
-        context_parts.append("\nQuestions and responses this round:")
+        parts.append("\nQuestions and responses this round:")
         for q in deps.questions:
             line = f'  {q["target_alias"]} was asked: "{q["question"]}"'
             if q.get("response"):
                 line += f' → responded: "{q["response"]}"'
-            context_parts.append(line)
+            parts.append(line)
 
     if deps.synthesis:
-        context_parts.append(f"\nSynthesized question: {deps.synthesis}")
+        parts.append(f"\nSynthesized question: {deps.synthesis}")
 
     if deps.hot_seat_response:
-        context_parts.append(f"\n{deps.nominated_alias} responded: {deps.hot_seat_response}")
+        parts.append(f"\n{deps.nominated_alias} responded: {deps.hot_seat_response}")
 
-    return "\n".join(context_parts)
+    return "\n".join(parts)
 
 
-async def _run_agent(deps: AIPlayerDeps, system_prompt: str, suffix: str, user_prompt: str) -> str:
-    """Run an AI agent with the given prompts. Returns generated text or fallback."""
-    settings = get_settings()
-    action = user_prompt.split()[0].lower().rstrip(".")
-    log.info("llm_call_start", player=deps.player_alias, action=action, model=settings.ai_model)
-    try:
-        agent = Agent(
-            model=settings.ai_model,
-            retries=settings.ai_retries,
-            output_type=str,
-            instructions=(system_prompt + "\n\n" + _build_game_context(deps) + suffix),
-        )
-        result = await agent.run(user_prompt)
-        log.info(
-            "llm_call_done",
-            player=deps.player_alias,
-            action=action,
-            output_len=len(result.output),
-        )
-        return result.output
-    except Exception:
-        log.exception("ai_agent_failed", player=deps.player_alias, action=action)
-        return deps.personality.fallback_response
+# ---------------------------------------------------------------------------
+# System agent (synthesis, verdict — no personality, no history)
+# ---------------------------------------------------------------------------
 
 
 async def _run_system_agent(
@@ -99,8 +140,6 @@ async def _run_system_agent(
     settings = get_settings()
     log.info("llm_system_call_start", model=settings.ai_model)
     try:
-        import asyncio
-
         agent = Agent(
             model=settings.ai_model,
             retries=1,
@@ -115,139 +154,160 @@ async def _run_system_agent(
         return None
 
 
-async def generate_answer(deps: AIPlayerDeps) -> str:
+# ---------------------------------------------------------------------------
+# Generate functions — all accept/return message_history
+# ---------------------------------------------------------------------------
+
+
+async def generate_answer(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str, list[ModelMessage]]:
     """Generate an answer to a prompt in character."""
-    return await _run_agent(
-        deps,
-        deps.personality.answer_system_prompt,
-        f"\n\nThe prompt is: {deps.current_prompt}"
-        "\n\nRespond in character. 1-3 sentences. Do not include your name.",
-        "Generate your answer to this prompt.",
-    )
+    settings = get_settings()
+    log.info("llm_call_start", player=deps.player_alias, action="answer", model=settings.ai_model)
+    try:
+        result = await ai_agent.run(
+            deps.action_prompt,
+            model=settings.ai_model,
+            deps=deps,
+            message_history=message_history,
+        )
+        log.info(
+            "llm_call_done",
+            player=deps.player_alias,
+            action="answer",
+            output_len=len(result.output),
+        )
+        return result.output, result.all_messages()
+    except Exception:
+        log.exception("ai_agent_failed", player=deps.player_alias, action="answer")
+        return deps.personality.fallback_response, message_history or []
 
 
-async def generate_question(deps: AIPlayerDeps) -> str:
+async def generate_question(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str, list[ModelMessage]]:
     """Generate a follow-up question about another player's answer."""
-    target_alias = deps.assigned_target or deps.nominated_alias or "unknown"
-    target_answer = deps.all_answers.get(target_alias, "")
+    settings = get_settings()
+    log.info("llm_call_start", player=deps.player_alias, action="question", model=settings.ai_model)
+    try:
+        result = await ai_agent.run(
+            deps.action_prompt,
+            model=settings.ai_model,
+            deps=deps,
+            message_history=message_history,
+        )
+        log.info(
+            "llm_call_done",
+            player=deps.player_alias,
+            action="question",
+            output_len=len(result.output),
+        )
+        return result.output, result.all_messages()
+    except Exception:
+        log.exception("ai_agent_failed", player=deps.player_alias, action="question")
+        return deps.personality.fallback_response, message_history or []
 
-    system_prompt = (
-        f"You are {deps.player_alias}, a robot unit in a game called Tell. All players claim to be "
-        "robots, but some are secretly human. Your job is to ask a follow-up question that might "
-        "reveal whether another player is human.\n\n"
-        f"{deps.personality.question_style}"
-    )
 
-    suffix = (
-        f'\n\nThe prompt was: "{deps.current_prompt}"'
-        f'\n{target_alias} answered: "{target_answer}"'
-        "\n\nWrite ONE short follow-up question (1 sentence, max 120 characters). "
-        "Probe for emotional authenticity, suspicious specificity, or logical gaps. "
-        "Your question is anonymous — they won't know who asked."
-        "\n\nRespond with ONLY the question."
-    )
-
-    return await _run_agent(deps, system_prompt, suffix, "Generate your question.")
-
-
-async def generate_question_response(deps: AIPlayerDeps, question: str) -> str:
+async def generate_question_response(
+    deps: AIPlayerDeps,
+    question: str,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str, list[ModelMessage]]:
     """Respond to an anonymous question about your answer."""
-    system_prompt = (
-        f"You are {deps.player_alias}, a robot unit in Tell. "
-        "You received a follow-up question about your answer. "
-        "Respond in character — you are a robot, act like one.\n\n"
-        f"{deps.personality.answer_system_prompt}"
-    )
+    settings = get_settings()
+    log.info("llm_call_start", player=deps.player_alias, action="response", model=settings.ai_model)
+    try:
+        result = await ai_agent.run(
+            deps.action_prompt,
+            model=settings.ai_model,
+            deps=deps,
+            message_history=message_history,
+        )
+        log.info(
+            "llm_call_done",
+            player=deps.player_alias,
+            action="response",
+            output_len=len(result.output),
+        )
+        return result.output, result.all_messages()
+    except Exception:
+        log.exception("ai_agent_failed", player=deps.player_alias, action="response")
+        return deps.personality.fallback_response, message_history or []
 
-    suffix = (
-        f'\n\nThe prompt was: "{deps.current_prompt}"'
-        f'\nYour answer was: "{deps.my_answer}"'
-        f'\nQuestion you received: "{question}"'
-        "\n\nWrite a brief response (1-2 sentences). Elaborate on or defend your answer naturally. "
-        "Robots don't get defensive or emotional — they clarify and compute."
-        "\n\nRespond with ONLY your response."
-    )
 
-    return await _run_agent(deps, system_prompt, suffix, "Generate your response.")
-
-
-async def generate_nomination(deps: AIPlayerDeps) -> str:
+async def generate_nomination(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str, list[ModelMessage]]:
     """Pick a player to nominate for the hot seat (Interrogation)."""
     other_players = [a for a in deps.alive_players if a != deps.player_alias]
     if not other_players:
-        return deps.alive_players[0] if deps.alive_players else ""
+        alias = deps.alive_players[0] if deps.alive_players else ""
+        return alias, message_history or []
 
-    system_prompt = (
-        f"You are {deps.player_alias} in a game called Tell. Choose one player to put on the "
-        "hot seat for interrogation. Pick the player whose answer is most worth scrutinizing.\n\n"
-        f"{deps.personality.vote_strategy}"
+    settings = get_settings()
+    log.info(
+        "llm_call_start", player=deps.player_alias, action="nomination", model=settings.ai_model
     )
-
-    answers_text = "\n".join(
-        f"  {alias}: {answer}"
-        for alias, answer in deps.all_answers.items()
-        if alias != deps.player_alias
-    )
-
-    suffix = (
-        f"\n\nAnswers this round:\n{answers_text}"
-        f'\n\nRespond with ONLY the alias of the player you nominate (e.g., "UNIT-7").'
-    )
-
-    nomination = await _run_agent(deps, system_prompt, suffix, "Who do you nominate?")
-    nomination = nomination.strip()
-
-    # Fuzzy match
-    for alias in other_players:
-        if alias.lower() in nomination.lower() or nomination.lower() in alias.lower():
-            return alias
-
-    log.warning("ai_nomination_no_match", player=deps.player_alias, raw=nomination)
-    return random.choice(other_players)
+    try:
+        result = await ai_agent.run(
+            deps.action_prompt,
+            model=settings.ai_model,
+            deps=deps,
+            output_type=NominationResponse,
+            message_history=message_history,
+        )
+        log.info(
+            "llm_call_done",
+            player=deps.player_alias,
+            action="nomination",
+            target=result.output.target_alias,
+        )
+        return result.output.target_alias, result.all_messages()
+    except Exception:
+        log.exception("ai_agent_failed", player=deps.player_alias, action="nomination")
+        return random.choice(other_players), message_history or []
 
 
-async def decide_vote(deps: AIPlayerDeps) -> list[str]:
+async def decide_vote(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[list[str], list[ModelMessage]]:
     """Decide who to vote for. Returns list of target aliases (up to max_votes)."""
     other_players = [a for a in deps.alive_players if a != deps.player_alias]
     if not other_players:
-        return []
+        return [], message_history or []
 
     from backend.services.game_logic import max_votes_for_player
 
     max_v = max_votes_for_player(len(deps.alive_players))
 
-    system_prompt = (
-        f"You are {deps.player_alias} in a game called Tell. Time to vote. "
-        f"Choose up to {max_v} players you suspect of being human.\n\n"
-        f"{deps.personality.vote_strategy}"
-    )
+    settings = get_settings()
+    log.info("llm_call_start", player=deps.player_alias, action="vote", model=settings.ai_model)
+    try:
+        result = await ai_agent.run(
+            deps.action_prompt,
+            model=settings.ai_model,
+            deps=deps,
+            output_type=VoteResponse,
+            message_history=message_history,
+        )
+        targets = result.output.targets[:max_v]
+        log.info("llm_call_done", player=deps.player_alias, action="vote", targets=targets)
+        return targets, result.all_messages()
+    except Exception:
+        log.exception("ai_agent_failed", player=deps.player_alias, action="vote")
+        # Fallback: random votes
+        picks = random.sample(other_players, min(max_v, len(other_players)))
+        return picks, message_history or []
 
-    suffix = (
-        f"\n\nPlayers you can vote for: {', '.join(other_players)}"
-        f"\n\nRespond with {max_v} aliases, one per line. Nothing else. Example:\nUNIT-7\nBOT-42"
-    )
 
-    vote_text = await _run_agent(deps, system_prompt, suffix, "Who do you vote for?")
-
-    # Parse multi-line output
-    lines = [line.strip() for line in vote_text.strip().split("\n") if line.strip()]
-    matched: list[str] = []
-    for line in lines:
-        for alias in other_players:
-            if alias.lower() in line.lower() or line.lower() in alias.lower():
-                if alias not in matched:
-                    matched.append(alias)
-                break
-
-    # Pad with random if needed
-    remaining = [a for a in other_players if a not in matched]
-    while len(matched) < max_v and remaining:
-        pick = random.choice(remaining)
-        matched.append(pick)
-        remaining.remove(pick)
-
-    # Trim to max
-    return matched[:max_v]
+# ---------------------------------------------------------------------------
+# System-level generators (no personality, no history)
+# ---------------------------------------------------------------------------
 
 
 async def synthesize_questions(

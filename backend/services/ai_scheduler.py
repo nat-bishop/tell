@@ -6,6 +6,7 @@ import asyncio
 import random
 
 import structlog
+from pydantic_ai.messages import ModelMessage
 
 from backend.api.deps import get_connection_manager, get_game_repository, get_settings
 from backend.llm.agents import (
@@ -22,6 +23,7 @@ from backend.services.game_logic import (
     get_alive_players,
     get_player_by_id,
     make_phase_changed_event,
+    max_votes_for_player,
 )
 from schemas.api_models import (
     AnswerSubmittedEvent,
@@ -42,6 +44,9 @@ _personality_map: dict[str, dict[str, Personality]] = {}
 # Store active AI tasks per game
 _ai_tasks: dict[str, list[asyncio.Task]] = {}
 
+# Store conversation history per AI player: game_id -> {player_id -> messages}
+_conversation_history: dict[str, dict[str, list[ModelMessage]]] = {}
+
 
 def assign_personalities(game_id: str, ai_player_ids: list[str]) -> None:
     """Assign random personalities to AI players (no duplicates)."""
@@ -49,6 +54,7 @@ def assign_personalities(game_id: str, ai_player_ids: list[str]) -> None:
     _personality_map[game_id] = {
         pid: personalities[i % len(personalities)] for i, pid in enumerate(ai_player_ids)
     }
+    _conversation_history[game_id] = {pid: [] for pid in ai_player_ids}
     log.info(
         "ai_personalities_assigned",
         game_id=game_id,
@@ -61,7 +67,88 @@ def get_personality(game_id: str, player_id: str) -> Personality:
     return _personality_map.get(game_id, {}).get(player_id, PERSONALITIES[0])
 
 
-def _build_deps(game_id: str, player_id: str) -> AIPlayerDeps | None:
+def _get_history(game_id: str, player_id: str) -> list[ModelMessage]:
+    """Get conversation history for an AI player."""
+    return _conversation_history.get(game_id, {}).get(player_id, [])
+
+
+def _set_history(game_id: str, player_id: str, history: list[ModelMessage]) -> None:
+    """Store updated conversation history for an AI player."""
+    if game_id in _conversation_history:
+        _conversation_history[game_id][player_id] = history
+
+
+# ---------------------------------------------------------------------------
+# Build action prompts — the user message for each phase action
+# ---------------------------------------------------------------------------
+
+
+def _build_answer_prompt(deps: AIPlayerDeps) -> str:
+    return (
+        f'The prompt is: "{deps.current_prompt}"\n\n'
+        "Respond in character. 1-3 sentences. Do not include your name."
+    )
+
+
+def _build_question_prompt(deps: AIPlayerDeps) -> str:
+    target_alias = deps.assigned_target or deps.nominated_alias or "unknown"
+    target_answer = deps.all_answers.get(target_alias, "")
+    return (
+        f'The prompt was: "{deps.current_prompt}"\n'
+        f'{target_alias} answered: "{target_answer}"\n\n'
+        f"Your questioning style: {deps.personality.question_style}\n\n"
+        "Write ONE short follow-up question (1 sentence, max 120 characters). "
+        "Probe for emotional authenticity, suspicious specificity, or logical gaps. "
+        "Your question is anonymous — they won't know who asked.\n\n"
+        "Respond with ONLY the question."
+    )
+
+
+def _build_response_prompt(deps: AIPlayerDeps, question: str) -> str:
+    return (
+        f'The prompt was: "{deps.current_prompt}"\n'
+        f'Your answer was: "{deps.my_answer}"\n'
+        f'Question you received: "{question}"\n\n'
+        "Write a brief response (1-2 sentences). Elaborate on or defend your answer naturally. "
+        "Robots don't get defensive or emotional — they clarify and compute.\n\n"
+        "Respond with ONLY your response."
+    )
+
+
+def _build_nomination_prompt(deps: AIPlayerDeps) -> str:
+    other_players = [a for a in deps.alive_players if a != deps.player_alias]
+    answers_text = "\n".join(
+        f"  {alias}: {answer}"
+        for alias, answer in deps.all_answers.items()
+        if alias != deps.player_alias
+    )
+    return (
+        f"Choose one player to put on the hot seat for interrogation. "
+        f"Pick the player whose answer is most worth scrutinizing.\n\n"
+        f"{deps.personality.vote_strategy}\n\n"
+        f"Answers this round:\n{answers_text}\n\n"
+        f"Valid players: {', '.join(other_players)}\n"
+        f"Respond with a JSON object containing target_alias and reasoning."
+    )
+
+
+def _build_vote_prompt(deps: AIPlayerDeps) -> str:
+    other_players = [a for a in deps.alive_players if a != deps.player_alias]
+    max_v = max_votes_for_player(len(deps.alive_players))
+    return (
+        f"Time to vote. Choose up to {max_v} players you suspect of being human.\n\n"
+        f"{deps.personality.vote_strategy}\n\n"
+        f"Valid players: {', '.join(other_players)}\n"
+        f"Respond with a JSON object containing targets (list of aliases) and reasoning."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Build deps
+# ---------------------------------------------------------------------------
+
+
+def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlayerDeps | None:
     """Build AIPlayerDeps from current game state (read without lock — snapshot)."""
     repo = get_game_repository()
     session = repo.get(game_id)
@@ -147,7 +234,13 @@ def _build_deps(game_id: str, player_id: str) -> AIPlayerDeps | None:
         nominated_alias=nominated_alias,
         synthesis=synthesis,
         hot_seat_response=hot_seat_response,
+        action_prompt=action_prompt,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase scheduling
+# ---------------------------------------------------------------------------
 
 
 async def on_phase_change(game_id: str, phase: GamePhase) -> None:
@@ -203,15 +296,22 @@ def cancel_all(game_id: str) -> None:
             task.cancel()
 
 
+# ---------------------------------------------------------------------------
+# AI task functions — generate-then-lock pattern with conversation history
+# ---------------------------------------------------------------------------
+
+
 async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player answers a prompt after a delay."""
     try:
         await asyncio.sleep(delay)
 
+        history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        answer_text = await generate_answer(deps)
+        deps.action_prompt = _build_answer_prompt(deps)
+        answer_text, updated_history = await generate_answer(deps, history)
 
         cm = get_connection_manager()
         repo = get_game_repository()
@@ -228,6 +328,7 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
                 return
 
             state.current_round.answers[player_id] = answer_text
+            _set_history(game_id, player_id, updated_history)
 
             alive = get_alive_players(state)
             answer_count = len(state.current_round.answers)
@@ -304,10 +405,12 @@ async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
     try:
         await asyncio.sleep(delay)
 
+        history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        nominee_alias = await generate_nomination(deps)
+        deps.action_prompt = _build_nomination_prompt(deps)
+        nominee_alias, updated_history = await generate_nomination(deps, history)
 
         cm = get_connection_manager()
         repo = get_game_repository()
@@ -336,6 +439,7 @@ async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
                 target = random.choice(candidates)
 
             round_state.nominations[player_id] = target.id
+            _set_history(game_id, player_id, updated_history)
 
             alive = get_alive_players(state)
             nom_count = len(round_state.nominations)
@@ -416,10 +520,12 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
             if player_id == round_state.nominated_id:
                 return  # Hot-seated player doesn't ask
 
+        history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        question_text = await generate_question(deps)
+        deps.action_prompt = _build_question_prompt(deps)
+        question_text, updated_history = await generate_question(deps, history)
 
         cm = get_connection_manager()
         settings = get_settings()
@@ -459,6 +565,7 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
                 anonymous=round_state.round_type == RoundType.PROBE,
             )
             round_state.questions.append(entry)
+            _set_history(game_id, player_id, updated_history)
 
             alive = get_alive_players(state)
             if round_state.round_type == RoundType.INTERROGATION:
@@ -560,10 +667,14 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
         if not pending_q or not question_text:
             return
 
+        history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        response_text = await generate_question_response(deps, question_text)
+        deps.action_prompt = _build_response_prompt(deps, question_text)
+        response_text, updated_history = await generate_question_response(
+            deps, question_text, history
+        )
 
         cm = get_connection_manager()
         settings = get_settings()
@@ -592,6 +703,7 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
                 return
 
             target_q.response = response_text
+            _set_history(game_id, player_id, updated_history)
 
             player = get_player_by_id(state, player_id)
             player_alias = player.alias if player else MISSING_ALIAS
@@ -658,10 +770,12 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
     try:
         await asyncio.sleep(delay)
 
+        history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        vote_aliases = await decide_vote(deps)
+        deps.action_prompt = _build_vote_prompt(deps)
+        vote_aliases, updated_history = await decide_vote(deps, history)
 
         cm = get_connection_manager()
         repo = get_game_repository()
@@ -693,6 +807,7 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
                     target_ids = [random.choice(candidates).id]
 
             state.current_round.votes[player_id] = target_ids
+            _set_history(game_id, player_id, updated_history)
 
             alive = get_alive_players(state)
             vote_count = len(state.current_round.votes)
@@ -722,3 +837,4 @@ def cleanup_game(game_id: str) -> None:
     """Clean up all AI state for a game."""
     cancel_all(game_id)
     _personality_map.pop(game_id, None)
+    _conversation_history.pop(game_id, None)
