@@ -65,6 +65,54 @@ def select_round_types(num_rounds: int) -> list[RoundType]:
     return [RoundType.PROBE if i % 2 == 0 else RoundType.INTERROGATION for i in range(num_rounds)]
 
 
+def get_question_target(round_state: RoundState, player_id: str) -> str | None:
+    """Get the question target for a player based on round type."""
+    if round_state.round_type == RoundType.INTERROGATION:
+        return round_state.nominated_id
+    return round_state.assignments.get(player_id)
+
+
+def is_question_eligible(round_state: RoundState, player_id: str) -> bool:
+    """Check if a player can submit a question this round."""
+    if round_state.round_type == RoundType.INTERROGATION:
+        return player_id != round_state.nominated_id
+    return True
+
+
+def count_expected_questions(state: TellGameState) -> int:
+    """How many questions are expected this round."""
+    alive = get_alive_players(state)
+    round_state = state.current_round
+    if round_state and round_state.round_type == RoundType.INTERROGATION:
+        return len([p for p in alive if p.id != round_state.nominated_id])
+    return len(alive)
+
+
+def is_response_eligible(round_state: RoundState, player_id: str) -> bool:
+    """Check if a player can respond this round."""
+    if round_state.round_type == RoundType.INTERROGATION:
+        return player_id == round_state.nominated_id
+    return True
+
+
+def count_responses(round_state: RoundState) -> tuple[int, int]:
+    """Return (responded_count, expected_count) for the current round."""
+    if round_state.round_type == RoundType.INTERROGATION:
+        has_response = any(
+            q.target_id == round_state.nominated_id and q.response is not None
+            for q in round_state.questions
+        )
+        return (1 if has_response else 0, 1)
+    targets = {q.target_id for q in round_state.questions}
+    responded = sum(1 for q in round_state.questions if q.response is not None)
+    return (responded, len(targets))
+
+
+def is_question_anonymous(round_type: RoundType) -> bool:
+    """Whether questions should be anonymous for this round type."""
+    return round_type == RoundType.PROBE
+
+
 def assign_question_targets(state: TellGameState) -> dict[str, str]:
     """Round-robin chain: player i questions player (i+1) % len."""
     alive = [p for p in state.players if p.is_alive]

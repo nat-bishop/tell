@@ -52,9 +52,9 @@ async def seed_game(req: SeedGameRequest):
 
     # Start phase timer (fresh game, no contention)
     if req.start_timers and active_phase:
-        from backend.api.routes.actions import _start_phase_timer
+        from backend.services.transitions import start_phase_timer
 
-        await _start_phase_timer(game_id, state.phase)
+        await start_phase_timer(game_id, state.phase)
 
     # Assign AI personalities and schedule AI actions
     if req.trigger_ai and active_phase:

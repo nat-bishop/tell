@@ -10,3 +10,4 @@ frontend/src/types/openapi.json
 .venv/
 *.egg-info/
 dist/
+.playwright-mcp/

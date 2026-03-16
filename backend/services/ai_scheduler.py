@@ -8,7 +8,7 @@ import random
 import structlog
 from pydantic_ai.messages import ModelMessage
 
-from backend.api.deps import get_connection_manager, get_game_repository, get_settings
+from backend.api.deps import get_connection_manager, get_game_repository, get_timer_manager
 from backend.llm.agents import (
     AIPlayerDeps,
     decide_vote,
@@ -19,15 +19,26 @@ from backend.llm.agents import (
 )
 from backend.llm.personalities import PERSONALITIES, Personality
 from backend.services.game_logic import (
+    count_expected_questions,
+    count_responses,
+    fill_missing_answers,
     fill_missing_responses,
     get_alive_players,
     get_player_by_id,
-    make_phase_changed_event,
+    get_question_target,
+    is_question_anonymous,
+    is_question_eligible,
+    is_response_eligible,
     max_votes_for_player,
+)
+from backend.services.transitions import (
+    do_nominate_complete,
+    do_prompt_complete,
+    do_question_complete,
+    do_respond_complete,
 )
 from schemas.api_models import (
     AnswerSubmittedEvent,
-    NominatedEvent,
     NominationCastEvent,
     QuestionSubmittedEvent,
     ResponseSubmittedEvent,
@@ -314,11 +325,10 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         answer_text, updated_history = await generate_answer(deps, history)
 
         cm = get_connection_manager()
-        repo = get_game_repository()
-        settings = get_settings()
         lock = cm.get_lock(game_id)
 
         async with lock:
+            repo = get_game_repository()
             session = repo.get(game_id)
             if not session or session.state.phase != GamePhase.PROMPT:
                 return
@@ -347,52 +357,9 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
             log.info("ai_answer_submitted", game_id=game_id, player_id=player_id)
 
             if answer_count >= total_count:
-                from backend.api.deps import get_timer_manager
-
                 get_timer_manager().cancel_timer(game_id)
-
-                round_state = state.current_round
-                if round_state.round_type == RoundType.INTERROGATION:
-                    from backend.services.game_logic import transition_to_nominate
-
-                    transition_to_nominate(state, settings.nominate_duration)
-                    await cm.broadcast(
-                        game_id,
-                        make_phase_changed_event(
-                            state,
-                            session.next_seq(),
-                            answers=round_state.answers,
-                            round_type=round_state.round_type,
-                        ),
-                    )
-                    next_phase = GamePhase.NOMINATE
-                else:
-                    from backend.services.game_logic import (
-                        assign_question_targets,
-                        transition_to_question,
-                    )
-
-                    round_state.assignments = assign_question_targets(state)
-                    transition_to_question(state, settings.question_duration)
-                    await cm.broadcast(
-                        game_id,
-                        make_phase_changed_event(
-                            state,
-                            session.next_seq(),
-                            answers=round_state.answers,
-                            round_type=round_state.round_type,
-                            assignments=round_state.assignments,
-                        ),
-                    )
-                    next_phase = GamePhase.QUESTION
-            else:
-                next_phase = None
-
-        if next_phase:
-            from backend.api.routes.actions import _start_phase_timer
-
-            await _start_phase_timer(game_id, next_phase)
-            await on_phase_change(game_id, next_phase)
+                fill_missing_answers(state)
+                await do_prompt_complete(game_id, session)
 
     except asyncio.CancelledError:
         pass
@@ -413,11 +380,10 @@ async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
         nominee_alias, updated_history = await generate_nomination(deps, history)
 
         cm = get_connection_manager()
-        repo = get_game_repository()
-        settings = get_settings()
         lock = cm.get_lock(game_id)
 
         async with lock:
+            repo = get_game_repository()
             session = repo.get(game_id)
             if not session or session.state.phase != GamePhase.NOMINATE:
                 return
@@ -460,44 +426,8 @@ async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
             )
 
             if nom_count >= total_count:
-                from backend.api.deps import get_timer_manager
-                from backend.services.game_logic import resolve_nominations, transition_to_question
-
                 get_timer_manager().cancel_timer(game_id)
-
-                nominated_id = resolve_nominations(state)
-                round_state.nominated_id = nominated_id
-                nominated_player = get_player_by_id(state, nominated_id)
-                nominated_alias = nominated_player.alias if nominated_player else MISSING_ALIAS
-
-                await cm.broadcast(
-                    game_id,
-                    NominatedEvent(
-                        seq=session.next_seq(),
-                        nominated_id=nominated_id,
-                        nominated_alias=nominated_alias,
-                    ),
-                )
-
-                transition_to_question(state, settings.question_duration)
-                await cm.broadcast(
-                    game_id,
-                    make_phase_changed_event(
-                        state,
-                        session.next_seq(),
-                        round_type=round_state.round_type,
-                        nominated_id=nominated_id,
-                    ),
-                )
-                need_timer = True
-            else:
-                need_timer = False
-
-        if need_timer:
-            from backend.api.routes.actions import _start_phase_timer
-
-            await _start_phase_timer(game_id, GamePhase.QUESTION)
-            await on_phase_change(game_id, GamePhase.QUESTION)
+                await do_nominate_complete(game_id, session)
 
     except asyncio.CancelledError:
         pass
@@ -510,15 +440,14 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
     try:
         await asyncio.sleep(delay)
 
-        # Check if this AI is the hot-seated player (can't ask questions)
+        # Check eligibility before generating (avoid wasted LLM call)
         repo = get_game_repository()
         session = repo.get(game_id)
         if not session:
             return
         round_state = session.state.current_round
-        if round_state and round_state.round_type == RoundType.INTERROGATION:
-            if player_id == round_state.nominated_id:
-                return  # Hot-seated player doesn't ask
+        if round_state and not is_question_eligible(round_state, player_id):
+            return
 
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
@@ -528,10 +457,10 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
         question_text, updated_history = await generate_question(deps, history)
 
         cm = get_connection_manager()
-        settings = get_settings()
         lock = cm.get_lock(game_id)
 
         async with lock:
+            repo = get_game_repository()
             session = repo.get(game_id)
             if not session or session.state.phase != GamePhase.QUESTION:
                 return
@@ -545,12 +474,7 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
             if already_asked:
                 return
 
-            # Determine target
-            if round_state.round_type == RoundType.INTERROGATION:
-                target_id = round_state.nominated_id
-            else:
-                target_id = round_state.assignments.get(player_id)
-
+            target_id = get_question_target(round_state, player_id)
             if not target_id:
                 return
 
@@ -562,17 +486,12 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
                 target_id=target_id,
                 target_alias=target_alias,
                 question=question_text,
-                anonymous=round_state.round_type == RoundType.PROBE,
+                anonymous=is_question_anonymous(round_state.round_type),
             )
             round_state.questions.append(entry)
             _set_history(game_id, player_id, updated_history)
 
-            alive = get_alive_players(state)
-            if round_state.round_type == RoundType.INTERROGATION:
-                expected = len([p for p in alive if p.id != round_state.nominated_id])
-            else:
-                expected = len(alive)
-
+            expected = count_expected_questions(state)
             q_count = len(round_state.questions)
 
             await cm.broadcast(
@@ -587,37 +506,8 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
             log.info("ai_question_submitted", game_id=game_id, player_id=player_id)
 
             if q_count >= expected:
-                from backend.api.deps import get_timer_manager
-
                 get_timer_manager().cancel_timer(game_id)
-
-                if round_state.round_type == RoundType.INTERROGATION:
-                    from backend.api.routes.actions import _synthesize_and_transition
-
-                    await _synthesize_and_transition(game_id, session)
-                    need_timer = False
-                else:
-                    from backend.services.game_logic import transition_to_respond
-
-                    transition_to_respond(state, settings.respond_duration)
-                    await cm.broadcast(
-                        game_id,
-                        make_phase_changed_event(
-                            state,
-                            session.next_seq(),
-                            round_type=round_state.round_type,
-                            questions=[q.model_dump() for q in round_state.questions],
-                        ),
-                    )
-                    need_timer = True
-            else:
-                need_timer = False
-
-        if need_timer:
-            from backend.api.routes.actions import _start_phase_timer
-
-            await _start_phase_timer(game_id, GamePhase.RESPOND)
-            await on_phase_change(game_id, GamePhase.RESPOND)
+                await do_question_complete(game_id, session)
 
     except asyncio.CancelledError:
         pass
@@ -640,29 +530,16 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
         if not round_state:
             return
 
-        # Check if this AI has a pending question
-        if round_state.round_type == RoundType.INTERROGATION:
-            if player_id != round_state.nominated_id:
-                return  # Only nominee responds
-            pending_q = next(
-                (
-                    q
-                    for q in round_state.questions
-                    if q.target_id == player_id and q.response is None
-                ),
-                None,
-            )
-            question_text = round_state.synthesis or (pending_q.question if pending_q else None)
-        else:
-            pending_q = next(
-                (
-                    q
-                    for q in round_state.questions
-                    if q.target_id == player_id and q.response is None
-                ),
-                None,
-            )
-            question_text = pending_q.question if pending_q else None
+        # Check eligibility
+        if not is_response_eligible(round_state, player_id):
+            return
+
+        pending_q = next(
+            (q for q in round_state.questions if q.target_id == player_id and q.response is None),
+            None,
+        )
+        # Use synthesis if available (interrogation), else direct question (probe)
+        question_text = round_state.synthesis or (pending_q.question if pending_q else None)
 
         if not pending_q or not question_text:
             return
@@ -677,10 +554,10 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
         )
 
         cm = get_connection_manager()
-        settings = get_settings()
         lock = cm.get_lock(game_id)
 
         async with lock:
+            repo = get_game_repository()
             session = repo.get(game_id)
             if not session or session.state.phase != GamePhase.RESPOND:
                 return
@@ -708,13 +585,7 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
             player = get_player_by_id(state, player_id)
             player_alias = player.alias if player else MISSING_ALIAS
 
-            if round_state.round_type == RoundType.INTERROGATION:
-                responded_count = 1
-                expected = 1
-            else:
-                targets_with_questions = {q.target_id for q in round_state.questions}
-                responded_count = sum(1 for q in round_state.questions if q.response is not None)
-                expected = len(targets_with_questions)
+            responded_count, expected = count_responses(round_state)
 
             await cm.broadcast(
                 game_id,
@@ -731,33 +602,9 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
             log.info("ai_response_submitted", game_id=game_id, player_id=player_id)
 
             if responded_count >= expected:
-                from backend.api.deps import get_timer_manager
-                from backend.services.game_logic import transition_to_review
-
                 get_timer_manager().cancel_timer(game_id)
-
                 fill_missing_responses(state)
-
-                transition_to_review(state, settings.review_duration)
-                await cm.broadcast(
-                    game_id,
-                    make_phase_changed_event(
-                        state,
-                        session.next_seq(),
-                        round_type=round_state.round_type,
-                        questions=[q.model_dump() for q in round_state.questions],
-                        synthesis=round_state.synthesis,
-                    ),
-                )
-                need_timer = True
-            else:
-                need_timer = False
-
-        if need_timer:
-            from backend.api.routes.actions import _start_phase_timer
-
-            await _start_phase_timer(game_id, GamePhase.REVIEW)
-            await on_phase_change(game_id, GamePhase.REVIEW)
+                await do_respond_complete(game_id, session)
 
     except asyncio.CancelledError:
         pass
