@@ -24,17 +24,23 @@ class StateSyncEvent(GameEvent):
     event_type: str = "state_sync"
     game_id: str
     phase: str
-    players: list[dict]  # sanitized player list (no role for alive players)
+    players: list[dict]
     round_number: int
     prompt_text: str | None = None
     prompt_category: str | None = None
-    answers: dict[str, str] = Field(default_factory=dict)  # only visible in chat/vote/elimination
-    messages: list[dict] = Field(default_factory=list)
-    votes: dict[str, str] = Field(default_factory=dict)  # only visible after vote
-    phase_deadline: str | None = None  # ISO timestamp
+    answers: dict[str, str] = Field(default_factory=dict)
+    round_type: str | None = None
+    questions: list[dict] = Field(default_factory=list)
+    assignments: dict[str, str] = Field(default_factory=dict)
+    nominated_id: str | None = None
+    nominations: dict[str, str] = Field(default_factory=dict)
+    synthesis: str | None = None
+    verdict: str | None = None
+    votes: dict[str, list[str]] = Field(default_factory=dict)
+    phase_deadline: str | None = None
     winner: str | None = None
     is_host: bool = False
-    my_answer: str | None = None  # player's own answer (visible during prompt phase)
+    my_answer: str | None = None
 
 
 class PlayerJoinedEvent(GameEvent):
@@ -61,40 +67,75 @@ class PhaseChangedEvent(GameEvent):
     prompt_text: str | None = None
     prompt_category: str | None = None
     phase_deadline: str | None = None
-    answers: dict[str, str] = Field(default_factory=dict)  # included on chat phase transition
-
-
-class ChatMessageEvent(GameEvent):
-    event_type: str = "chat_message"
-    player_id: str
-    player_alias: str
-    text: str
-    is_answer: bool = False
+    answers: dict[str, str] = Field(default_factory=dict)
+    round_type: str | None = None
+    assignments: dict[str, str] = Field(default_factory=dict)
+    nominated_id: str | None = None
+    questions: list[dict] = Field(default_factory=list)
+    synthesis: str | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):
     event_type: str = "answer_submitted"
     player_id: str
-    answer_count: int  # how many have answered
-    total_count: int  # how many need to answer
+    answer_count: int
+    total_count: int
+
+
+class NominationCastEvent(GameEvent):
+    event_type: str = "nomination_cast"
+    voter_id: str
+    count: int
+    total: int
+
+
+class NominatedEvent(GameEvent):
+    event_type: str = "nominated"
+    nominated_id: str
+    nominated_alias: str
+
+
+class QuestionSubmittedEvent(GameEvent):
+    event_type: str = "question_submitted"
+    count: int
+    total: int
+
+
+class ResponseSubmittedEvent(GameEvent):
+    event_type: str = "response_submitted"
+    target_id: str
+    target_alias: str
+    response: str
+    count: int
+    total: int
+
+
+class SynthesisReadyEvent(GameEvent):
+    event_type: str = "synthesis_ready"
+    synthesis: str
+
+
+class VerdictEvent(GameEvent):
+    event_type: str = "verdict"
+    verdict: str
 
 
 class VoteCastEvent(GameEvent):
     event_type: str = "vote_cast"
-    voter_id: str  # who voted (not who they voted for — secret until reveal)
+    voter_id: str
     vote_count: int
     total_count: int
 
 
 class VoteResultsEvent(GameEvent):
     event_type: str = "vote_results"
-    votes: dict[str, str]  # voter_id -> target_id (all revealed)
-    vote_tallies: dict[str, int]  # target_id -> count
-    eliminated_id: str | None  # None if no consensus
+    votes: dict[str, list[str]]
+    vote_tallies: dict[str, int]
+    eliminated_id: str | None
     eliminated_alias: str | None
-    was_human: bool | None  # True/False/None
+    was_human: bool | None
     tie: bool = False
-    tie_message: str | None = None  # e.g. "UNIT-7 and BOT-42 tied..."
+    tie_message: str | None = None
 
 
 class EliminationEvent(GameEvent):
@@ -105,13 +146,13 @@ class EliminationEvent(GameEvent):
     vote_count: int
     tie: bool = False
     tie_message: str | None = None
-    no_votes: bool = False  # True if nobody voted
+    no_votes: bool = False
 
 
 class GameOverEvent(GameEvent):
     event_type: str = "game_over"
-    winner: str  # "humans" or "ai"
-    players: list[dict]  # full player list with roles revealed
+    winner: str
+    players: list[dict]
 
 
 class TimerTickEvent(GameEvent):
@@ -138,7 +179,7 @@ class CreateGameResponse(BaseModel):
 
 
 class JoinGameRequest(BaseModel):
-    player_name: str  # display name (will get a robot alias instead)
+    player_name: str
 
 
 class JoinGameResponse(BaseModel):
@@ -154,17 +195,27 @@ class StartGameRequest(BaseModel):
 
 class SubmitAnswerRequest(BaseModel):
     player_id: str
-    answer: str = ""  # empty = "[no response]"
+    answer: str = ""
 
 
-class SendChatRequest(BaseModel):
+class NominateRequest(BaseModel):
     player_id: str
-    message: str
+    target_id: str
+
+
+class SubmitQuestionRequest(BaseModel):
+    player_id: str
+    question: str
+
+
+class SubmitResponseRequest(BaseModel):
+    player_id: str
+    response: str
 
 
 class CastVoteRequest(BaseModel):
     player_id: str
-    target_id: str
+    target_ids: list[str]
 
 
 class GameInfoResponse(BaseModel):

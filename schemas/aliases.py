@@ -5,8 +5,21 @@ from __future__ import annotations
 import random
 
 PREFIXES = [
-    "UNIT", "BOT", "NODE", "BYTE", "CORE", "CHIP", "WIRE", "FLUX",
-    "GRID", "NANO", "PING", "PORT", "HASH", "LOOP", "NULL",
+    "UNIT",
+    "BOT",
+    "NODE",
+    "BYTE",
+    "CORE",
+    "CHIP",
+    "WIRE",
+    "FLUX",
+    "GRID",
+    "NANO",
+    "PING",
+    "PORT",
+    "HASH",
+    "LOOP",
+    "NULL",
 ]
 
 

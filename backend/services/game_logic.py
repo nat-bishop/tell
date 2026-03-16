@@ -12,11 +12,13 @@ from schemas.api_models import (
     PhaseChangedEvent,
     VoteResultsEvent,
 )
+from schemas.constants import MISSING_ALIAS, NO_RESPONSE
 from schemas.game_state import (
     GamePhase,
     Player,
     PlayerRole,
     RoundState,
+    RoundType,
     TellGameState,
 )
 from schemas.prompts import select_prompt
@@ -34,6 +36,65 @@ def get_alive_ai(state: TellGameState) -> list[Player]:
     return [p for p in state.players if p.is_alive and p.role == PlayerRole.AI]
 
 
+def get_player_by_id(state: TellGameState, player_id: str) -> Player | None:
+    return next((p for p in state.players if p.id == player_id), None)
+
+
+def fill_missing_answers(state: TellGameState) -> None:
+    """Fill NO_RESPONSE for alive players who haven't answered."""
+    rs = state.current_round
+    if not rs:
+        return
+    for p in get_alive_players(state):
+        if p.id not in rs.answers:
+            rs.answers[p.id] = NO_RESPONSE
+
+
+def fill_missing_responses(state: TellGameState) -> None:
+    """Fill NO_RESPONSE for unanswered questions."""
+    rs = state.current_round
+    if not rs:
+        return
+    for q in rs.questions:
+        if q.response is None:
+            q.response = NO_RESPONSE
+
+
+def select_round_types(num_rounds: int) -> list[RoundType]:
+    """Round 1 always probe. Alternate with interrogation."""
+    return [RoundType.PROBE if i % 2 == 0 else RoundType.INTERROGATION for i in range(num_rounds)]
+
+
+def assign_question_targets(state: TellGameState) -> dict[str, str]:
+    """Round-robin chain: player i questions player (i+1) % len."""
+    alive = [p for p in state.players if p.is_alive]
+    assignments = {}
+    for i, player in enumerate(alive):
+        target = alive[(i + 1) % len(alive)]
+        assignments[player.id] = target.id
+    return assignments
+
+
+def resolve_nominations(state: TellGameState) -> str:
+    """Tally nominations and return the nominated player id. Ties broken randomly."""
+    round_state = state.current_round
+    nominations = round_state.nominations if round_state else {}
+
+    if not nominations:
+        alive = get_alive_players(state)
+        return random.choice(alive).id
+
+    tallies = Counter(nominations.values())
+    max_count = max(tallies.values())
+    top = [pid for pid, count in tallies.items() if count == max_count]
+    return random.choice(top) if len(top) > 1 else top[0]
+
+
+def max_votes_for_player(alive_count: int) -> int:
+    """Max votes a player can cast: min(3, alive_count - 1)."""
+    return min(3, max(1, alive_count - 1))
+
+
 def transition_to_prompt(state: TellGameState, duration: int) -> TellGameState:
     """Start a new round with a new prompt."""
     state.round_number += 1
@@ -44,56 +105,70 @@ def transition_to_prompt(state: TellGameState, duration: int) -> TellGameState:
     )
     state.used_prompt_indices.append(idx)
     state.last_prompt_category = prompt.category.value
+
+    round_type = RoundType.PROBE
+    if state.round_types and state.round_number <= len(state.round_types):
+        round_type = state.round_types[state.round_number - 1]
+
     state.current_round = RoundState(
         round_number=state.round_number,
         prompt_text=prompt.text,
         prompt_category=prompt.category.value,
+        round_type=round_type,
     )
     state.phase = GamePhase.PROMPT
     state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
     return state
 
 
-def _transition_to_phase(
-    state: TellGameState, phase: GamePhase, duration: int
-) -> TellGameState:
+def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) -> TellGameState:
     """Move to a phase with a deadline."""
     state.phase = phase
     state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
     return state
 
 
-def transition_to_chat(state: TellGameState, duration: int) -> TellGameState:
-    """Move to chat phase — answers become visible."""
-    return _transition_to_phase(state, GamePhase.CHAT, duration)
+def transition_to_question(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.QUESTION, duration)
 
 
-def transition_to_vote(state: TellGameState, duration: int) -> TellGameState:
-    """Move to vote phase."""
-    return _transition_to_phase(state, GamePhase.VOTE, duration)
+def transition_to_respond(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.RESPOND, duration)
+
+
+def transition_to_review(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.REVIEW, duration)
+
+
+def transition_to_nominate(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.NOMINATE, duration)
 
 
 def transition_to_elimination(state: TellGameState, duration: int) -> TellGameState:
-    """Move to elimination reveal phase."""
     return _transition_to_phase(state, GamePhase.ELIMINATION, duration)
 
 
 def resolve_votes(
-    state: TellGameState, seq_fn,
+    state: TellGameState,
+    seq_fn,
 ) -> tuple[TellGameState, VoteResultsEvent, EliminationEvent]:
-    """Tally votes and eliminate the most-voted player. Returns updated state and events."""
+    """Tally votes (multi-vote) and eliminate the most-voted player."""
     round_state = state.current_round
     votes = round_state.votes if round_state else {}
 
-    # Tally
-    tallies: dict[str, int] = Counter(votes.values())
+    # Flatten all vote lists into a single counter
+    all_targets: list[str] = []
+    for target_list in votes.values():
+        all_targets.extend(target_list)
+
+    tallies: dict[str, int] = dict(Counter(all_targets))
 
     eliminated_id = None
     eliminated_alias = None
     was_human = None
     tie = False
     tie_message = None
-    no_votes = len(votes) == 0
+    no_votes = len(all_targets) == 0
     vote_count = 0
 
     if tallies:
@@ -104,17 +179,15 @@ def resolve_votes(
         if len(top_players) == 1:
             eliminated_id = top_players[0]
         else:
-            # Tie — random elimination among tied
             tie = True
             eliminated_id = random.choice(top_players)
             tied_aliases = []
             for pid in top_players:
-                p = next((p for p in state.players if p.id == pid), None)
+                p = get_player_by_id(state, pid)
                 if p:
                     tied_aliases.append(p.alias)
             tie_message = f"{' and '.join(tied_aliases)} tied with {max_count} votes each. "
 
-        # Find and eliminate the player
         for p in state.players:
             if p.id == eliminated_id:
                 p.is_alive = False
@@ -128,7 +201,7 @@ def resolve_votes(
     vote_results = VoteResultsEvent(
         seq=seq_fn(),
         votes=votes,
-        vote_tallies=dict(tallies),
+        vote_tallies=tallies,
         eliminated_id=eliminated_id,
         eliminated_alias=eliminated_alias,
         was_human=was_human,
@@ -156,38 +229,31 @@ def check_game_over(state: TellGameState) -> str | None:
     alive_ai = get_alive_ai(state)
     alive = get_alive_players(state)
 
-    # All humans eliminated — AI wins
     if not alive_humans:
         return "ai"
-
-    # All AI eliminated — humans win
     if not alive_ai:
         return "humans"
-
-    # Only 2 players left — game over
     if len(alive) <= 2:
         if alive_humans:
             return "humans"
         return "ai"
-
-    # Max rounds reached — humans survive
     if state.round_number >= state.max_rounds:
         return "humans"
-
     return None
 
 
 def make_game_over_event(state: TellGameState, winner: str, seq_fn) -> GameOverEvent:
-    """Create GameOverEvent with all player identities revealed."""
     players_revealed = []
     for p in state.players:
-        players_revealed.append({
-            "id": p.id,
-            "alias": p.alias,
-            "role": p.role.value,
-            "is_alive": p.is_alive,
-            "eliminated_round": p.eliminated_round,
-        })
+        players_revealed.append(
+            {
+                "id": p.id,
+                "alias": p.alias,
+                "role": p.role.value,
+                "is_alive": p.is_alive,
+                "eliminated_round": p.eliminated_round,
+            }
+        )
     return GameOverEvent(
         seq=seq_fn(),
         winner=winner,
@@ -196,7 +262,6 @@ def make_game_over_event(state: TellGameState, winner: str, seq_fn) -> GameOverE
 
 
 def make_phase_changed_event(state: TellGameState, seq: int, **extra) -> PhaseChangedEvent:
-    """Build a PhaseChangedEvent from current state."""
     return PhaseChangedEvent(
         seq=seq,
         phase=state.phase.value,
@@ -207,8 +272,7 @@ def make_phase_changed_event(state: TellGameState, seq: int, **extra) -> PhaseCh
 
 
 def validate_player_alive(state: TellGameState, player_id: str) -> Player | str:
-    """Returns the Player if alive, or an error message string."""
-    player = next((p for p in state.players if p.id == player_id), None)
+    player = get_player_by_id(state, player_id)
     if not player:
         return "Player not found"
     if not player.is_alive:
@@ -217,7 +281,6 @@ def validate_player_alive(state: TellGameState, player_id: str) -> Player | str:
 
 
 def sanitize_players_for_client(state: TellGameState) -> list[dict]:
-    """Return player list without revealing roles of alive players."""
     result = []
     for p in state.players:
         d = {
@@ -228,7 +291,6 @@ def sanitize_players_for_client(state: TellGameState) -> list[dict]:
             "is_host": p.is_host,
             "eliminated_round": p.eliminated_round,
         }
-        # Only reveal role of eliminated players
         if not p.is_alive:
             d["role"] = p.role.value
         result.append(d)
@@ -239,29 +301,57 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
     """Build a StateSyncEvent payload for a specific player."""
     round_state = state.current_round
     answers: dict[str, str] = {}
-    messages: list[dict] = []
     my_answer: str | None = None
     prompt_text: str | None = None
     prompt_category: str | None = None
+    round_type: str | None = None
+    questions: list[dict] = []
+    assignments: dict[str, str] = {}
+    nominated_id: str | None = None
+    nominations: dict[str, str] = {}
+    synthesis: str | None = None
+    verdict: str | None = None
 
     if round_state:
         prompt_text = round_state.prompt_text
         prompt_category = round_state.prompt_category
+        round_type = round_state.round_type
 
-        # Answers visible during chat, vote, elimination, game_over
+        # Answers visible during question, respond, review, elimination, game_over
         visible_phases = (
-            GamePhase.CHAT, GamePhase.VOTE, GamePhase.ELIMINATION, GamePhase.GAME_OVER,
+            GamePhase.QUESTION,
+            GamePhase.RESPOND,
+            GamePhase.REVIEW,
+            GamePhase.ELIMINATION,
+            GamePhase.GAME_OVER,
+            GamePhase.NOMINATE,
         )
         if state.phase in visible_phases:
             answers = round_state.answers
 
-        # Player's own answer always visible to them during prompt phase
         if state.phase == GamePhase.PROMPT and player_id in round_state.answers:
             my_answer = round_state.answers[player_id]
 
-        messages = [m.model_dump(mode="json") for m in round_state.messages]
+        assignments = round_state.assignments
+        nominated_id = round_state.nominated_id
+        nominations = round_state.nominations
+        synthesis = round_state.synthesis
+        verdict = round_state.verdict
 
-    is_host = any(p.id == player_id and p.is_host for p in state.players)
+        # Serialize questions — hide questioner identity if anonymous
+        for q in round_state.questions:
+            qd: dict = {
+                "target_id": q.target_id,
+                "target_alias": q.target_alias,
+                "question": q.question,
+                "response": q.response,
+            }
+            if not q.anonymous:
+                qd["questioner_id"] = q.questioner_id
+            questions.append(qd)
+
+    player_obj = get_player_by_id(state, player_id)
+    is_host = player_obj.is_host if player_obj else False
 
     return {
         "event_type": "state_sync",
@@ -272,9 +362,15 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
         "round_number": state.round_number,
         "prompt_text": prompt_text,
         "prompt_category": prompt_category,
+        "round_type": round_type,
         "answers": answers,
-        "messages": messages,
-        "votes": {},  # votes are hidden until results
+        "questions": questions,
+        "assignments": assignments,
+        "nominated_id": nominated_id,
+        "nominations": nominations,
+        "synthesis": synthesis,
+        "verdict": verdict,
+        "votes": {},
         "phase_deadline": state.phase_deadline.isoformat() if state.phase_deadline else None,
         "winner": state.winner,
         "is_host": is_host,

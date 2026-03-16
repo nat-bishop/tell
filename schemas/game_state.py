@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from datetime import UTC, datetime
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -11,10 +11,17 @@ from pydantic import BaseModel, Field
 class GamePhase(str, enum.Enum):
     LOBBY = "lobby"
     PROMPT = "prompt"
-    CHAT = "chat"
-    VOTE = "vote"
+    NOMINATE = "nominate"
+    QUESTION = "question"
+    RESPOND = "respond"
+    REVIEW = "review"
     ELIMINATION = "elimination"
     GAME_OVER = "game_over"
+
+
+class RoundType(str, enum.Enum):
+    PROBE = "probe"
+    INTERROGATION = "interrogation"
 
 
 class PlayerRole(str, enum.Enum):
@@ -32,21 +39,28 @@ class Player(BaseModel):
     eliminated_round: int | None = None
 
 
-class ChatMessage(BaseModel):
-    player_id: str
-    player_alias: str
-    text: str
-    is_answer: bool = False  # True for prompt answers, False for chat messages
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+class QuestionEntry(BaseModel):
+    questioner_id: str
+    target_id: str
+    target_alias: str
+    question: str
+    response: str | None = None
+    anonymous: bool = True
 
 
 class RoundState(BaseModel):
     round_number: int
     prompt_text: str
     prompt_category: str
-    answers: dict[str, str] = Field(default_factory=dict)  # player_id -> answer text
-    messages: list[ChatMessage] = Field(default_factory=list)
-    votes: dict[str, str] = Field(default_factory=dict)  # voter_id -> target_id
+    round_type: RoundType = RoundType.PROBE
+    answers: dict[str, str] = Field(default_factory=dict)
+    questions: list[QuestionEntry] = Field(default_factory=list)
+    assignments: dict[str, str] = Field(default_factory=dict)  # questioner_id -> target_id
+    nominated_id: str | None = None
+    nominations: dict[str, str] = Field(default_factory=dict)  # voter_id -> target_id
+    synthesis: str | None = None
+    verdict: str | None = None
+    votes: dict[str, list[str]] = Field(default_factory=dict)  # voter_id -> [target_ids]
 
 
 class TellGameState(BaseModel):
@@ -55,8 +69,9 @@ class TellGameState(BaseModel):
     players: list[Player] = Field(default_factory=list)
     current_round: RoundState | None = None
     round_number: int = 0
-    max_rounds: int = 3  # calculated at game start: max(3, humanCount + 1)
+    max_rounds: int = 3
+    round_types: list[RoundType] = Field(default_factory=list)
     used_prompt_indices: list[int] = Field(default_factory=list)
     last_prompt_category: str | None = None
-    winner: str | None = None  # "humans" or "ai" or None
-    phase_deadline: datetime | None = None  # when current phase timer expires
+    winner: str | None = None
+    phase_deadline: datetime | None = None

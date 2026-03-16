@@ -6,12 +6,12 @@
 Human Client A  ── POST /games/{id}/answer ──►  FastAPI
                                                    │
                 ◄── SSE: state_sync ───────────────┤  validates, acquires
-Human Client B  ◄── SSE: answer_submitted ─────────┤  asyncio.Lock, mutates
+Human Client B  ◄── SSE: phase_changed ────────────┤  asyncio.Lock, mutates
                                                    │  state, broadcasts to
 AI Player       ── internal asyncio task ──────────┘  all queues
 
 GET /games/{id}/events  →  persistent EventSource per client
-POST /games/{id}/*      →  actions (join, answer, chat, vote, start)
+POST /games/{id}/*      →  actions (join, start, answer, question, respond, nominate, vote)
 ```
 
 ## Module Dependency Rules
@@ -36,22 +36,39 @@ Each connected client gets an `asyncio.Queue[GameEvent | None]`. The `Connection
 
 ## State Machine
 
+Two round types alternate throughout the game. Round 1 is always Probe.
+
+**Probe** (round-robin anonymous questions):
 ```
-LOBBY → PROMPT (45s) → CHAT (75s) → VOTE (20s) → ELIMINATION (5s) → PROMPT → ... → GAME_OVER
+LOBBY → PROMPT → QUESTION → RESPOND → REVIEW → ELIMINATION → PROMPT → ... → GAME_OVER
 ```
+
+**Interrogation** (hot seat with LLM question synthesis):
+```
+LOBBY → PROMPT → NOMINATE → QUESTION → RESPOND → REVIEW → ELIMINATION → ...
+```
+
+Round types are pre-generated at game start (`select_round_types()`) into `state.round_types`: odd rounds = probe, even rounds = interrogation.
 
 ### Phase Transitions
 
-All transitions go through helper functions in `actions.py`:
+All transitions funnel through helper functions in `actions.py`:
 
 | Function | Trigger | What it does |
 |---|---|---|
-| `_start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps for duration, then calls `_handle_phase_expiry` |
-| `_handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, transitions to next phase |
-| `_do_vote_resolution` | Vote timer expires or all voted | Tallies votes, resolves ties (random), eliminates player |
-| `_after_elimination` | Elimination timer expires | Checks game-over conditions, starts next round or ends game |
+| `_start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps then calls `_handle_phase_expiry` |
+| `_handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to next phase |
+| `_synthesize_and_transition` | All questions in (Interrogation) | Calls LLM synthesis outside lock, transitions to RESPOND |
+| `_do_vote_resolution` | REVIEW timer expires | Tallies multi-votes, generates LLM verdict, eliminates player |
+| `_after_elimination` | ELIMINATION timer expires | Checks game-over, starts next round or ends game |
 
-**Early completion**: When all players submit (answers or votes), the timer is cancelled and the transition happens immediately.
+**Early completion**: When all players submit (answers, nominations, questions, responses), the timer is cancelled and the transition happens immediately. Exception: **REVIEW never early-completes** — votes are changeable until the timer expires.
+
+**Probe QUESTION assignment**: `assign_question_targets()` in `game_logic.py` creates a round-robin chain — player `i` questions player `(i+1) % len(alive)`.
+
+**Interrogation NOMINATE resolution**: plurality vote among all nominations; ties broken randomly.
+
+**Interrogation QUESTION → synthesis**: when all non-nominated players submit questions, `synthesize_questions()` (LLM, 5s timeout) weaves them into one cross-examination paragraph. Fallback: numbered list.
 
 ### Game-Over Conditions
 
@@ -66,7 +83,7 @@ Checked in `game_logic.check_game_over()` after each elimination:
 `ai_scheduler.py` implements the **generate-then-lock** pattern:
 
 ```
-1. Sleep random delay (3-15s for answers, 5-25s for chat, 2-10s for votes)
+1. Sleep random delay (varies by phase)
 2. Build AIPlayerDeps snapshot (reads state WITHOUT lock — stale is fine)
 3. Call LLM (PydanticAI agent) — may take 1-5 seconds
 4. Acquire lock
@@ -76,24 +93,43 @@ Checked in `game_logic.check_game_over()` after each elimination:
 ```
 
 **Per phase**:
-- **PROMPT**: Each AI schedules one answer with random delay
-- **CHAT**: Each AI schedules 2-5 messages at random 5-25s intervals
-- **VOTE**: Each AI schedules one vote with random delay
+
+| Phase | Action | Delay |
+|---|---|---|
+| PROMPT | Each AI answers | 3-15s |
+| NOMINATE | Each AI nominates (Interrogation only) | 2-8s |
+| QUESTION | Each AI submits a question (except hot-seated) | 3-12s |
+| RESPOND | AI targets respond to their question | 2-8s |
+| REVIEW | Each AI casts votes | 5-15s |
 
 All tasks stored in `_ai_tasks[game_id]` and cancelled on phase change via `cancel_all()`.
 
-**Fallback**: If LLM fails, personality's `fallback_response` is used (e.g., glitchy says "[signal lost]", chill says "meh").
+**Fallback**: If LLM fails, personality's `fallback_response` is used.
 
 ## AI Agent Architecture
 
-Single PydanticAI `Agent(output_type=str)` instantiated per call (not shared). System prompt composed from:
-1. Personality template (answer/chat/vote-specific)
-2. Game context (alive players, round number, answers so far, chat history)
+Single PydanticAI `Agent(output_type=str)` instantiated per call. System prompt composed from:
+1. Personality template (action-specific)
+2. Game context (alive players, round number, answers, questions/responses)
 3. Task-specific instruction
 
-5 personalities: paranoid, chill, overachiever, glitchy, philosopher. Each has distinct answer style, chat behavior, vote strategy, and fallback response.
+**Agent functions in `agents.py`**:
 
-Model: `google-gla:gemini-3.1-flash-lite-preview` (fast, cheap). Configured in `config.toml`.
+| Function | Phase | Notes |
+|---|---|---|
+| `generate_answer` | PROMPT | Responds to prompt in character |
+| `generate_question` | QUESTION | Anonymous follow-up targeting assigned/nominated player |
+| `generate_question_response` | RESPOND | Responds to received question or synthesis |
+| `generate_nomination` | NOMINATE | Picks player to put on hot seat |
+| `decide_vote` | REVIEW | Returns up to `max_votes_for_player(alive_count)` aliases |
+| `synthesize_questions` | QUESTION→RESPOND | System-level call; weaves N questions into one paragraph |
+| `generate_verdict` | Elimination | System-level call; one-line dramatic sentence about the elimination |
+
+`synthesize_questions` and `generate_verdict` are system-level calls (no personality context), with short timeouts (5s and 3s respectively).
+
+5 personalities: paranoid, chill, overachiever, glitchy, philosopher. Each has `answer_system_prompt`, `vote_strategy`, `question_style`, and `fallback_response`.
+
+Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 ## Frontend Architecture
 
@@ -101,11 +137,24 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (fast, cheap). Configured in `
 
 **SSE connection**: `useGameEvents` hook connects `EventSource` on mount, routes events to store. Auto-reconnects natively.
 
-**Phase routing**: `game/[id]/page.tsx` renders phase-appropriate component based on `store.phase`. Eliminated players get spectator views (read-only prompt/vote displays).
+**Phase routing**: `game/[id]/page.tsx` renders phase-appropriate component based on `store.phase`. Eliminated players receive a `spectator` prop — components render read-only views.
 
 **Session persistence**: Player ID stored in `sessionStorage` keyed by game ID. Survives page refresh within the same tab.
 
-**Timer**: Server sends `phase_deadline` (ISO timestamp). Client counts down locally via `useTimer` hook (1s interval). No server-side tick events needed.
+**Timer**: Server sends `phase_deadline` (ISO timestamp). Client counts down locally via `useTimer` hook (1s interval).
+
+**View components**:
+
+| Component | Phase | Role |
+|---|---|---|
+| `PlayerBar` | All gameplay phases | Persistent strip showing alive players and connection status |
+| `Gallery` | REVIEW | Grid of player cards for voting context |
+| `Spotlight` | REVIEW | Auto-cycling featured player |
+| `VoteOverlay` | REVIEW | Multi-select vote UI (up to 3, changeable) |
+| `QuestionPhase` | QUESTION | Write anonymous follow-up question to assigned target |
+| `RespondPhase` | RESPOND | Answer received question (or synthesis in Interrogation) |
+| `NominatePhase` | NOMINATE | Pick player for hot seat |
+| `ReviewPhase` | REVIEW | Combines Spotlight + Gallery + VoteOverlay |
 
 ## Prompt Selection
 

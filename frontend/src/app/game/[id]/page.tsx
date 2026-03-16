@@ -3,10 +3,13 @@
 import { useEffect, useState, use } from "react";
 import { Stage } from "@/components/Stage";
 import { Timer } from "@/components/Timer";
+import { PlayerBar } from "@/components/PlayerBar";
 import { Lobby } from "@/components/Lobby";
 import { Prompt } from "@/components/Prompt";
-import { Chat } from "@/components/Chat";
-import { Vote } from "@/components/Vote";
+import { QuestionPhase } from "@/components/QuestionPhase";
+import { RespondPhase } from "@/components/RespondPhase";
+import { NominatePhase } from "@/components/NominatePhase";
+import { ReviewPhase } from "@/components/ReviewPhase";
 import { Elimination } from "@/components/Elimination";
 import { GameOver } from "@/components/GameOver";
 import { SystemText } from "@/components/SystemText";
@@ -87,14 +90,17 @@ function GameContent() {
 
   const totalDurations: Record<string, number> = {
     prompt: 45,
-    chat: 75,
-    vote: 20,
-    elimination: 5,
+    nominate: 15,
+    question: 25,
+    respond: 30,
+    review: 40,
+    elimination: 8,
   };
   const total = totalDurations[phase] || 0;
 
   return (
     <>
+      <PlayerBar />
       {phase !== "lobby" && phase !== "game_over" && (
         <Timer remaining={remaining} total={total} />
       )}
@@ -104,8 +110,10 @@ function GameContent() {
         )}
         {phase === "lobby" && <Lobby />}
         {phase === "prompt" && <Prompt readOnly={!isAlive} />}
-        {phase === "chat" && <Chat spectator={!isAlive} />}
-        {phase === "vote" && <Vote spectator={!isAlive} />}
+        {phase === "nominate" && <NominatePhase spectator={!isAlive} />}
+        {phase === "question" && <QuestionPhase spectator={!isAlive} />}
+        {phase === "respond" && <RespondPhase spectator={!isAlive} />}
+        {phase === "review" && <ReviewPhase spectator={!isAlive} />}
         {phase === "elimination" && <Elimination />}
         {phase === "game_over" && <GameOver />}
       </Stage>

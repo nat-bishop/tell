@@ -10,7 +10,6 @@ export function useGameEvents(gameId: string, playerId: string) {
   useEffect(() => {
     if (!gameId || !playerId) return;
 
-    // Use getState() to avoid subscribing to the entire store
     const store = useGameStore.getState();
     const lastSeq = store.lastSeq;
 
@@ -20,7 +19,6 @@ export function useGameEvents(gameId: string, playerId: string) {
       onPlayerDisconnected: useGameStore.getState().onPlayerDisconnected,
       onPlayerReconnected: useGameStore.getState().onPlayerReconnected,
       onPhaseChanged: useGameStore.getState().onPhaseChanged,
-      onChatMessage: useGameStore.getState().onChatMessage,
       onAnswerSubmitted: useGameStore.getState().onAnswerSubmitted,
       onVoteCast: useGameStore.getState().onVoteCast,
       onVoteResults: useGameStore.getState().onVoteResults,
@@ -28,6 +26,12 @@ export function useGameEvents(gameId: string, playerId: string) {
       onGameOver: useGameStore.getState().onGameOver,
       onTimerTick: useGameStore.getState().onTimerTick,
       onHostChanged: useGameStore.getState().onHostChanged,
+      onNominationCast: useGameStore.getState().onNominationCast,
+      onNominated: useGameStore.getState().onNominated,
+      onQuestionSubmitted: useGameStore.getState().onQuestionSubmitted,
+      onResponseSubmitted: useGameStore.getState().onResponseSubmitted,
+      onSynthesisReady: useGameStore.getState().onSynthesisReady,
+      onVerdict: useGameStore.getState().onVerdict,
     }, lastSeq);
 
     return () => {

@@ -10,6 +10,7 @@ export function Elimination() {
     eliminationVoteCount,
     eliminationTieMessage,
     eliminationNoVotes,
+    verdict,
   } = useGameStore();
   const [step, setStep] = useState(0);
 
@@ -18,6 +19,7 @@ export function Elimination() {
       setTimeout(() => setStep(1), 0),
       setTimeout(() => setStep(2), 1500),
       setTimeout(() => setStep(3), 3000),
+      setTimeout(() => setStep(4), 4500),
     ];
     return () => timers.forEach(clearTimeout);
   }, []);
@@ -55,6 +57,12 @@ export function Elimination() {
             {wasHuman ? "human" : "ai"}
           </span>
           <span className="text-ink">.</span>
+        </p>
+      )}
+
+      {step >= 4 && verdict && (
+        <p className="animate-fade-in font-literary text-[0.95rem] italic text-dim max-w-md text-center leading-[1.6]">
+          {verdict}
         </p>
       )}
     </div>

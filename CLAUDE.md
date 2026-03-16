@@ -1,12 +1,12 @@
 # Tell
 
-Multiplayer social deduction game — reverse Turing test meets Among Us. Players join a group chat where some are AI, some human. Everyone pretends to be a robot. Each round: answer a prompt, discuss, vote on who's human.
+Multiplayer social deduction game — reverse Turing test meets Among Us. Players join a group where some are AI, some human. Everyone pretends to be a robot. Each round: answer a prompt, question each other through structured minigames, vote on who's human.
 
 ## Architecture
 
 ```
 schemas/          Shared Pydantic models — the contract between backend + frontend
-  game_state.py   GamePhase, Player, TellGameState (core state machine)
+  game_state.py   GamePhase, Player, TellGameState, QuestionEntry, RoundState
   api_models.py   SSE event types + POST request/response models
   prompts.py      30 game prompts with category-aware selection
   aliases.py      Robot alias generator (UNIT-7, BOT-42)
@@ -20,21 +20,32 @@ backend/
     routes/
       game.py     POST /games, GET /games/{id}
       events.py   GET /games/{id}/events (SSE stream)
-      actions.py  POST join/start/answer/chat/vote + phase transition helpers
+      actions.py  POST join/start/answer/question/respond/nominate/vote + transitions
   services/
-    connection_manager.py  Per-game asyncio.Queue broadcast + event log (reconnection replay)
+    connection_manager.py  Per-game asyncio.Queue broadcast + event log
     game_repository.py     In-memory game session store
     game_logic.py          Pure functions: transitions, vote resolution, validation
     timer_manager.py       asyncio.Task per phase timer
     ai_scheduler.py        Generate-then-lock AI player scheduling
   llm/
-    agents.py              PydanticAI agent: answer, chat, vote generation
-    personalities.py       5 AI personalities with system prompts + fallbacks
+    agents.py              PydanticAI: answer, question, response, vote, nomination,
+                           synthesis, verdict generation
+    personalities.py       5 AI personalities with system prompts + question styles
 
 frontend/src/
   app/page.tsx             Landing: "tell — a game of words and suspicion"
-  app/game/[id]/page.tsx   Game page: join screen → phase routing (spectator view for eliminated)
-  components/              Lobby, Prompt, Chat, Vote, Elimination, GameOver, Stage, Timer, Dialogue, SystemText
+  app/game/[id]/page.tsx   Game page: join → phase routing (spectator for eliminated)
+  components/
+    PlayerBar.tsx          Persistent player strip during gameplay
+    Gallery.tsx            Grid of player cards
+    Spotlight.tsx          Single featured player, auto-cycling
+    VoteOverlay.tsx        Multi-vote selection overlay (up to 3 votes)
+    QuestionPhase.tsx      QUESTION phase — write anonymous follow-up questions
+    RespondPhase.tsx       RESPOND phase — answer received questions
+    NominatePhase.tsx      NOMINATE phase — pick who to interrogate
+    ReviewPhase.tsx        REVIEW phase — spotlight + gallery + voting
+    Prompt.tsx, Elimination.tsx, GameOver.tsx, Lobby.tsx
+    Stage.tsx, Timer.tsx, Dialogue.tsx, SystemText.tsx
   hooks/useGameStore.ts    Zustand store — all game state + SSE event handlers
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
@@ -75,15 +86,31 @@ AI players call LLM **outside** the lock, then acquire `asyncio.Lock` only to wr
 ### Type pipeline
 Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run `make codegen` after changing any schema or route signature.
 
-### State machine
+### State machine — two round types
+
+**Probe** (round-robin chain, anonymous questions):
 ```
-LOBBY → PROMPT (45s) → CHAT (75s) → VOTE (20s) → ELIMINATION (5s) → PROMPT → ... → GAME_OVER
+LOBBY → PROMPT (45s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s) → PROMPT → ... → GAME_OVER
 ```
 
-Phase transitions happen in `actions.py` helper functions (`_handle_phase_expiry`, `_do_vote_resolution`, `_after_elimination`). Timer callbacks and early-completion checks both funnel through these same helpers. AI scheduler hooks into each transition via `ai_on_phase_change()`.
+**Interrogation** (hot seat, LLM synthesis):
+```
+LOBBY → PROMPT (45s) → NOMINATE (15s) → QUESTION (20s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s) → ...
+```
+
+Round types alternate: round 1 = probe, round 2 = interrogation, etc. Generated at game start in `state.round_types`.
+
+Phase transitions happen in `actions.py` helper functions (`_handle_phase_expiry`, `_do_vote_resolution`, `_after_elimination`, `_synthesize_and_transition`). Timer callbacks and early-completion checks both funnel through these same helpers. AI scheduler hooks into each transition via `ai_on_phase_change()`.
 
 ### Game logic is pure
-`game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, client state sanitization. Routes call these under the lock.
+`game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, assignment logic, client state sanitization. Routes call these under the lock.
+
+### Voting: multi-vote
+Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are changeable until timer expires. No early-complete for REVIEW.
+
+### LLM-powered features
+- **Question synthesis** (Interrogation): all submitted questions → LLM → one cohesive cross-examination paragraph. 5s timeout, fallback: numbered list.
+- **Verdict summary** (Elimination): one-line dramatic summary after role reveal. 3s timeout, fallback: no verdict.
 
 ## Gotchas
 
@@ -93,7 +120,9 @@ Phase transitions happen in `actions.py` helper functions (`_handle_phase_expiry
 - **No database**: All state is in-memory. Server restart kills all games.
 - **Circular import in ai_scheduler**: It imports from `actions.py` inside functions (not at top level) to avoid circular dependency with route helpers.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
-- **Eliminated players see spectator views**: `game/[id]/page.tsx` checks `isAlive` and renders `SpectatorPrompt`/`SpectatorVote` instead of interactive components.
+- **Eliminated players see spectator views**: `game/[id]/page.tsx` checks `isAlive` and passes `spectator` prop to phase components.
+- **Round-robin assignments** (Probe): player `i` questions player `(i+1) % len(alive)`. Generated in `assign_question_targets()`.
+- **Hot-seated player** (Interrogation): nominated player can't submit questions, only responds to synthesis.
 
 ## Code Conventions
 

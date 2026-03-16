@@ -14,6 +14,7 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
     answerCount,
     totalCount,
     myAnswer,
+    roundType,
   } = useGameStore();
   const [answer, setAnswer] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -29,7 +30,12 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
 
   return (
     <div className="flex flex-col items-center gap-8 pt-8">
-      <SystemText>round {roundNumber}</SystemText>
+      <div className="flex items-center gap-3">
+        <SystemText>round {roundNumber}</SystemText>
+        {roundType && (
+          <SystemText>{roundType}</SystemText>
+        )}
+      </div>
 
       <p className="max-w-md text-center font-literary text-[1.3rem] italic leading-[1.6] text-ink">
         {promptText}

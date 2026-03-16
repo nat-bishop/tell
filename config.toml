@@ -5,9 +5,11 @@
 ai_model = "google-gla:gemini-3.1-flash-lite-preview"
 ai_retries = 2
 prompt_duration = 45
-chat_duration = 75
-vote_duration = 20
-elimination_duration = 5
+question_duration = 25
+respond_duration = 30
+review_duration = 40
+nominate_duration = 15
+elimination_duration = 8
 min_humans = 2
 max_players = 10
 min_ai = 1

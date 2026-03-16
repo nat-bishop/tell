@@ -40,23 +40,25 @@ class Settings:
         self.prompt_duration: int = int(
             os.environ.get("TELL_PROMPT_DURATION", game.get("prompt_duration", 45))
         )
-        self.chat_duration: int = int(
-            os.environ.get("TELL_CHAT_DURATION", game.get("chat_duration", 75))
+        self.question_duration: int = int(
+            os.environ.get("TELL_QUESTION_DURATION", game.get("question_duration", 25))
         )
-        self.vote_duration: int = int(
-            os.environ.get("TELL_VOTE_DURATION", game.get("vote_duration", 20))
+        self.respond_duration: int = int(
+            os.environ.get("TELL_RESPOND_DURATION", game.get("respond_duration", 30))
+        )
+        self.review_duration: int = int(
+            os.environ.get("TELL_REVIEW_DURATION", game.get("review_duration", 40))
+        )
+        self.nominate_duration: int = int(
+            os.environ.get("TELL_NOMINATE_DURATION", game.get("nominate_duration", 15))
         )
         self.elimination_duration: int = int(
-            os.environ.get("TELL_ELIMINATION_DURATION", game.get("elimination_duration", 5))
+            os.environ.get("TELL_ELIMINATION_DURATION", game.get("elimination_duration", 8))
         )
 
         # Player limits
-        self.min_humans: int = int(
-            os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2))
-        )
-        self.max_players: int = int(
-            os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 10))
-        )
+        self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))
+        self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 10)))
         self.min_ai: int = int(os.environ.get("TELL_MIN_AI", game.get("min_ai", 1)))
         self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 3)))
 

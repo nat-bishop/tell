@@ -2,7 +2,15 @@ import { create } from "zustand";
 
 // --- Types matching backend SSE event models ---
 
-export type GamePhase = "lobby" | "prompt" | "chat" | "vote" | "elimination" | "game_over";
+export type GamePhase =
+  | "lobby"
+  | "prompt"
+  | "nominate"
+  | "question"
+  | "respond"
+  | "review"
+  | "elimination"
+  | "game_over";
 
 export interface PlayerInfo {
   id: string;
@@ -14,12 +22,12 @@ export interface PlayerInfo {
   role?: string;
 }
 
-export interface ChatMsg {
-  player_id: string;
-  player_alias: string;
-  text: string;
-  is_answer?: boolean;
-  timestamp?: string;
+export interface QuestionEntryClient {
+  target_id: string;
+  target_alias: string;
+  question: string;
+  response: string | null;
+  questioner_id?: string;
 }
 
 export interface RevealedPlayer {
@@ -38,7 +46,13 @@ interface StateSyncData {
   prompt_text: string | null;
   prompt_category: string | null;
   answers: Record<string, string>;
-  messages: ChatMsg[];
+  round_type: string | null;
+  questions: QuestionEntryClient[];
+  assignments: Record<string, string>;
+  nominated_id: string | null;
+  nominations: Record<string, string>;
+  synthesis: string | null;
+  verdict: string | null;
   my_answer: string | null;
   winner: string | null;
   is_host: boolean;
@@ -60,14 +74,11 @@ interface PhaseChangedData {
   prompt_category?: string;
   phase_deadline?: string;
   answers?: Record<string, string>;
-}
-
-interface ChatMessageData {
-  seq: number;
-  player_id: string;
-  player_alias: string;
-  text: string;
-  is_answer?: boolean;
+  round_type?: string;
+  assignments?: Record<string, string>;
+  nominated_id?: string;
+  questions?: QuestionEntryClient[];
+  synthesis?: string;
 }
 
 interface CountData {
@@ -75,11 +86,13 @@ interface CountData {
   answer_count?: number;
   total_count?: number;
   vote_count?: number;
+  count?: number;
+  total?: number;
 }
 
 interface VoteResultsData {
   seq: number;
-  votes: Record<string, string>;
+  votes: Record<string, string[]>;
   vote_tallies: Record<string, number>;
 }
 
@@ -105,6 +118,31 @@ interface HostChangedData {
   new_host_id: string;
 }
 
+interface NominatedData {
+  seq: number;
+  nominated_id: string;
+  nominated_alias: string;
+}
+
+interface SynthesisReadyData {
+  seq: number;
+  synthesis: string;
+}
+
+interface VerdictData {
+  seq: number;
+  verdict: string;
+}
+
+interface ResponseSubmittedData {
+  seq: number;
+  target_id: string;
+  target_alias: string;
+  response: string;
+  count: number;
+  total: number;
+}
+
 interface SeqData {
   seq: number;
 }
@@ -125,15 +163,32 @@ interface GameState {
   promptText: string | null;
   promptCategory: string | null;
   answers: Record<string, string>;
-  messages: ChatMsg[];
   myAnswer: string | null;
-  myVote: string | null;
   answerCount: number;
   totalCount: number;
-  voteCount: number;
-  voteTotalCount: number;
   winner: string | null;
   lastSeq: number;
+
+  // Round-specific
+  roundType: string | null;
+  questions: QuestionEntryClient[];
+  assignments: Record<string, string>;
+  nominatedId: string | null;
+  synthesis: string | null;
+  verdict: string | null;
+  myQuestionSubmitted: boolean;
+  myResponseSubmitted: boolean;
+  questionCount: number;
+  questionTotal: number;
+  responseCount: number;
+  responseTotal: number;
+  nominationCount: number;
+  nominationTotal: number;
+
+  // Votes (multi-vote)
+  myVotes: string[];
+  voteCount: number;
+  voteTotalCount: number;
 
   // Timer
   phaseDeadline: string | null;
@@ -148,11 +203,14 @@ interface GameState {
   eliminationNoVotes: boolean;
 
   // Vote results
-  voteResults: Record<string, string> | null;
+  voteResults: Record<string, string[]> | null;
   voteTallies: Record<string, number> | null;
 
   // Game over
   revealedPlayers: RevealedPlayer[] | null;
+
+  // Spotlight
+  spotlightIndex: number;
 
   // Actions
   setIdentity: (gameId: string, playerId: string, alias: string) => void;
@@ -161,7 +219,6 @@ interface GameState {
   onPlayerDisconnected: (data: PlayerEventData) => void;
   onPlayerReconnected: (data: PlayerEventData) => void;
   onPhaseChanged: (data: PhaseChangedData) => void;
-  onChatMessage: (data: ChatMessageData) => void;
   onAnswerSubmitted: (data: CountData) => void;
   onVoteCast: (data: CountData) => void;
   onVoteResults: (data: VoteResultsData) => void;
@@ -169,6 +226,12 @@ interface GameState {
   onGameOver: (data: GameOverData) => void;
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
+  onNominationCast: (data: CountData) => void;
+  onNominated: (data: NominatedData) => void;
+  onQuestionSubmitted: (data: CountData) => void;
+  onResponseSubmitted: (data: ResponseSubmittedData) => void;
+  onSynthesisReady: (data: SynthesisReadyData) => void;
+  onVerdict: (data: VerdictData) => void;
   reset: () => void;
 }
 
@@ -183,15 +246,28 @@ const initialState = {
   promptText: null as string | null,
   promptCategory: null as string | null,
   answers: {} as Record<string, string>,
-  messages: [] as ChatMsg[],
   myAnswer: null as string | null,
-  myVote: null as string | null,
   answerCount: 0,
   totalCount: 0,
-  voteCount: 0,
-  voteTotalCount: 0,
   winner: null as string | null,
   lastSeq: 0,
+  roundType: null as string | null,
+  questions: [] as QuestionEntryClient[],
+  assignments: {} as Record<string, string>,
+  nominatedId: null as string | null,
+  synthesis: null as string | null,
+  verdict: null as string | null,
+  myQuestionSubmitted: false,
+  myResponseSubmitted: false,
+  questionCount: 0,
+  questionTotal: 0,
+  responseCount: 0,
+  responseTotal: 0,
+  nominationCount: 0,
+  nominationTotal: 0,
+  myVotes: [] as string[],
+  voteCount: 0,
+  voteTotalCount: 0,
   phaseDeadline: null as string | null,
   eliminatedId: null as string | null,
   eliminatedAlias: null as string | null,
@@ -200,12 +276,13 @@ const initialState = {
   eliminationTie: false,
   eliminationTieMessage: null as string | null,
   eliminationNoVotes: false,
-  voteResults: null as Record<string, string> | null,
+  voteResults: null as Record<string, string[]> | null,
   voteTallies: null as Record<string, number> | null,
   revealedPlayers: null as RevealedPlayer[] | null,
+  spotlightIndex: 0,
 };
 
-export const useGameStore = create<GameState>((set, get) => ({
+export const useGameStore = create<GameState>((set) => ({
   ...initialState,
 
   setIdentity: (gameId, playerId, alias) =>
@@ -219,15 +296,23 @@ export const useGameStore = create<GameState>((set, get) => ({
       promptText: data.prompt_text,
       promptCategory: data.prompt_category,
       answers: data.answers || {},
-      messages: data.messages || [],
+      roundType: data.round_type,
+      questions: data.questions || [],
+      assignments: data.assignments || {},
+      nominatedId: data.nominated_id,
+      synthesis: data.synthesis,
+      verdict: data.verdict,
       myAnswer: data.my_answer,
       winner: data.winner,
       isHost: data.is_host,
       phaseDeadline: data.phase_deadline,
       lastSeq: data.seq,
-      myVote: null,
+      myVotes: [],
+      myQuestionSubmitted: false,
+      myResponseSubmitted: false,
       voteResults: null,
       voteTallies: null,
+      spotlightIndex: 0,
     }),
 
   onPlayerJoined: (data) =>
@@ -270,14 +355,26 @@ export const useGameStore = create<GameState>((set, get) => ({
       promptCategory: data.prompt_category || null,
       phaseDeadline: data.phase_deadline || null,
       answers: data.answers || {},
+      roundType: data.round_type || null,
+      assignments: data.assignments || {},
+      nominatedId: data.nominated_id || null,
+      questions: data.questions || [],
+      synthesis: data.synthesis || null,
       lastSeq: data.seq,
       myAnswer: null,
-      myVote: null,
+      myVotes: [],
+      myQuestionSubmitted: false,
+      myResponseSubmitted: false,
       answerCount: 0,
       totalCount: 0,
       voteCount: 0,
       voteTotalCount: 0,
-      messages: data.phase === "chat" ? [] : get().messages,
+      questionCount: 0,
+      questionTotal: 0,
+      responseCount: 0,
+      responseTotal: 0,
+      nominationCount: 0,
+      nominationTotal: 0,
       eliminatedId: null,
       eliminatedAlias: null,
       wasHuman: null,
@@ -287,26 +384,56 @@ export const useGameStore = create<GameState>((set, get) => ({
       eliminationNoVotes: false,
       voteResults: null,
       voteTallies: null,
+      verdict: null,
+      spotlightIndex: 0,
     }),
-
-  onChatMessage: (data) =>
-    set((s) => ({
-      messages: [
-        ...s.messages,
-        {
-          player_id: data.player_id,
-          player_alias: data.player_alias,
-          text: data.text,
-          is_answer: data.is_answer,
-        },
-      ],
-      lastSeq: data.seq,
-    })),
 
   onAnswerSubmitted: (data) =>
     set({
       answerCount: data.answer_count || 0,
       totalCount: data.total_count || 0,
+      lastSeq: data.seq,
+    }),
+
+  onNominationCast: (data) =>
+    set({
+      nominationCount: data.count || 0,
+      nominationTotal: data.total || 0,
+      lastSeq: data.seq,
+    }),
+
+  onNominated: (data) =>
+    set({
+      nominatedId: data.nominated_id,
+      lastSeq: data.seq,
+    }),
+
+  onQuestionSubmitted: (data) =>
+    set({
+      questionCount: data.count || 0,
+      questionTotal: data.total || 0,
+      lastSeq: data.seq,
+    }),
+
+  onResponseSubmitted: (data) =>
+    set((s) => ({
+      responseCount: data.count,
+      responseTotal: data.total,
+      lastSeq: data.seq,
+      questions: s.questions.map((q) =>
+        q.target_id === data.target_id ? { ...q, response: data.response } : q,
+      ),
+    })),
+
+  onSynthesisReady: (data) =>
+    set({
+      synthesis: data.synthesis,
+      lastSeq: data.seq,
+    }),
+
+  onVerdict: (data) =>
+    set({
+      verdict: data.verdict,
       lastSeq: data.seq,
     }),
 

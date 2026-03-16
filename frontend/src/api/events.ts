@@ -10,7 +10,6 @@ export interface GameEventCallbacks {
   onPlayerDisconnected: EventHandler;
   onPlayerReconnected: EventHandler;
   onPhaseChanged: EventHandler;
-  onChatMessage: EventHandler;
   onAnswerSubmitted: EventHandler;
   onVoteCast: EventHandler;
   onVoteResults: EventHandler;
@@ -18,6 +17,12 @@ export interface GameEventCallbacks {
   onGameOver: EventHandler;
   onTimerTick: EventHandler;
   onHostChanged: EventHandler;
+  onNominationCast: EventHandler;
+  onNominated: EventHandler;
+  onQuestionSubmitted: EventHandler;
+  onResponseSubmitted: EventHandler;
+  onSynthesisReady: EventHandler;
+  onVerdict: EventHandler;
 }
 
 export function connectGameEvents(
@@ -35,7 +40,6 @@ export function connectGameEvents(
     player_disconnected: callbacks.onPlayerDisconnected,
     player_reconnected: callbacks.onPlayerReconnected,
     phase_changed: callbacks.onPhaseChanged,
-    chat_message: callbacks.onChatMessage,
     answer_submitted: callbacks.onAnswerSubmitted,
     vote_cast: callbacks.onVoteCast,
     vote_results: callbacks.onVoteResults,
@@ -43,6 +47,12 @@ export function connectGameEvents(
     game_over: callbacks.onGameOver,
     timer_tick: callbacks.onTimerTick,
     host_changed: callbacks.onHostChanged,
+    nomination_cast: callbacks.onNominationCast,
+    nominated: callbacks.onNominated,
+    question_submitted: callbacks.onQuestionSubmitted,
+    response_submitted: callbacks.onResponseSubmitted,
+    synthesis_ready: callbacks.onSynthesisReady,
+    verdict: callbacks.onVerdict,
   };
 
   for (const [eventType, handler] of Object.entries(eventMap)) {
