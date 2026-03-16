@@ -8,7 +8,7 @@ dependencies = [
     "fastapi==0.135.1",
     "uvicorn[standard]==0.41.0",
     "pydantic-ai-slim[google,logfire] @ git+https://github.com/nat-bishop/pydantic-ai.git@add-google-image-size-512#subdirectory=pydantic_ai_slim",
-    "logfire[fastapi]>=4.16.0",
+    "logfire[fastapi,google-genai]>=4.16.0",
     "sse-starlette==3.3.2",
     "structlog>=24.1.0",
     "python-dotenv>=1.2.2",

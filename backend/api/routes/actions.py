@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import structlog
 from fastapi import APIRouter, HTTPException
 
 from backend.api.deps import (
@@ -163,6 +164,8 @@ async def _after_elimination(game_id: str, session) -> None:
 @router.post("/{game_id}/join", response_model=JoinGameResponse)
 async def join_game(game_id: str, req: JoinGameRequest):
     """Join a game lobby."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
     cm = get_connection_manager()
     repo = get_game_repository()
     settings = get_settings()
@@ -208,6 +211,8 @@ async def join_game(game_id: str, req: JoinGameRequest):
 @router.post("/{game_id}/start")
 async def start_game(game_id: str, req: StartGameRequest):
     """Start the game (host only). Spawns AI players and begins round 1."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
     cm = get_connection_manager()
     repo = get_game_repository()
     settings = get_settings()
@@ -291,6 +296,8 @@ async def start_game(game_id: str, req: StartGameRequest):
 @router.post("/{game_id}/answer")
 async def submit_answer(game_id: str, req: SubmitAnswerRequest):
     """Submit an answer to the current prompt."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
     cm = get_connection_manager()
     repo = get_game_repository()
     settings = get_settings()
@@ -354,6 +361,8 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
 @router.post("/{game_id}/chat")
 async def send_chat(game_id: str, req: SendChatRequest):
     """Send a chat message during the chat phase."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
     cm = get_connection_manager()
     repo = get_game_repository()
     lock = cm.get_lock(game_id)
@@ -396,6 +405,8 @@ async def send_chat(game_id: str, req: SendChatRequest):
 @router.post("/{game_id}/vote")
 async def cast_vote(game_id: str, req: CastVoteRequest):
     """Cast a vote for who you think is human."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
     cm = get_connection_manager()
     repo = get_game_repository()
     lock = cm.get_lock(game_id)

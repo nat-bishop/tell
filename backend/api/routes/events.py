@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
@@ -19,6 +20,9 @@ router = APIRouter()
 @router.get("/{game_id}/events")
 async def game_events(game_id: str, player_id: str, request: Request, last_seq: int = 0):
     """Persistent SSE stream for a game. Sends state_sync on connect, then live events."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id, player_id=player_id)
+
     repo = get_game_repository()
     session = repo.get(game_id)
     if not session:

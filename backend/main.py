@@ -72,6 +72,7 @@ _settings = Settings()
 if _settings.logfire_enabled:
     logfire.configure(service_name="tell")
     logfire.instrument_pydantic_ai()
+    logfire.instrument_google_genai()
 
 app = FastAPI(
     title="Tell",
@@ -89,7 +90,19 @@ app.add_middleware(
 )
 
 if _settings.logfire_enabled:
-    logfire.instrument_fastapi(app)
+
+    def _game_id_attributes_mapper(request, attributes):  # type: ignore[no-untyped-def]
+        """Extract game_id from path and add it to span attributes."""
+        attrs = {
+            "values": attributes["values"],
+            "errors": attributes["errors"],
+        }
+        values = attributes.get("values") or {}
+        if "game_id" in values:
+            attrs["game_id"] = values["game_id"]
+        return attrs
+
+    logfire.instrument_fastapi(app, request_attributes_mapper=_game_id_attributes_mapper)
 
 app.include_router(game_router, prefix="/games", tags=["games"])
 app.include_router(events_router, prefix="/games", tags=["events"])

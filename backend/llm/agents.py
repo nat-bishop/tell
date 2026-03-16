@@ -50,8 +50,10 @@ def _build_game_context(deps: AIPlayerDeps) -> str:
 
 async def _run_agent(deps: AIPlayerDeps, system_prompt: str, suffix: str, user_prompt: str) -> str:
     """Run an AI agent with the given prompts. Returns generated text or fallback."""
+    settings = get_settings()
+    action = user_prompt.split()[0].lower().rstrip(".")  # "Generate" / "Who"
+    log.info("llm_call_start", player=deps.player_alias, action=action, model=settings.ai_model)
     try:
-        settings = get_settings()
         agent = Agent(
             model=settings.ai_model,
             retries=settings.ai_retries,
@@ -61,9 +63,15 @@ async def _run_agent(deps: AIPlayerDeps, system_prompt: str, suffix: str, user_p
             ),
         )
         result = await agent.run(user_prompt)
+        log.info(
+            "llm_call_done",
+            player=deps.player_alias,
+            action=action,
+            output_len=len(result.output),
+        )
         return result.output
     except Exception:
-        log.exception("ai_agent_failed", player=deps.player_alias, prompt=user_prompt)
+        log.exception("ai_agent_failed", player=deps.player_alias, action=action)
         return deps.personality.fallback_response
 
 
