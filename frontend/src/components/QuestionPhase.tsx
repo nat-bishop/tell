@@ -22,7 +22,6 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   const [submitted, setSubmitted] = useState(false);
 
   const hasSubmitted = submitted || myQuestionSubmitted;
-  const alivePlayers = players.filter((p) => p.is_alive);
 
   // Determine target
   let targetId: string | null = null;
@@ -33,6 +32,9 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   } else {
     targetId = playerId ? assignments[playerId] || null : null;
   }
+
+  const targetPlayer = players.find((p) => p.id === targetId);
+  const targetAnswer = targetId ? answers[targetId] : null;
 
   const handleSubmit = async () => {
     if (!gameId || !playerId || !question.trim() || hasSubmitted) return;
@@ -60,37 +62,20 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      {/* Player answer cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {alivePlayers.map((p) => {
-          const answer = answers[p.id];
-          const isTarget = p.id === targetId;
-          return (
-            <div
-              key={p.id}
-              className={`border p-4 ${isTarget ? "" : "border-rule"}`}
-              style={isTarget ? { borderColor: "var(--warm)" } : undefined}
-            >
-              <div
-                className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
-                  isTarget ? "text-warm" : "text-ink"
-                }`}
-              >
-                {p.alias}
-              </div>
-              {isTarget && !spectator && (
-                <div className="mt-0.5 font-system text-[0.65rem] text-warm">
-                  your target
-                </div>
-              )}
-              {answer && (
-                <div className="mt-1 font-literary text-[1rem] leading-[1.5] text-ink">
-                  {answer}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      {/* Target's answer */}
+      <div>
+        <SystemText>
+          {targetPlayer?.alias || "unknown"}&apos;s answer
+        </SystemText>
+        {targetAnswer ? (
+          <p className="mt-2 font-literary text-[1.1rem] italic leading-[1.6] text-ink">
+            {targetAnswer}
+          </p>
+        ) : (
+          <p className="mt-2 font-literary text-[1rem] text-dim">
+            no answer submitted
+          </p>
+        )}
       </div>
 
       {!spectator && (
@@ -113,7 +98,7 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
                   e.target.style.height = e.target.scrollHeight + "px";
                 }}
                 maxLength={200}
-                rows={2}
+                rows={1}
                 className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
                 placeholder={
                   roundType === "interrogation"

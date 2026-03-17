@@ -76,7 +76,7 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
               e.target.style.height = e.target.scrollHeight + "px";
             }}
             maxLength={280}
-            rows={3}
+            rows={1}
             className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.1rem] leading-[1.6] text-ink outline-none border-rule"
             placeholder="your answer..."
           />
