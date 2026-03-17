@@ -25,8 +25,9 @@ backend/
       actions.py      POST join/start/answer/question/respond/nominate/vote/chain-word
       matchmaking.py  POST /matchmaking/join|leave, GET /matchmaking/status|events
   services/
-    connection_manager.py  Per-game asyncio.Queue broadcast + event log
+    connection_manager.py  Per-game asyncio.Queue broadcast + event log + recording buffer
     game_repository.py     In-memory game session store
+    recorder.py            Writes completed game JSON to recordings/ on game over
     game_logic.py          Pure functions: transitions, vote resolution, validation,
                            word chain selection, round type cycling
     timer_manager.py       asyncio.Task per phase timer
@@ -97,6 +98,7 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_LOGFIRE_ENABLED=true` — Pydantic Logfire tracing
 - `TELL_MM_MIN_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
 - `TELL_CHAIN_DURATION`, `TELL_CHAIN_SUB_ROUND_DURATION`, `TELL_CHAIN_SUB_ROUNDS` — word chain timing
+- `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
 
 **Logging convention**: INFO for game actions (player_joined, answer_submitted, vote_cast, phase transitions). DEBUG for SSE internals (sse_connected, sse_replay, queue ops).
 
@@ -152,7 +154,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **Windows process cleanup**: `uv run uvicorn --reload` spawns a process tree (uv → reloader → worker). `make down` and the `dev` trap use `taskkill /F /T /PID` to kill the full tree; plain `kill` leaves child processes as zombies holding the port.
 - **`from __future__ import annotations`** used in all Python files. Use `datetime.now(UTC)`, never `datetime.utcnow()`.
 - **`schemas/` is top-level**: Imported by both `backend/` and `scripts/`. Don't nest under `backend/`.
-- **No database**: All state is in-memory. Server restart kills all games.
+- **No database**: All state is in-memory. Server restart kills all games. Completed games are recorded to `recordings/{game_id}.json` (toggle with `TELL_RECORD_GAMES=false`).
 - **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
 - **Eliminated players see spectator views**: `game/[id]/page.tsx` checks `isAlive` and passes `spectator` prop to phase components.

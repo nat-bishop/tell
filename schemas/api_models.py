@@ -44,6 +44,8 @@ class StateSyncEvent(GameEvent):
     winner: str | None = None
     is_host: bool = False
     my_answer: str | None = None
+    # Reading period
+    writing_begins_at: str | None = None
     # Word Chain
     chain_rounds: list[dict] = Field(default_factory=list)
     current_sub_round: int = 0
@@ -80,6 +82,7 @@ class PhaseChangedEvent(GameEvent):
     nominated_id: str | None = None
     questions: list[dict] = Field(default_factory=list)
     synthesis: str | None = None
+    writing_begins_at: str | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):

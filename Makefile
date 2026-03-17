@@ -40,7 +40,7 @@ endef
 
 backend: .installed-py ## Start FastAPI backend
 	$(call kill-port,backend,$(BACKEND_PORT))
-	$(ENV_PREFIX) PYTHONUNBUFFERED=1 uv run uvicorn backend.main:app --reload --log-level $$(echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z) --port $(BACKEND_PORT)
+	$(ENV_PREFIX) PYTHONUNBUFFERED=1 uv run uvicorn backend.main:app --reload --reload-exclude .venv --log-level $$(echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z) --port $(BACKEND_PORT)
 
 frontend: frontend/node_modules/.installed ## Start Next.js dev server
 	$(call kill-port,frontend,$(FRONTEND_PORT))
@@ -50,7 +50,7 @@ dev: .installed-py frontend/node_modules/.installed ## Start backend + frontend 
 	$(call kill-port,backend,$(BACKEND_PORT))
 	$(call kill-port,frontend,$(FRONTEND_PORT))
 	@trap 'taskkill //F //T //PID $$(cat .backend.pid) 2>/dev/null; rm -f .backend.pid; kill 0 2>/dev/null' EXIT; \
-	$(ENV_PREFIX) PYTHONUNBUFFERED=1 uv run uvicorn backend.main:app --reload --log-level $$(echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z) --port $(BACKEND_PORT) & \
+	$(ENV_PREFIX) PYTHONUNBUFFERED=1 uv run uvicorn backend.main:app --reload --reload-exclude .venv --log-level $$(echo $${TELL_LOG_LEVEL:-INFO} | tr A-Z a-z) --port $(BACKEND_PORT) & \
 	echo $$! > .backend.pid; \
 	$(ENV_PREFIX) cd frontend && PORT=$(FRONTEND_PORT) npm run dev
 

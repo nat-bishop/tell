@@ -82,6 +82,7 @@ interface StateSyncData {
   is_host: boolean;
   phase_deadline: string | null;
   phase_duration: number | null;
+  writing_begins_at?: string | null;
   chain_rounds: ChainRoundData[];
   current_sub_round: number;
 }
@@ -107,6 +108,7 @@ interface PhaseChangedData {
   nominated_id?: string;
   questions?: QuestionEntryClient[];
   synthesis?: string;
+  writing_begins_at?: string;
 }
 
 interface CountData {
@@ -222,6 +224,9 @@ interface GameState {
   phaseDeadline: string | null;
   phaseDuration: number | null;
 
+  // Reading period
+  writingBeginsAt: string | null;
+
   // Word Chain
   chainRounds: ChainRoundData[];
   currentSubRound: number;
@@ -313,6 +318,7 @@ const initialState = {
   voteTotalCount: 0,
   phaseDeadline: null as string | null,
   phaseDuration: null as number | null,
+  writingBeginsAt: null as string | null,
   chainRounds: [] as ChainRoundData[],
   currentSubRound: 0,
   currentSeedWord: null as string | null,
@@ -357,6 +363,7 @@ export const useGameStore = create<GameState>((set) => ({
       isHost: data.is_host,
       phaseDeadline: data.phase_deadline,
       phaseDuration: data.phase_duration ?? null,
+      writingBeginsAt: data.writing_begins_at ?? null,
       lastSeq: data.seq,
       myVotes: [],
       myQuestionSubmitted: false,
@@ -413,6 +420,7 @@ export const useGameStore = create<GameState>((set) => ({
       promptCategory: data.prompt_category || null,
       phaseDeadline: data.phase_deadline || null,
       phaseDuration: data.phase_duration ?? null,
+      writingBeginsAt: data.writing_begins_at ?? null,
       answers: data.answers || {},
       roundType: data.round_type || null,
       assignments: data.assignments || {},

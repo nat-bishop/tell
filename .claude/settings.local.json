@@ -21,7 +21,22 @@
       "mcp__plugin_playwright_playwright__browser_console_messages",
       "mcp__plugin_playwright_playwright__browser_network_requests",
       "mcp__plugin_playwright_playwright__browser_evaluate",
-      "mcp__plugin_playwright_playwright__browser_wait_for"
+      "mcp__plugin_playwright_playwright__browser_wait_for",
+      "WebSearch",
+      "Bash(python .claude/skills/seed-game/scripts/generate_seed.py --phase prompt)",
+      "Bash(python .claude/skills/seed-game/scripts/generate_seed.py --phase review --round 2 --eliminated 1)",
+      "Bash(python .claude/skills/seed-game/scripts/generate_seed.py --phase chain --round 3 --sub-round 3 --eliminated 2)",
+      "Bash(railway whoami:*)",
+      "Bash(railway status:*)",
+      "Bash(railway link:*)",
+      "Bash(railway logs:*)",
+      "Bash(railway service:*)",
+      "Bash(railway delete:*)",
+      "WebFetch(domain:tell-ebon.vercel.app)",
+      "Bash(make lint:*)",
+      "Bash(make test:*)",
+      "WebFetch(domain:ai.pydantic.dev)",
+      "Skill(commit-commands:commit)"
     ]
   }
 }

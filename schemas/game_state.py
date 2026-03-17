@@ -71,6 +71,8 @@ class RoundState(BaseModel):
     synthesis: str | None = None
     verdict: str | None = None
     votes: dict[str, list[str]] = Field(default_factory=dict)  # voter_id -> [target_ids]
+    # Reading period — when set, answers are not accepted until this time
+    writing_begins_at: datetime | None = None
     # Word Chain
     current_sub_round: int = 0
     chain_rounds: list[ChainRound] = Field(default_factory=list)

@@ -11,3 +11,4 @@ frontend/src/types/openapi.json
 *.egg-info/
 dist/
 .playwright-mcp/
+recordings/

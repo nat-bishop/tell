@@ -55,6 +55,9 @@ def _make_event(state, session, settings, **extra):
     """Build a PhaseChangedEvent with phase_duration computed from settings."""
     rs = state.current_round
     pd = get_phase_duration(settings, state.phase, rs.round_type if rs else None)
+    # Include writing_begins_at for reading period
+    if rs and rs.writing_begins_at and "writing_begins_at" not in extra:
+        extra["writing_begins_at"] = rs.writing_begins_at.isoformat()
     return make_phase_changed_event(state, session.next_seq(), phase_duration=pd, **extra)
 
 
@@ -398,6 +401,10 @@ async def do_after_elimination(game_id: str, session) -> None:
         state.phase_deadline = None
         event = make_game_over_event(state, winner, session.next_seq)
         await cm.broadcast(game_id, event)
+        if settings.record_games:
+            from backend.services.recorder import save_recording
+
+            save_recording(game_id, state, cm.pop_recording(game_id))
         from backend.services.ai_scheduler import cleanup_game as ai_cleanup
 
         ai_cleanup(game_id)
@@ -407,7 +414,8 @@ async def do_after_elimination(game_id: str, session) -> None:
     next_round_type = get_next_round_type(state)
 
     if next_round_type == RoundType.TASK:
-        transition_to_task_prompt(state, settings.task_prompt_duration)
+        total_duration = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
+        transition_to_task_prompt(state, total_duration, settings.prompt_reading_duration)
         round_state = state.current_round
         await cm.broadcast(
             game_id,
@@ -445,7 +453,8 @@ async def do_after_elimination(game_id: str, session) -> None:
 
     else:
         # INTERROGATION or PROBE
-        transition_to_prompt(state, settings.prompt_duration)
+        total_duration = get_phase_duration(settings, GamePhase.PROMPT) or 55
+        transition_to_prompt(state, total_duration, settings.prompt_reading_duration)
         round_state = state.current_round
         await cm.broadcast(
             game_id,
@@ -656,14 +665,22 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
 
         # Transition to first round based on round type
         first_round_type = state.round_types[0] if state.round_types else RoundType.TASK
+        reading = settings.prompt_reading_duration
         if first_round_type == RoundType.TASK:
-            transition_to_task_prompt(state, settings.task_prompt_duration)
+            total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
+            transition_to_task_prompt(state, total, reading)
         else:
-            transition_to_prompt(state, settings.prompt_duration)
+            total = get_phase_duration(settings, GamePhase.PROMPT) or 55
+            transition_to_prompt(state, total, reading)
 
         round_state = state.current_round
         pd = get_phase_duration(
             settings, state.phase, round_state.round_type if round_state else None
+        )
+        writing_begins_at = (
+            round_state.writing_begins_at.isoformat()
+            if round_state and round_state.writing_begins_at
+            else None
         )
         await cm.broadcast(
             game_id,
@@ -674,6 +691,7 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
                 prompt_text=round_state.prompt_text if round_state else None,
                 prompt_category=round_state.prompt_category if round_state else None,
                 round_type=round_state.round_type if round_state else RoundType.TASK,
+                writing_begins_at=writing_begins_at,
             ),
         )
 

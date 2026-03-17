@@ -8,7 +8,12 @@ import random
 import structlog
 from pydantic_ai.messages import ModelMessage
 
-from backend.api.deps import get_connection_manager, get_game_repository, get_timer_manager
+from backend.api.deps import (
+    get_connection_manager,
+    get_game_repository,
+    get_settings,
+    get_timer_manager,
+)
 from backend.llm.agents import (
     AIPlayerDeps,
     decide_vote,
@@ -273,8 +278,10 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
     tasks: list[asyncio.Task] = []
 
     if phase == GamePhase.PROMPT:
+        # Offset AI answer delays past the reading period
+        reading = get_settings().prompt_reading_duration
         for player in ai_players:
-            delay = random.uniform(3, 15)
+            delay = random.uniform(reading + 3, reading + 15)
             tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.NOMINATE:

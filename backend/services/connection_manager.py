@@ -22,6 +22,8 @@ class ConnectionManager:
         self._locks: dict[str, asyncio.Lock] = {}
         # game_id -> deque of recent events (for reconnection replay)
         self._event_logs: dict[str, deque[GameEvent]] = {}
+        # game_id -> full event list (for game recording)
+        self._recordings: dict[str, list[GameEvent]] = {}
 
     def get_lock(self, game_id: str) -> asyncio.Lock:
         if game_id not in self._locks:
@@ -32,6 +34,7 @@ class ConnectionManager:
         if game_id not in self._connections:
             self._connections[game_id] = {}
             self._event_logs[game_id] = deque(maxlen=200)
+            self._recordings[game_id] = []
         queue: asyncio.Queue[GameEvent | None] = asyncio.Queue()
         self._connections[game_id][player_id] = queue
         log.info("player_connected", game_id=game_id, player_id=player_id)
@@ -46,6 +49,8 @@ class ConnectionManager:
         """Send event to all connected clients in a game and log it."""
         if game_id in self._event_logs:
             self._event_logs[game_id].append(event)
+        if game_id in self._recordings:
+            self._recordings[game_id].append(event)
         conns = self._connections.get(game_id, {})
         for pid, queue in conns.items():
             try:
@@ -79,8 +84,13 @@ class ConnectionManager:
     def get_connected_players(self, game_id: str) -> set[str]:
         return set(self._connections.get(game_id, {}).keys())
 
+    def pop_recording(self, game_id: str) -> list[GameEvent]:
+        """Return and remove the full event recording for a game."""
+        return self._recordings.pop(game_id, [])
+
     def cleanup_game(self, game_id: str) -> None:
         """Remove all data for a game."""
         self._connections.pop(game_id, None)
         self._locks.pop(game_id, None)
         self._event_logs.pop(game_id, None)
+        self._recordings.pop(game_id, None)

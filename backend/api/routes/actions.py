@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import structlog
 from fastapi import APIRouter, HTTPException
 
@@ -168,6 +170,13 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
         round_state = state.current_round
         if not round_state:
             raise HTTPException(status_code=400, detail="No active round")
+
+        # Reject answers during reading period
+        if round_state.writing_begins_at:
+            if datetime.now(UTC) < round_state.writing_begins_at:
+                raise HTTPException(
+                    status_code=400, detail="Reading period — answers not accepted yet"
+                )
 
         if req.player_id in round_state.answers:
             raise HTTPException(status_code=400, detail="Already answered")

@@ -98,9 +98,10 @@ def get_phase_duration(
 ) -> int | None:
     """Get the duration for a given phase, accounting for round-type-specific overrides."""
     if phase == GamePhase.PROMPT:
+        reading = settings.prompt_reading_duration
         if round_type == RoundType.TASK:
-            return settings.task_prompt_duration
-        return settings.prompt_duration
+            return settings.task_prompt_duration + reading
+        return settings.prompt_duration + reading
     if phase == GamePhase.CHAIN:
         return settings.chain_duration
     durations = {
@@ -199,7 +200,9 @@ def get_next_round_type(state: TellGameState) -> RoundType:
     return RoundType.TASK
 
 
-def transition_to_prompt(state: TellGameState, duration: int) -> TellGameState:
+def transition_to_prompt(
+    state: TellGameState, duration: int, reading_duration: int = 0
+) -> TellGameState:
     """Start a new round with a new prompt (Interrogation or Probe)."""
     state.round_number += 1
     idx, prompt = select_prompt(
@@ -214,18 +217,24 @@ def transition_to_prompt(state: TellGameState, duration: int) -> TellGameState:
     if state.round_types and state.round_number <= len(state.round_types):
         round_type = state.round_types[state.round_number - 1]
 
+    now = datetime.now(UTC)
     state.current_round = RoundState(
         round_number=state.round_number,
         prompt_text=prompt.text,
         prompt_category=prompt.category.value,
         round_type=round_type,
+        writing_begins_at=(
+            now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
+        ),
     )
     state.phase = GamePhase.PROMPT
-    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
+    state.phase_deadline = now + timedelta(seconds=duration)
     return state
 
 
-def transition_to_task_prompt(state: TellGameState, duration: int) -> TellGameState:
+def transition_to_task_prompt(
+    state: TellGameState, duration: int, reading_duration: int = 0
+) -> TellGameState:
     """Start a new Task round with a constrained prompt."""
     from schemas.prompts import select_task_prompt
 
@@ -237,14 +246,18 @@ def transition_to_task_prompt(state: TellGameState, duration: int) -> TellGameSt
     state.used_task_prompt_indices.append(idx)
     state.last_task_prompt_category = prompt.category.value
 
+    now = datetime.now(UTC)
     state.current_round = RoundState(
         round_number=state.round_number,
         prompt_text=prompt.text,
         prompt_category=prompt.category.value,
         round_type=RoundType.TASK,
+        writing_begins_at=(
+            now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
+        ),
     )
     state.phase = GamePhase.PROMPT
-    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
+    state.phase_deadline = now + timedelta(seconds=duration)
     return state
 
 
@@ -530,6 +543,11 @@ def build_state_sync(
         "winner": state.winner,
         "is_host": is_host,
         "my_answer": my_answer,
+        "writing_begins_at": (
+            round_state.writing_begins_at.isoformat()
+            if round_state and round_state.writing_begins_at
+            else None
+        ),
         "chain_rounds": chain_rounds,
         "current_sub_round": current_sub_round,
     }

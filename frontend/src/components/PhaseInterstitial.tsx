@@ -5,6 +5,7 @@ interface PhaseInterstitialProps {
   roundNumber: number;
   roundType: string | null;
   fading: boolean;
+  isRoundStart?: boolean;
 }
 
 const DIRECTIVES: Partial<Record<GamePhase, { text: string; subtitle?: string }>> = {
@@ -19,13 +20,16 @@ export function PhaseInterstitial({
   roundNumber,
   roundType,
   fading,
+  isRoundStart = false,
 }: PhaseInterstitialProps) {
   let text: string;
   let subtitle: string | undefined;
 
-  if (phase === "prompt") {
+  if (phase === "prompt" || phase === "chain") {
     text = `ROUND ${roundNumber}`;
-    subtitle = roundType?.toUpperCase() || undefined;
+    subtitle = phase === "chain"
+      ? "WORD CHAIN"
+      : roundType?.toUpperCase() || undefined;
   } else if (phase === "question") {
     text = roundType === "interrogation" ? "INTERROGATION" : "CROSS-EXAMINE";
   } else {
@@ -46,7 +50,25 @@ export function PhaseInterstitial({
       >
         {text}
       </p>
-      {subtitle && (
+      {isRoundStart && subtitle && !fading && (
+        <>
+          <hr
+            className="animate-line-draw border-none"
+            style={{
+              animationDelay: "1s",
+              height: "1px",
+              background: "var(--rule)",
+            }}
+          />
+          <p
+            className="animate-reveal-expand font-system text-[0.7rem] text-cold tracking-[0.25em] uppercase"
+            style={{ animationDelay: "1.5s" }}
+          >
+            {subtitle}
+          </p>
+        </>
+      )}
+      {!isRoundStart && subtitle && (
         <p className="font-system text-[0.7rem] text-cold tracking-[0.25em] uppercase">
           {subtitle}
         </p>

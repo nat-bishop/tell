@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   useGameStore,
   type PlayerInfo,
@@ -10,18 +10,27 @@ import { castVote } from "@/api/actions";
 import { AnswerCard } from "./AnswerCard";
 import { SystemText } from "./SystemText";
 
+function shuffleArray<T>(arr: T[]): T[] {
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
 function PlayerCard({
   player,
   voted,
   canVote,
   onToggle,
-  delay,
+  disabled,
 }: {
   player: PlayerInfo;
   voted: boolean;
   canVote: boolean;
   onToggle: () => void;
-  delay: number;
+  disabled: boolean;
 }) {
   const answer = useGameStore((s) => s.answers[player.id]);
   const questions = useGameStore((s) => s.questions);
@@ -41,9 +50,9 @@ function PlayerCard({
       answer={answer}
       highlighted={voted}
       showVotedLabel={voted}
-      delay={delay}
       as={canVote ? "button" : "div"}
       onClick={onToggle}
+      disabled={disabled}
     >
       {questionText && (
         <div className="mt-3 pt-3 border-t border-rule">
@@ -75,23 +84,23 @@ function WordChainCard({
   voted,
   canVote,
   onToggle,
-  delay,
+  disabled,
 }: {
   player: PlayerInfo;
   chainRounds: ChainRoundData[];
   voted: boolean;
   canVote: boolean;
   onToggle: () => void;
-  delay: number;
+  disabled: boolean;
 }) {
   return (
     <AnswerCard
       alias={player.alias}
       highlighted={voted}
       showVotedLabel={voted}
-      delay={delay}
       as={canVote ? "button" : "div"}
       onClick={onToggle}
+      disabled={disabled}
     >
       <div className="flex flex-col gap-1">
         {chainRounds.map((cr, i) => {
@@ -132,6 +141,41 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   const aliveCount = alivePlayers.length;
   const maxVotes = Math.min(3, Math.max(1, aliveCount - 1));
 
+  // Randomized reveal order — shuffled once on mount
+  const revealOrder = useMemo(() => shuffleArray(alivePlayers), [aliveCount]);
+
+  // Spotlight reveal state
+  const [revealedCount, setRevealedCount] = useState(0);
+  const revealInterval = useMemo(
+    () => Math.max(1000, 1500 - (aliveCount - 5) * 100),
+    [aliveCount],
+  );
+
+  useEffect(() => {
+    if (revealedCount >= aliveCount) return;
+
+    // Reveal first card immediately
+    if (revealedCount === 0) {
+      setRevealedCount(1);
+      return;
+    }
+
+    const timer = setTimeout(() => setRevealedCount((c) => c + 1), revealInterval);
+
+    return () => clearTimeout(timer);
+  }, [revealedCount, aliveCount, revealInterval]);
+
+  const allRevealed = revealedCount >= aliveCount;
+
+  // Build a set of revealed player IDs for quick lookup
+  const revealedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < revealedCount && i < revealOrder.length; i++) {
+      ids.add(revealOrder[i].id);
+    }
+    return ids;
+  }, [revealedCount, revealOrder]);
+
   const [selected, setSelected] = useState<string[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -153,6 +197,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   }, []);
 
   const toggleVote = (pid: string) => {
+    if (!allRevealed) return;
     const prev = selected;
     let next: string[];
     if (prev.includes(pid)) {
@@ -172,10 +217,6 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <p className="text-center font-system text-[0.9rem] text-ink tracking-[0.15em] uppercase">
-        {spectator ? "REVIEW" : "IDENTIFY HUMAN"}
-      </p>
-
       {isTask && promptText && (
         <p className="text-center font-literary text-[1rem] italic leading-[1.6] text-dim">
           the task was: {promptText}
@@ -195,8 +236,14 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {alivePlayers.map((p, i) =>
-          isWordChain ? (
+        {alivePlayers.map((p) => {
+          const isRevealed = revealedIds.has(p.id);
+          if (!isRevealed) {
+            return (
+              <div key={p.id} className="card-placeholder p-5 h-full min-h-[100px]" />
+            );
+          }
+          return isWordChain ? (
             <WordChainCard
               key={p.id}
               player={p}
@@ -204,7 +251,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
               voted={selected.includes(p.id)}
               canVote={!spectator && p.id !== playerId}
               onToggle={() => toggleVote(p.id)}
-              delay={i * 80}
+              disabled={!allRevealed}
             />
           ) : (
             <PlayerCard
@@ -213,37 +260,48 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
               voted={selected.includes(p.id)}
               canVote={!spectator && p.id !== playerId}
               onToggle={() => toggleVote(p.id)}
-              delay={i * 80}
+              disabled={!allRevealed}
             />
-          ),
-        )}
+          );
+        })}
       </div>
 
-      {!spectator ? (
-        <div className="flex items-center justify-between">
-          {/* Vote dots */}
-          <div className="flex items-center gap-2">
-            {Array.from({ length: maxVotes }).map((_, i) => (
-              <span
-                key={i}
-                className={`inline-block w-2.5 h-2.5 rounded-full transition-all duration-200 ${
-                  i < selected.length
-                    ? "scale-110"
-                    : "border border-rule"
-                }`}
-                style={i < selected.length ? {
-                  backgroundColor: 'var(--warm)',
-                  boxShadow: '0 0 8px var(--glow)',
-                } : undefined}
-              />
-            ))}
-          </div>
-          <SystemText>
-            {voteCount} of {voteTotalCount} voted
-          </SystemText>
-        </div>
-      ) : (
-        <SystemText>voting in progress</SystemText>
+      {allRevealed && (
+        <>
+          {!spectator ? (
+            <div className="animate-fade-in flex flex-col gap-3">
+              <p className="animate-reveal-expand text-center font-system text-[0.9rem] text-ink tracking-[0.15em] uppercase">
+                IDENTIFY HUMAN
+              </p>
+              <div className="flex items-center justify-between">
+                {/* Vote dots */}
+                <div className="flex items-center gap-2">
+                  {Array.from({ length: maxVotes }).map((_, i) => (
+                    <span
+                      key={i}
+                      className={`inline-block w-2.5 h-2.5 rounded-full transition-all duration-200 ${
+                        i < selected.length
+                          ? "scale-110"
+                          : "border border-rule"
+                      }`}
+                      style={i < selected.length ? {
+                        backgroundColor: 'var(--warm)',
+                        boxShadow: '0 0 8px var(--glow)',
+                      } : undefined}
+                    />
+                  ))}
+                </div>
+                <SystemText>
+                  {voteCount} of {voteTotalCount} voted
+                </SystemText>
+              </div>
+            </div>
+          ) : (
+            <div className="animate-fade-in">
+              <SystemText>voting in progress</SystemText>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

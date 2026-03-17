@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cormorant, Cormorant_SC, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -23,6 +23,10 @@ const ibmPlexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "tell",
   description: "a game of words and suspicion",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0F1114",
 };
 
 export default function RootLayout({

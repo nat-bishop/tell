@@ -87,6 +87,8 @@ const INTERSTITIAL_PHASES = new Set<GamePhase>([
   "prompt", "nominate", "question", "respond", "review", "elimination", "chain",
 ]);
 
+const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "chain"]);
+
 const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   prompt: 45,
   nominate: 15,
@@ -108,6 +110,7 @@ function GameContent() {
   // Phase interstitial state
   const [showInterstitial, setShowInterstitial] = useState(false);
   const [interstitialFading, setInterstitialFading] = useState(false);
+  const [isRoundStart, setIsRoundStart] = useState(false);
   const prevPhaseRef = useRef(phase);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -127,19 +130,25 @@ function GameContent() {
       return;
     }
 
+    const roundStart = ROUND_START_PHASES.has(phase);
+    setIsRoundStart(roundStart);
     setShowInterstitial(true);
     setInterstitialFading(false);
 
+    // Round starts get a longer hold (5s) for staggered visual beats
+    const holdMs = roundStart ? 5000 : 1200;
+    const removeMs = holdMs + 300;
+
     // Start fade-out after hold period
     timersRef.current.push(
-      setTimeout(() => setInterstitialFading(true), 1200),
+      setTimeout(() => setInterstitialFading(true), holdMs),
     );
     // Remove interstitial after fade-out completes
     timersRef.current.push(
       setTimeout(() => {
         setShowInterstitial(false);
         setInterstitialFading(false);
-      }, 1500),
+      }, removeMs),
     );
 
     return clearTimers;
@@ -160,6 +169,7 @@ function GameContent() {
             roundNumber={roundNumber}
             roundType={roundType}
             fading={interstitialFading}
+            isRoundStart={isRoundStart}
           />
         ) : (
           <>

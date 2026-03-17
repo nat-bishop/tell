@@ -1,83 +1,101 @@
 ---
 name: seed-game
 description: >
-  Seeds a Tell game with a specific state for debugging and testing.
-  Translates natural language scenarios into valid TellGameState JSON
-  and POSTs to the backend debug endpoint. Use when the user wants to
-  set up a game scenario, inject test state, create a debug game, or
-  skip to a specific game phase.
+  Seeds a Tell game at any phase for debugging and testing.
+  Translates natural language scenarios into valid game state
+  and injects it via the debug endpoint. Handles all three round
+  types (Task, Interrogation, Word Chain) and all phases including
+  the CHAIN sub-round system. Triggers when testing a game phase,
+  debugging UI rendering, setting up a test scenario, checking how
+  voting or elimination works, or skipping to a specific game state.
 ---
 
 # Seed Game
 
-Inject a game at any phase into the running dev server. Describe the scenario in plain English — this skill builds valid state JSON and POSTs it.
+Inject a game at any phase into the running dev server. Describe the scenario in plain English — a bundled script builds valid state JSON and this skill POSTs it.
+
+## Prerequisites
+
+- Server running (`make dev` or `make backend`)
+- `TELL_LOG_LEVEL=DEBUG` set in `.env` (this enables the `/debug/seed` endpoint)
 
 ## Workflow
 
 1. Parse `$ARGUMENTS` for the desired scenario
-2. Read [references/game-state-schema.md](references/game-state-schema.md) for the full schema, valid values, and JSON template
-3. Generate a complete `TellGameState` JSON object following the template
-4. POST to the debug endpoint:
+2. Translate to CLI args for the generator script (see mapping below)
+3. Run the script from the project root:
 
 ```bash
-curl -s -X POST http://localhost:8501/debug/seed \
-  -H "Content-Type: application/json" \
-  -d '{"state": <JSON>, "start_timers": true, "trigger_ai": true}'
+python .claude/skills/seed-game/scripts/generate_seed.py [args]
 ```
 
-5. If the response is a 422, read the error, fix the JSON, and retry
-6. Report the result including the game URL
-7. Suggest using Playwright MCP to open the page and test interactions
+4. Capture the JSON output
+5. POST it to `http://localhost:8501/debug/seed`:
 
-## Critical invariants
-
-- **Player IDs**: humans = 12-char lowercase hex (`a1b2c3d4e5f6`), AI = `ai-` + 8-char hex (`ai-1a2b3c4d`)
-- **Aliases**: `PREFIX-NUMBER` where PREFIX is from [UNIT, BOT, NODE, BYTE, CORE, CHIP, WIRE, FLUX, GRID, NANO, PING, PORT, HASH, LOOP, NULL] and NUMBER is 1-99. All aliases unique.
-- **Exactly one** human player has `is_host: true`
-- If phase is not `lobby`: `current_round` must exist, `round_number` must match `current_round.round_number`
-- **`round_types`**: list of `max_rounds` entries, alternating `"probe"` / `"interrogation"` starting with `"probe"`
-- **`used_prompt_indices`**: length equals `round_number`, values are valid prompt indices (0-29)
-- **`last_prompt_category`**: matches the category of the prompt at `used_prompt_indices[-1]`
-- **Eliminated players**: `is_alive: false`, `eliminated_round` set, must NOT appear in current round's `answers` or `votes`
-- **`phase_deadline`**: set to `null` — the endpoint calculates it when `start_timers: true`
-- See the schema reference for phase-specific data requirements
-
-## Defaults
-
-When the user doesn't specify, use:
-- 3 humans, 2 AI players
-- Round 1, probe type
-- Prompt index 0 ("Describe the last time you felt something you couldn't name.", category "emotional")
-- `start_timers: true`, `trigger_ai: true`
-- `max_rounds: 3`
-
-## Examples
-
-**Input**: `game in prompt phase`
-
-**Output**: POST succeeds, report:
-```
-Seeded game `a1b2c3d4` in prompt phase with 5 players (3 human, 2 AI).
-Open: http://localhost:3500/game/a1b2c3d4
+```bash
+python .claude/skills/seed-game/scripts/generate_seed.py [args] | curl -s -X POST http://localhost:8501/debug/seed -H "Content-Type: application/json" -d @-
 ```
 
-**Input**: `review phase, 4 players, round 2, one eliminated`
+6. If the response is a 422, read the validation error, fix the args, and retry
+7. Report the game URL and suggest connecting as a player
 
-**Output**: POST succeeds, report:
+## Translating requests to script args
+
+The script accepts `--phase`, `--round`, `--humans`, `--ai`, `--eliminated`, `--no-timers`, `--no-ai`, `--sub-round`, `--round-type`, `--winner`. All optional with sensible defaults (prompt phase, round 1, 3 humans, 2 AI).
+
+| User says | Script args |
+|-----------|------------|
+| "prompt phase" / "game in prompt" | `--phase prompt` (default) |
+| "review phase" | `--phase review` |
+| "round 2" / "second round" | `--round 2` |
+| "one eliminated" / "someone dead" | `--eliminated 1` |
+| "frozen" / "for screenshots" / "don't advance" | `--no-timers --no-ai` |
+| "word chain mid-round" / "chain phase" | `--phase chain --round 3` (round 3 is first word_chain) |
+| "4 sub-rounds done" | `--sub-round 4` |
+| "late game" / "almost over" | `--round 3 --eliminated 2` |
+| "game over, AI wins" | `--phase game_over --winner ai` |
+| "interrogation review" | `--phase review --round 2` (round 2 is first interrogation) |
+| "no AI behavior" / "humans only" | `--no-ai` |
+| "4 humans, 3 AI" | `--humans 4 --ai 3` |
+
+The round type is auto-determined from the round number using the cycle: round 1 = Task, round 2 = Interrogation, round 3 = Word Chain, round 4 = Task, etc. Override with `--round-type` if needed.
+
+## Controlling timers and AI
+
+| Intent | Flags |
+|--------|-------|
+| Full flow (phase auto-advances, AI acts) | _(default)_ |
+| Freeze phase for UI inspection / screenshots | `--no-timers --no-ai` |
+| Watch AI behavior only | _(default)_ |
+| Test human interactions, no AI interference | `--no-ai` |
+
+## Connecting as a player
+
+After seeding, no browser is authenticated as any player. The frontend stores identity in `sessionStorage` key `tell-{game_id}` as `{"playerId": "<id>", "alias": "<alias>"}`.
+
+To connect as a specific human player, use Playwright:
+
 ```
-Seeded game `f00dcafe` in review phase, round 2.
-4 players (2 human, 2 AI), 1 eliminated in round 1.
-Open: http://localhost:3500/game/f00dcafe
+1. browser_navigate to http://localhost:3500/game/{game_id}
+2. browser_evaluate: sessionStorage.setItem('tell-{game_id}', JSON.stringify({playerId: '<player_id>', alias: '<alias>'}))
+3. browser_evaluate: location.reload()
 ```
 
-## After seeding
+Pick the player_id and alias from the script's JSON output (first human player is usually the simplest choice).
 
-Tell the user the game URL and suggest:
-- Open the URL in a browser to see the game
-- Use `mcp__plugin_playwright_playwright__browser_navigate` to open the page programmatically
-- Use `mcp__plugin_playwright_playwright__browser_snapshot` to verify the rendered state
+## Edge cases
+
+The script validates impossible combinations and exits with clear error messages:
+- Task rounds (1, 4, 7...) have no Q&A phases — no nominate/question/respond
+- CHAIN phase only exists in word_chain rounds (3, 6, 9...)
+- Can't eliminate more players than completed rounds (one elimination per round)
+- Need at least 3 total players, at least 2 alive
+
+## Customization beyond the script
+
+For specific answer text, custom player names, or unusual scenarios not covered by the script args: generate baseline JSON from the script, then modify the output before POSTing. See [references/game-state-schema.md](references/game-state-schema.md) for the full state structure.
 
 ## Errors
 
-- **404**: `TELL_DEBUG` is not set to `true`, or the server is not running
-- **422**: Invalid state JSON — read the validation error, fix, and retry
+- **404**: `TELL_LOG_LEVEL` is not `DEBUG` in `.env`, or server not running
+- **422**: Invalid state JSON — read the validation error, fix, retry

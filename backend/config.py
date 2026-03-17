@@ -43,6 +43,9 @@ class Settings:
         self.task_prompt_duration: int = int(
             os.environ.get("TELL_TASK_PROMPT_DURATION", game.get("task_prompt_duration", 25))
         )
+        self.prompt_reading_duration: int = int(
+            os.environ.get("TELL_PROMPT_READING_DURATION", game.get("prompt_reading_duration", 10))
+        )
         self.question_duration: int = int(
             os.environ.get("TELL_QUESTION_DURATION", game.get("question_duration", 25))
         )
@@ -73,6 +76,12 @@ class Settings:
         self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 10)))
         self.min_ai: int = int(os.environ.get("TELL_MIN_AI", game.get("min_ai", 1)))
         self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 3)))
+
+        # Recording
+        self.record_games: bool = (
+            os.environ.get("TELL_RECORD_GAMES", str(game.get("record_games", True))).lower()
+            in ("true", "1", "yes")
+        )
 
         # Observability
         self.logfire_enabled: bool = (
