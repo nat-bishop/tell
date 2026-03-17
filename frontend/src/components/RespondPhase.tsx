@@ -105,11 +105,11 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
     <div className="flex flex-col gap-6 pt-4">
       {/* Show the question */}
       <div>
-        <SystemText>
+        <p className="font-literary text-[1.1rem] text-ink">
           {roundType === "interrogation"
             ? "the group asks"
             : "anonymous question"}
-        </SystemText>
+        </p>
         <p className="mt-2 font-literary text-[1.1rem] italic leading-[1.6] text-ink">
           {questionText}
         </p>
@@ -138,19 +138,24 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
             <button
               onClick={handleSubmit}
               disabled={!response.trim()}
-              className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
+              className="btn-action"
             >
               respond &rarr;
             </button>
           </div>
         </div>
       ) : (
-        <>
-          <SystemText>response submitted</SystemText>
-          <SystemText>
-            {responseCount} of {responseTotal} responded
-          </SystemText>
-        </>
+        <div className="animate-fade-in">
+          <p className="font-literary text-[1.05rem] leading-[1.55] text-ink border-l-2 border-rule pl-4">
+            {response}
+          </p>
+          <div className="mt-3 flex items-center justify-between">
+            <SystemText>response submitted</SystemText>
+            <SystemText>
+              {responseCount} of {responseTotal} responded
+            </SystemText>
+          </div>
+        </div>
       )}
     </div>
   );

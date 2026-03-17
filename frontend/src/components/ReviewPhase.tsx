@@ -36,6 +36,7 @@ function PlayerCard({
       alias={player.alias}
       answer={answer}
       highlighted={voted}
+      showVotedLabel={voted}
       delay={delay}
       as={canVote ? "button" : "div"}
       onClick={onToggle}
@@ -109,10 +110,12 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <SystemText>{spectator ? "review" : "who is human?"}</SystemText>
+      <p className="text-center font-literary text-[1.1rem] text-ink">
+        {spectator ? "review" : "who is human?"}
+      </p>
 
       {promptText && (
-        <p className="text-center font-literary text-[1.1rem] italic leading-[1.6] text-dim">
+        <p className="text-center font-literary text-[1rem] italic leading-[1.6] text-dim">
           {promptText}
         </p>
       )}
@@ -132,9 +135,19 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
 
       {!spectator ? (
         <div className="flex items-center justify-between">
-          <SystemText>
-            {selected.length} of {maxVotes} votes cast
-          </SystemText>
+          {/* Vote dots */}
+          <div className="flex items-center gap-2">
+            {Array.from({ length: maxVotes }).map((_, i) => (
+              <span
+                key={i}
+                className={`inline-block w-2 h-2 rounded-full transition-all duration-200 ${
+                  i < selected.length
+                    ? "bg-warm scale-110"
+                    : "border border-rule"
+                }`}
+              />
+            ))}
+          </div>
           <SystemText>
             {voteCount} of {voteTotalCount} voted
           </SystemText>

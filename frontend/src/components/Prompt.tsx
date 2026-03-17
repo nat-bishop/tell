@@ -65,18 +65,25 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
             </SystemText>
             <button
               onClick={handleSubmit}
-              className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70"
+              className="btn-action"
             >
               submit &rarr;
             </button>
           </div>
         </div>
       ) : (
-        <div className="w-full max-w-md">
-          <SystemText>answer submitted</SystemText>
-          <SystemText>
-            {answerCount} of {totalCount} answered
-          </SystemText>
+        <div className="w-full max-w-md animate-fade-in">
+          <div className="border border-rule p-5">
+            <p className="font-literary text-[1.05rem] leading-[1.55] text-ink">
+              {answer || myAnswer}
+            </p>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <SystemText>submitted</SystemText>
+            <SystemText>
+              {answerCount} of {totalCount} answered
+            </SystemText>
+          </div>
         </div>
       )}
     </div>

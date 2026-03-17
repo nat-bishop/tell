@@ -71,7 +71,9 @@ export function NominatePhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <SystemText>who should be interrogated?</SystemText>
+      <p className="text-center font-literary text-[1.1rem] text-ink">
+        who should be interrogated?
+      </p>
 
       {promptText && (
         <p className="text-center font-literary text-[1.1rem] italic leading-[1.6] text-dim">
@@ -100,7 +102,7 @@ export function NominatePhase({ spectator = false }: { spectator?: boolean }) {
         {!submitted && selected && (
           <button
             onClick={handleNominate}
-            className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70"
+            className="btn-action"
           >
             nominate &rarr;
           </button>

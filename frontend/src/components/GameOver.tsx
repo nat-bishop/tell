@@ -1,16 +1,8 @@
 "use client";
 
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore, type RevealedPlayer } from "@/hooks/useGameStore";
 import { createGame } from "@/api/actions";
 import { useRouter } from "next/navigation";
-
-interface RevealedPlayer {
-  id: string;
-  alias: string;
-  role: string;
-  is_alive: boolean;
-  eliminated_round?: number;
-}
 
 export function GameOver() {
   const { winner, revealedPlayers } = useGameStore();
@@ -21,20 +13,34 @@ export function GameOver() {
     router.push(`/game/${res.game_id}`);
   };
 
+  // Sort: eliminated first (by round), then survivors
+  const sorted = [...(revealedPlayers || [])].sort(
+    (a, b) => {
+      if (!a.is_alive && b.is_alive) return -1;
+      if (a.is_alive && !b.is_alive) return 1;
+      if (!a.is_alive && !b.is_alive)
+        return (a.eliminated_round || 0) - (b.eliminated_round || 0);
+      return 0;
+    },
+  );
+
+  const totalPlayers = sorted.length;
+
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-10">
-      <p className="animate-fade-in font-literary text-[1.5rem] text-ink">
+      <p className="animate-elimination-reveal font-literary text-[1.5rem] text-ink">
         {winner === "ai" ? "the machines win." : "humanity survives."}
       </p>
 
       <div className="flex flex-col gap-3">
-        {(revealedPlayers as RevealedPlayer[] | null)?.map((p) => (
+        {sorted.map((p, i) => (
           <div
             key={p.id}
             className="flex items-center gap-4 min-h-[44px] animate-fade-in"
+            style={{ animationDelay: `${(i * 400) + 1000}ms` }}
           >
             <span
-              className={`w-24 font-literary-sc text-[0.9rem] tracking-[0.08em] ${p.is_alive ? 'text-ink' : 'text-dim'}`}
+              className={`w-24 font-literary-sc text-[0.9rem] tracking-[0.08em] ${p.is_alive ? 'text-ink' : 'text-dim line-through'}`}
             >
               {p.alias}
             </span>
@@ -45,7 +51,7 @@ export function GameOver() {
             </span>
             {!p.is_alive && (
               <span className="font-system text-[0.7rem] text-dim">
-                (voted off, round {p.eliminated_round})
+                round {p.eliminated_round}
               </span>
             )}
           </div>
@@ -54,7 +60,8 @@ export function GameOver() {
 
       <button
         onClick={handlePlayAgain}
-        className="font-literary text-[1.1rem] text-ink transition-opacity hover:opacity-70"
+        className="btn-action animate-fade-in"
+        style={{ animationDelay: `${(totalPlayers * 400) + 2000}ms` }}
       >
         play again &rarr;
       </button>

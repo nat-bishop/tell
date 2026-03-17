@@ -5,6 +5,7 @@ interface AnswerCardProps {
   answer?: string;
   highlighted?: boolean;
   label?: string;
+  showVotedLabel?: boolean;
   delay?: number;
   children?: React.ReactNode;
   as?: "button" | "div";
@@ -17,6 +18,7 @@ export function AnswerCard({
   answer,
   highlighted = false,
   label,
+  showVotedLabel = false,
   delay = 0,
   children,
   as = "div",
@@ -40,7 +42,7 @@ export function AnswerCard({
       {children}
 
       {/* Attribution — name pinned to bottom */}
-      <div className="mt-auto pt-3 border-t border-rule">
+      <div className="mt-auto pt-3 border-t border-rule flex items-baseline justify-between">
         <div
           className={`font-literary-sc text-[0.8rem] tracking-[0.08em] ${
             highlighted ? "text-warm" : "text-dim"
@@ -49,8 +51,13 @@ export function AnswerCard({
           {alias}
         </div>
         {label && (
-          <div className="mt-0.5 font-system text-[0.65rem] text-warm">
+          <div className="font-system text-[0.65rem] text-warm">
             {label}
+          </div>
+        )}
+        {showVotedLabel && (
+          <div className="font-system text-[0.65rem] text-warm">
+            voted
           </div>
         )}
       </div>
@@ -58,7 +65,7 @@ export function AnswerCard({
   );
 
   const baseClass = `border p-5 h-full animate-fade-in transition-colors duration-150 ${
-    !highlighted ? "border-rule" : ""
+    !highlighted ? "border-rule" : "animate-vote-select"
   }`;
   const style = {
     animationDelay: delay ? `${delay}ms` : undefined,
