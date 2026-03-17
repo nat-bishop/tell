@@ -36,7 +36,8 @@
       "Bash(make lint:*)",
       "Bash(make test:*)",
       "WebFetch(domain:ai.pydantic.dev)",
-      "Skill(commit-commands:commit)"
+      "Skill(commit-commands:commit)",
+      "WebFetch(domain:humanornot.so)"
     ]
   }
 }

@@ -1,11 +1,7 @@
-export const BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || "/api";
-
-// SSE (EventSource) must bypass the Next.js proxy which buffers responses.
-// In production, SSE hits the same origin; in dev, it needs the direct backend URL.
-export const SSE_URL =
-  process.env.NEXT_PUBLIC_SSE_URL ||
-  (BASE_URL === "/api" ? "http://localhost:8501" : BASE_URL);
+// Backend URL — used for both REST (fetch) and SSE (EventSource).
+// In dev, defaults to the local backend. In production, set via env var.
+export const API_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8501";
 
 export class ApiError extends Error {
   constructor(
@@ -21,7 +17,7 @@ export async function apiFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
+  const res = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json", ...options?.headers },
     ...options,
   });

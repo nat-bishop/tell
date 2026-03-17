@@ -70,7 +70,7 @@ frontend/src/
   api/actions.ts           Typed POST helpers (incl. submitChainWord, matchmaking)
   api/events.ts            SSE client with typed event routing
   api/matchmaking-events.ts  SSE client for matchmaking lobby (LobbyStatus, GameAssigned)
-  api/client.ts            Base fetch wrapper
+  api/client.ts            API_URL config + base fetch wrapper
 ```
 
 ## Running
@@ -93,9 +93,13 @@ Dependencies auto-install via sentinel files when `pyproject.toml` or `package.j
 
 Copy `.env.example` → `.env` and set `GOOGLE_API_KEY`. AI model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
+Frontend env var:
+- `NEXT_PUBLIC_API_URL` — backend URL for REST + SSE (default: `http://localhost:8501`). In production behind a reverse proxy, set to the backend origin or `/api`.
+
 Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_LOG_LEVEL=DEBUG` — enables debug logging **and** mounts debug routes (`/debug/seed`, etc.)
 - `TELL_LOGFIRE_ENABLED=true` — Pydantic Logfire tracing
+- `TELL_CORS_ORIGINS` — comma-separated allowed origins (default: `*`). Set for production.
 - `TELL_MM_MIN_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
 - `TELL_CHAIN_DURATION`, `TELL_CHAIN_SUB_ROUND_DURATION`, `TELL_CHAIN_SUB_ROUNDS` — word chain timing
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
@@ -150,7 +154,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 
 ## Gotchas
 
-- **Ports**: Backend defaults to **8501**. Frontend runs on **3500**. Next.js rewrites `/api/*` → backend via `next.config.ts`.
+- **Ports**: Backend defaults to **8501**. Frontend runs on **3500**. Frontend talks directly to backend (no proxy) — CORS allows it.
 - **Windows process cleanup**: `uv run uvicorn --reload` spawns a process tree (uv → reloader → worker). `make down` and the `dev` trap use `taskkill /F /T /PID` to kill the full tree; plain `kill` leaves child processes as zombies holding the port.
 - **`from __future__ import annotations`** used in all Python files. Use `datetime.now(UTC)`, never `datetime.utcnow()`.
 - **`schemas/` is top-level**: Imported by both `backend/` and `scripts/`. Don't nest under `backend/`.
