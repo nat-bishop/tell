@@ -21,12 +21,14 @@ from backend.services.game_logic import (
     resolve_nominations,
     resolve_votes,
     sanitize_players_for_client,
+    select_chain_next_word,
     select_round_types,
     transition_to_elimination,
     transition_to_prompt,
     transition_to_question,
     transition_to_respond,
     transition_to_review,
+    transition_to_task_prompt,
     validate_player_alive,
 )
 from schemas.constants import NO_RESPONSE
@@ -37,7 +39,6 @@ from schemas.game_state import (
     RoundType,
 )
 from tests.factories import make_game_state, make_player, make_round_state, make_standard_game
-
 
 # ---------------------------------------------------------------------------
 # Player queries
@@ -269,19 +270,19 @@ class TestPhaseTransitions:
     def test_transition_to_prompt(self):
         state, _ = make_standard_game()
         state.round_number = 0
-        state.round_types = [RoundType.PROBE, RoundType.INTERROGATION]
+        state.round_types = [RoundType.INTERROGATION, RoundType.TASK]
 
         result = transition_to_prompt(state, 45)
         assert result.phase == GamePhase.PROMPT
         assert result.round_number == 1
         assert result.current_round is not None
-        assert result.current_round.round_type == RoundType.PROBE
+        assert result.current_round.round_type == RoundType.INTERROGATION
         assert result.phase_deadline is not None
 
     def test_transition_to_prompt_respects_round_types(self):
         state, _ = make_standard_game()
         state.round_number = 1
-        state.round_types = [RoundType.PROBE, RoundType.INTERROGATION, RoundType.PROBE]
+        state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
 
         result = transition_to_prompt(state, 45)
         assert result.round_number == 2
@@ -303,14 +304,29 @@ class TestPhaseTransitions:
         assert result.phase_deadline is not None
 
     def test_select_round_types(self):
-        types = select_round_types(5)
+        types = select_round_types(6)
         assert types == [
-            RoundType.PROBE,
+            RoundType.TASK,
             RoundType.INTERROGATION,
-            RoundType.PROBE,
+            RoundType.WORD_CHAIN,
+            RoundType.TASK,
             RoundType.INTERROGATION,
-            RoundType.PROBE,
+            RoundType.WORD_CHAIN,
         ]
+
+    def test_select_round_types_no_probe(self):
+        types = select_round_types(9)
+        assert RoundType.PROBE not in types
+
+    def test_transition_to_task_prompt(self):
+        state, _ = make_standard_game()
+        state.round_number = 0
+        result = transition_to_task_prompt(state, 25)
+        assert result.phase == GamePhase.PROMPT
+        assert result.round_number == 1
+        assert result.current_round is not None
+        assert result.current_round.round_type == RoundType.TASK
+        assert result.current_round.prompt_text is not None
 
 
 # ---------------------------------------------------------------------------
@@ -480,9 +496,7 @@ class TestQuestionResponseEligibility:
         q1 = QuestionEntry(
             questioner_id="h1", target_id="h2", target_alias="B", question="Q", response="R"
         )
-        q2 = QuestionEntry(
-            questioner_id="h2", target_id="a1", target_alias="C", question="Q"
-        )
+        q2 = QuestionEntry(questioner_id="h2", target_id="a1", target_alias="C", question="Q")
         rs = make_round_state(round_type=RoundType.PROBE, questions=[q1, q2])
         responded, total = count_responses(rs)
         assert responded == 1
@@ -506,9 +520,7 @@ class TestQuestionResponseEligibility:
         assert total == 1
 
     def test_count_responses_interrogation_no_response(self):
-        q1 = QuestionEntry(
-            questioner_id="h1", target_id="nominee", target_alias="N", question="Q"
-        )
+        q1 = QuestionEntry(questioner_id="h1", target_id="nominee", target_alias="N", question="Q")
         rs = make_round_state(
             round_type=RoundType.INTERROGATION,
             nominated_id="nominee",
@@ -517,3 +529,63 @@ class TestQuestionResponseEligibility:
         responded, total = count_responses(rs)
         assert responded == 0
         assert total == 1
+
+
+# ---------------------------------------------------------------------------
+# Word Chain seed selection
+# ---------------------------------------------------------------------------
+
+
+class TestSelectChainNextWord:
+    def test_prefers_unique_word(self):
+        responses = {"p1": "wave", "p2": "wave", "p3": "tide"}
+        # "tide" is unique (only p3), should be preferred
+        for _ in range(20):
+            word, pid = select_chain_next_word(responses)
+            assert word == "tide"
+            assert pid == "p3"
+
+    def test_all_same_word(self):
+        responses = {"p1": "wave", "p2": "wave", "p3": "wave"}
+        word, pid = select_chain_next_word(responses)
+        assert word == "wave"
+        assert pid in ("p1", "p2", "p3")
+
+    def test_multiple_unique_words(self):
+        responses = {"p1": "tide", "p2": "shore", "p3": "surf"}
+        # All unique — should pick randomly among them
+        word, pid = select_chain_next_word(responses)
+        assert word in ("tide", "shore", "surf")
+
+    def test_empty_responses(self):
+        word, pid = select_chain_next_word({})
+        assert word == ""
+        assert pid is None
+
+    def test_case_insensitive(self):
+        responses = {"p1": "Wave", "p2": "WAVE", "p3": "tide"}
+        word, pid = select_chain_next_word(responses)
+        # "wave" appears twice (case-insensitive), "tide" is unique
+        assert word == "tide"
+
+
+# ---------------------------------------------------------------------------
+# Task prompt selection
+# ---------------------------------------------------------------------------
+
+
+class TestTaskPrompts:
+    def test_task_prompt_separate_from_interrogation(self):
+        """Task and interrogation prompts use separate used_indices."""
+        state, _ = make_standard_game()
+        state.round_number = 0
+
+        # Use task prompt
+        result = transition_to_task_prompt(state, 25)
+        assert len(result.used_task_prompt_indices) == 1
+        assert len(result.used_prompt_indices) == 0  # regular prompts untouched
+
+        # Use interrogation prompt
+        result2 = transition_to_prompt(result, 45)
+        assert len(result2.used_task_prompt_indices) == 1  # task indices untouched
+        assert len(result2.used_prompt_indices) == 1

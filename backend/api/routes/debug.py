@@ -8,6 +8,7 @@ import structlog
 from fastapi import APIRouter
 
 from backend.api.deps import get_game_repository, get_settings
+from backend.services.game_logic import get_phase_duration
 from schemas.api_models import SeedGameRequest
 from schemas.game_state import GamePhase, PlayerRole
 
@@ -28,15 +29,8 @@ async def seed_game(req: SeedGameRequest):
 
     # Set phase deadline if starting timers
     if req.start_timers and active_phase:
-        durations = {
-            GamePhase.PROMPT: settings.prompt_duration,
-            GamePhase.QUESTION: settings.question_duration,
-            GamePhase.RESPOND: settings.respond_duration,
-            GamePhase.REVIEW: settings.review_duration,
-            GamePhase.NOMINATE: settings.nominate_duration,
-            GamePhase.ELIMINATION: settings.elimination_duration,
-        }
-        duration = durations.get(state.phase)
+        round_type = state.current_round.round_type if state.current_round else None
+        duration = get_phase_duration(settings, state.phase, round_type)
         if duration:
             state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
 

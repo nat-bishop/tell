@@ -1,9 +1,49 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useGameStore, type PlayerInfo } from "@/hooks/useGameStore";
+import {
+  useGameStore,
+  type PlayerInfo,
+  type ChainRoundData,
+} from "@/hooks/useGameStore";
 import { castVote } from "@/api/actions";
 import { SystemText } from "./SystemText";
+
+function VotableCard({
+  voted,
+  canVote,
+  onToggle,
+  delay,
+  children,
+}: {
+  voted: boolean;
+  canVote: boolean;
+  onToggle: () => void;
+  delay: number;
+  children: React.ReactNode;
+}) {
+  const baseClass = `border p-4 animate-fade-in transition-colors duration-150 ${
+    !voted ? "border-rule" : ""
+  }`;
+  const style = {
+    animationDelay: `${delay}ms`,
+    borderColor: voted ? "var(--warm)" : undefined,
+  };
+
+  return canVote ? (
+    <button
+      onClick={onToggle}
+      className={`${baseClass} cursor-pointer text-left w-full`}
+      style={style}
+    >
+      {children}
+    </button>
+  ) : (
+    <div className={baseClass} style={style}>
+      {children}
+    </div>
+  );
+}
 
 function PlayerCard({
   player,
@@ -30,8 +70,8 @@ function PlayerCard({
   const questionText = isNominee ? synthesis : myQuestion?.question;
   const responseText = myQuestion?.response;
 
-  const content = (
-    <>
+  return (
+    <VotableCard voted={voted} canVote={canVote} onToggle={onToggle} delay={delay}>
       <div
         className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
           voted ? "text-warm" : "text-ink"
@@ -64,35 +104,69 @@ function PlayerCard({
           </div>
         </>
       )}
-    </>
+    </VotableCard>
   );
+}
 
-  const baseClass = `border p-4 animate-fade-in transition-colors duration-150 ${
-    !voted ? "border-rule" : ""
-  }`;
-  const style = {
-    animationDelay: `${delay}ms`,
-    borderColor: voted ? "var(--warm)" : undefined,
-  };
-
-  return canVote ? (
-    <button
-      onClick={onToggle}
-      className={`${baseClass} cursor-pointer text-left w-full`}
-      style={style}
-    >
-      {content}
-    </button>
-  ) : (
-    <div className={baseClass} style={style}>
-      {content}
-    </div>
+function WordChainCard({
+  player,
+  chainRounds,
+  voted,
+  canVote,
+  onToggle,
+  delay,
+}: {
+  player: PlayerInfo;
+  chainRounds: ChainRoundData[];
+  voted: boolean;
+  canVote: boolean;
+  onToggle: () => void;
+  delay: number;
+}) {
+  return (
+    <VotableCard voted={voted} canVote={canVote} onToggle={onToggle} delay={delay}>
+      <div
+        className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
+          voted ? "text-warm" : "text-ink"
+        }`}
+      >
+        {player.alias}
+      </div>
+      <div className="mt-2 flex flex-col gap-1">
+        {chainRounds.map((cr, i) => {
+          const response = cr.responses[player.id];
+          const wasChosen = cr.chosen_player_id === player.id;
+          return (
+            <div key={i} className="flex items-baseline gap-2 text-[0.85rem]">
+              <span className="font-system text-[0.7rem] text-dim shrink-0">
+                {cr.seed} →
+              </span>
+              <span
+                className={`font-literary ${
+                  wasChosen ? "text-warm" : "text-ink"
+                }`}
+              >
+                {response || "—"}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </VotableCard>
   );
 }
 
 export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
-  const { gameId, playerId, players, voteCount, voteTotalCount } =
-    useGameStore();
+  const {
+    gameId,
+    playerId,
+    players,
+    voteCount,
+    voteTotalCount,
+    roundType,
+    promptText,
+    chainRounds,
+  } = useGameStore();
   const alivePlayers = players.filter((p) => p.is_alive);
   const aliveCount = alivePlayers.length;
   const maxVotes = Math.min(3, Math.max(1, aliveCount - 1));
@@ -133,21 +207,48 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     });
   };
 
+  const isWordChain = roundType === "word_chain";
+  const isTask = roundType === "task";
+
   return (
     <div className="flex flex-col gap-6 pt-4">
       <SystemText>{spectator ? "review" : "who is human?"}</SystemText>
 
+      {isTask && promptText && (
+        <p className="text-center font-literary text-[0.95rem] italic text-dim">
+          the task was: {promptText}
+        </p>
+      )}
+
+      {isWordChain && chainRounds.length > 0 && (
+        <p className="text-center font-literary text-[0.95rem] text-dim">
+          {chainRounds.map((cr) => cr.seed).join(" → ")}
+        </p>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {alivePlayers.map((p, i) => (
-          <PlayerCard
-            key={p.id}
-            player={p}
-            voted={selected.includes(p.id)}
-            canVote={!spectator && p.id !== playerId}
-            onToggle={() => toggleVote(p.id)}
-            delay={i * 60}
-          />
-        ))}
+        {alivePlayers.map((p, i) =>
+          isWordChain ? (
+            <WordChainCard
+              key={p.id}
+              player={p}
+              chainRounds={chainRounds}
+              voted={selected.includes(p.id)}
+              canVote={!spectator && p.id !== playerId}
+              onToggle={() => toggleVote(p.id)}
+              delay={i * 60}
+            />
+          ) : (
+            <PlayerCard
+              key={p.id}
+              player={p}
+              voted={selected.includes(p.id)}
+              canVote={!spectator && p.id !== playerId}
+              onToggle={() => toggleVote(p.id)}
+              delay={i * 60}
+            />
+          ),
+        )}
       </div>
 
       {!spectator ? (

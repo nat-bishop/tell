@@ -21,6 +21,7 @@ from backend.services.game_logic import (
     fill_missing_answers,
     fill_missing_responses,
     get_alive_players,
+    get_phase_duration,
     get_player_by_id,
     get_question_target,
     is_question_anonymous,
@@ -30,6 +31,7 @@ from backend.services.game_logic import (
     max_votes_for_player,
     select_round_types,
     transition_to_prompt,
+    transition_to_task_prompt,
     validate_player_alive,
 )
 from backend.services.transitions import (
@@ -43,6 +45,7 @@ from schemas.aliases import generate_aliases
 from schemas.api_models import (
     AnswerSubmittedEvent,
     CastVoteRequest,
+    ChainProgressEvent,
     JoinGameRequest,
     JoinGameResponse,
     NominateRequest,
@@ -52,6 +55,7 @@ from schemas.api_models import (
     ResponseSubmittedEvent,
     StartGameRequest,
     SubmitAnswerRequest,
+    SubmitChainWordRequest,
     SubmitQuestionRequest,
     SubmitResponseRequest,
     VoteCastEvent,
@@ -172,21 +176,34 @@ async def start_game(game_id: str, req: StartGameRequest):
         state.max_rounds = max(3, human_count + 1)
         state.round_types = select_round_types(state.max_rounds)
 
-        # Transition to first prompt
-        transition_to_prompt(state, settings.prompt_duration)
+        # Transition to first round based on first round type
+        first_round_type = state.round_types[0] if state.round_types else RoundType.TASK
+        if first_round_type == RoundType.TASK:
+            transition_to_task_prompt(state, settings.task_prompt_duration)
+        else:
+            transition_to_prompt(state, settings.prompt_duration)
+
         round_state = state.current_round
+        pd = get_phase_duration(
+            settings, state.phase, round_state.round_type if round_state else None
+        )
         await cm.broadcast(
             game_id,
             make_phase_changed_event(
                 state,
                 session.next_seq(),
+                phase_duration=pd,
                 prompt_text=round_state.prompt_text if round_state else None,
                 prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else RoundType.PROBE,
+                round_type=round_state.round_type if round_state else RoundType.TASK,
             ),
         )
 
-    await start_phase_timer(game_id, GamePhase.PROMPT)
+    await start_phase_timer(
+        game_id,
+        GamePhase.PROMPT,
+        state.round_types[0] if state.round_types else None,
+    )
     await ai_on_phase_change(game_id, GamePhase.PROMPT)
 
     log.info(
@@ -516,5 +533,66 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
         )
 
         # NO early-complete for REVIEW — always runs full timer
+
+    return {"status": "ok"}
+
+
+@router.post("/{game_id}/chain-word")
+async def submit_chain_word(game_id: str, req: SubmitChainWordRequest):
+    """Submit a word during a Word Chain sub-round."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.CHAIN:
+            raise HTTPException(status_code=400, detail="Not in chain phase")
+
+        result = validate_player_alive(state, req.player_id)
+        if isinstance(result, str):
+            raise HTTPException(status_code=400, detail=result)
+
+        round_state = state.current_round
+        if not round_state:
+            raise HTTPException(status_code=400, detail="No active round")
+
+        if req.round_index != round_state.current_sub_round:
+            raise HTTPException(status_code=400, detail="Wrong sub-round")
+
+        # Validate single word: no spaces, max 30 chars
+        word = req.word.strip().lower()
+        if not word or " " in word or len(word) > 30:
+            raise HTTPException(status_code=400, detail="Must be a single word, max 30 characters")
+
+        current_cr = round_state.chain_rounds[round_state.current_sub_round]
+        if req.player_id in current_cr.responses:
+            raise HTTPException(status_code=400, detail="Already submitted this sub-round")
+
+        current_cr.responses[req.player_id] = word
+
+        alive = get_alive_players(state)
+
+        await cm.broadcast(
+            game_id,
+            ChainProgressEvent(
+                seq=session.next_seq(),
+                round_index=req.round_index,
+                response_count=len(current_cr.responses),
+                total_count=len(alive),
+            ),
+        )
+        log.info(
+            "chain_word_submitted",
+            player_id=req.player_id,
+            round_index=req.round_index,
+            response_count=len(current_cr.responses),
+        )
 
     return {"status": "ok"}

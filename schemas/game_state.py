@@ -17,11 +17,14 @@ class GamePhase(str, enum.Enum):
     REVIEW = "review"
     ELIMINATION = "elimination"
     GAME_OVER = "game_over"
+    CHAIN = "chain"
 
 
 class RoundType(str, enum.Enum):
     PROBE = "probe"
     INTERROGATION = "interrogation"
+    TASK = "task"
+    WORD_CHAIN = "word_chain"
 
 
 class PlayerRole(str, enum.Enum):
@@ -48,6 +51,13 @@ class QuestionEntry(BaseModel):
     anonymous: bool = True
 
 
+class ChainRound(BaseModel):
+    seed: str
+    responses: dict[str, str] = Field(default_factory=dict)  # player_id -> word
+    chosen_word: str | None = None
+    chosen_player_id: str | None = None
+
+
 class RoundState(BaseModel):
     round_number: int
     prompt_text: str
@@ -61,6 +71,9 @@ class RoundState(BaseModel):
     synthesis: str | None = None
     verdict: str | None = None
     votes: dict[str, list[str]] = Field(default_factory=dict)  # voter_id -> [target_ids]
+    # Word Chain
+    current_sub_round: int = 0
+    chain_rounds: list[ChainRound] = Field(default_factory=list)
 
 
 class TellGameState(BaseModel):
@@ -72,6 +85,8 @@ class TellGameState(BaseModel):
     max_rounds: int = 3
     round_types: list[RoundType] = Field(default_factory=list)
     used_prompt_indices: list[int] = Field(default_factory=list)
+    used_task_prompt_indices: list[int] = Field(default_factory=list)
     last_prompt_category: str | None = None
+    last_task_prompt_category: str | None = None
     winner: str | None = None
     phase_deadline: datetime | None = None

@@ -9,8 +9,8 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from backend.api.deps import get_connection_manager, get_game_repository
-from backend.services.game_logic import build_state_sync
+from backend.api.deps import get_connection_manager, get_game_repository, get_settings
+from backend.services.game_logic import build_state_sync, get_phase_duration
 from schemas.api_models import HostChangedEvent
 from schemas.game_state import PlayerRole
 
@@ -58,7 +58,15 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
 
             if send_full_sync:
                 log.debug("sse_full_sync")
-                sync_data = build_state_sync(session.state, player_id, session.next_seq())
+                rs = session.state.current_round
+                pd = get_phase_duration(
+                    get_settings(),
+                    session.state.phase,
+                    rs.round_type if rs else None,
+                )
+                sync_data = build_state_sync(
+                    session.state, player_id, session.next_seq(), phase_duration=pd
+                )
                 yield {
                     "id": str(sync_data["seq"]),
                     "event": "state_sync",

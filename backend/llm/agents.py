@@ -384,3 +384,47 @@ async def generate_verdict(
     )
 
     return await _run_system_agent(system_prompt, user_prompt, timeout=3.0)
+
+
+async def generate_association(
+    seed_word: str,
+    personality: Personality,
+    chain_history: list[str] | None = None,
+) -> str:
+    """Generate a single-word association for Word Chain. Personality-aware, lightweight."""
+    style_hints = {
+        "paranoid": "Think of something unsettling or suspicious.",
+        "chill": "Think of the most obvious connection.",
+        "overachiever": "Think of a precise, specific connection.",
+        "glitchy": "Think of a slightly unexpected connection.",
+        "philosopher": "Think of an abstract or existential leap.",
+    }
+    hint = style_hints.get(personality.name, "")
+
+    history_text = ""
+    if chain_history:
+        history_text = f"\nChain so far: {' → '.join(chain_history)}"
+
+    system_prompt = (
+        "You are playing a word association game. Given a word, respond with ONE single word "
+        "that you associate with it. Rules:\n"
+        "- Exactly ONE word. No punctuation, no explanation.\n"
+        "- Be creative but connected. The association should make sense.\n"
+        "- Do NOT repeat any word already in the chain.\n"
+        f"- {hint}\n"
+        "Respond with ONLY the single word."
+    )
+
+    user_prompt = f"Word: {seed_word}{history_text}"
+
+    result = await _run_system_agent(system_prompt, user_prompt, timeout=3.0)
+    if result:
+        # Clean up: take first word only
+        word = result.strip().split()[0].strip(".,!?\"'").lower()
+        if word:
+            return word
+
+    # Fallback
+    from schemas.word_chain import get_fallback_association
+
+    return get_fallback_association(seed_word)

@@ -10,6 +10,7 @@ import { QuestionPhase } from "@/components/QuestionPhase";
 import { RespondPhase } from "@/components/RespondPhase";
 import { NominatePhase } from "@/components/NominatePhase";
 import { ReviewPhase } from "@/components/ReviewPhase";
+import { WordChainPhase } from "@/components/WordChainPhase";
 import { Elimination } from "@/components/Elimination";
 import { GameOver } from "@/components/GameOver";
 import { SystemText } from "@/components/SystemText";
@@ -82,21 +83,23 @@ function EliminatedBanner() {
 }
 
 function GameContent() {
-  const { phase, phaseDeadline, playerId, players } = useGameStore();
+  const { phase, phaseDeadline, phaseDuration, playerId, players } =
+    useGameStore();
   const remaining = useTimer(phaseDeadline);
 
   const myPlayer = players.find((p) => p.id === playerId);
   const isAlive = myPlayer?.is_alive ?? true;
 
-  const totalDurations: Record<string, number> = {
+  const fallbackDurations: Record<string, number> = {
     prompt: 45,
     nominate: 15,
     question: 25,
     respond: 30,
     review: 40,
     elimination: 8,
+    chain: 8,
   };
-  const total = totalDurations[phase] || 0;
+  const total = phaseDuration ?? fallbackDurations[phase] ?? 0;
 
   return (
     <>
@@ -113,6 +116,7 @@ function GameContent() {
         {phase === "nominate" && <NominatePhase spectator={!isAlive} />}
         {phase === "question" && <QuestionPhase spectator={!isAlive} />}
         {phase === "respond" && <RespondPhase spectator={!isAlive} />}
+        {phase === "chain" && <WordChainPhase spectator={!isAlive} />}
         {phase === "review" && <ReviewPhase spectator={!isAlive} />}
         {phase === "elimination" && <Elimination />}
         {phase === "game_over" && <GameOver />}

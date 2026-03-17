@@ -14,6 +14,7 @@ from schemas.api_models import (
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
+    ChainRound,
     GamePhase,
     Player,
     PlayerRole,
@@ -60,9 +61,56 @@ def fill_missing_responses(state: TellGameState) -> None:
             q.response = NO_RESPONSE
 
 
+def select_chain_next_word(responses: dict[str, str]) -> tuple[str, str | None]:
+    """Pick the next seed word from chain responses. Prefers unique (single-submitter) words.
+
+    Returns (chosen_word, player_id_who_submitted_it_or_None).
+    """
+    if not responses:
+        return "", None
+
+    # Count occurrences of each word (case-insensitive)
+    normalized = {pid: word.strip().lower() for pid, word in responses.items()}
+    word_counts = Counter(normalized.values())
+    word_to_players: dict[str, list[str]] = {}
+    for pid, w in normalized.items():
+        word_to_players.setdefault(w, []).append(pid)
+
+    # Prefer unique words (submitted by exactly one player)
+    unique_words = [w for w, count in word_counts.items() if count == 1]
+    if unique_words:
+        chosen = random.choice(unique_words)
+    else:
+        chosen = random.choice(list(word_counts.keys()))
+
+    player_id = random.choice(word_to_players[chosen])
+    return chosen, player_id
+
+
 def select_round_types(num_rounds: int) -> list[RoundType]:
-    """Round 1 always probe. Alternate with interrogation."""
-    return [RoundType.PROBE if i % 2 == 0 else RoundType.INTERROGATION for i in range(num_rounds)]
+    """Cycle: Task → Interrogation → Word Chain → Task → ..."""
+    cycle = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
+    return [cycle[i % len(cycle)] for i in range(num_rounds)]
+
+
+def get_phase_duration(
+    settings, phase: GamePhase, round_type: RoundType | None = None
+) -> int | None:
+    """Get the duration for a given phase, accounting for round-type-specific overrides."""
+    if phase == GamePhase.PROMPT:
+        if round_type == RoundType.TASK:
+            return settings.task_prompt_duration
+        return settings.prompt_duration
+    if phase == GamePhase.CHAIN:
+        return settings.chain_duration
+    durations = {
+        GamePhase.QUESTION: settings.question_duration,
+        GamePhase.RESPOND: settings.respond_duration,
+        GamePhase.REVIEW: settings.review_duration,
+        GamePhase.NOMINATE: settings.nominate_duration,
+        GamePhase.ELIMINATION: settings.elimination_duration,
+    }
+    return durations.get(phase)
 
 
 def get_question_target(round_state: RoundState, player_id: str) -> str | None:
@@ -143,8 +191,16 @@ def max_votes_for_player(alive_count: int) -> int:
     return min(3, max(1, alive_count - 1))
 
 
+def get_next_round_type(state: TellGameState) -> RoundType:
+    """Get the round type for the next round."""
+    next_round = state.round_number + 1
+    if state.round_types and next_round <= len(state.round_types):
+        return state.round_types[next_round - 1]
+    return RoundType.TASK
+
+
 def transition_to_prompt(state: TellGameState, duration: int) -> TellGameState:
-    """Start a new round with a new prompt."""
+    """Start a new round with a new prompt (Interrogation or Probe)."""
     state.round_number += 1
     idx, prompt = select_prompt(
         state.used_prompt_indices,
@@ -165,6 +221,47 @@ def transition_to_prompt(state: TellGameState, duration: int) -> TellGameState:
         round_type=round_type,
     )
     state.phase = GamePhase.PROMPT
+    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
+    return state
+
+
+def transition_to_task_prompt(state: TellGameState, duration: int) -> TellGameState:
+    """Start a new Task round with a constrained prompt."""
+    from schemas.prompts import select_task_prompt
+
+    state.round_number += 1
+    idx, prompt = select_task_prompt(
+        state.used_task_prompt_indices,
+        state.last_task_prompt_category,
+    )
+    state.used_task_prompt_indices.append(idx)
+    state.last_task_prompt_category = prompt.category.value
+
+    state.current_round = RoundState(
+        round_number=state.round_number,
+        prompt_text=prompt.text,
+        prompt_category=prompt.category.value,
+        round_type=RoundType.TASK,
+    )
+    state.phase = GamePhase.PROMPT
+    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
+    return state
+
+
+def transition_to_word_chain(state: TellGameState, seed_word: str, duration: int) -> TellGameState:
+    """Start a new Word Chain round."""
+
+    state.round_number += 1
+
+    state.current_round = RoundState(
+        round_number=state.round_number,
+        prompt_text="word chain",
+        prompt_category="word_chain",
+        round_type=RoundType.WORD_CHAIN,
+        current_sub_round=0,
+        chain_rounds=[ChainRound(seed=seed_word)],
+    )
+    state.phase = GamePhase.CHAIN
     state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
     return state
 
@@ -345,7 +442,9 @@ def sanitize_players_for_client(state: TellGameState) -> list[dict]:
     return result
 
 
-def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
+def build_state_sync(
+    state: TellGameState, player_id: str, seq: int, phase_duration: int | None = None
+) -> dict:
     """Build a StateSyncEvent payload for a specific player."""
     round_state = state.current_round
     answers: dict[str, str] = {}
@@ -359,6 +458,8 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
     nominations: dict[str, str] = {}
     synthesis: str | None = None
     verdict: str | None = None
+    chain_rounds: list[dict] = []
+    current_sub_round: int = 0
 
     if round_state:
         prompt_text = round_state.prompt_text
@@ -398,6 +499,11 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
                 qd["questioner_id"] = q.questioner_id
             questions.append(qd)
 
+        # Word Chain state
+        if round_state.chain_rounds:
+            chain_rounds = [cr.model_dump() for cr in round_state.chain_rounds]
+            current_sub_round = round_state.current_sub_round
+
     player_obj = get_player_by_id(state, player_id)
     is_host = player_obj.is_host if player_obj else False
 
@@ -420,7 +526,10 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
         "verdict": verdict,
         "votes": {},
         "phase_deadline": state.phase_deadline.isoformat() if state.phase_deadline else None,
+        "phase_duration": phase_duration,
         "winner": state.winner,
         "is_host": is_host,
         "my_answer": my_answer,
+        "chain_rounds": chain_rounds,
+        "current_sub_round": current_sub_round,
     }

@@ -90,3 +90,19 @@ export function castVote(
     body: JSON.stringify({ player_id: playerId, target_ids: targetIds }),
   });
 }
+
+export function submitChainWord(
+  gameId: string,
+  playerId: string,
+  word: string,
+  roundIndex: number,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/chain-word`, {
+    method: "POST",
+    body: JSON.stringify({
+      player_id: playerId,
+      word,
+      round_index: roundIndex,
+    }),
+  });
+}

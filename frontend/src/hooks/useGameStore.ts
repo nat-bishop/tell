@@ -10,7 +10,8 @@ export type GamePhase =
   | "respond"
   | "review"
   | "elimination"
-  | "game_over";
+  | "game_over"
+  | "chain";
 
 export interface PlayerInfo {
   id: string;
@@ -38,6 +39,29 @@ export interface RevealedPlayer {
   eliminated_round?: number;
 }
 
+export interface ChainRoundData {
+  seed: string;
+  responses: Record<string, string>;
+  chosen_word: string | null;
+  chosen_player_id: string | null;
+}
+
+interface ChainSeedData {
+  seq: number;
+  word: string;
+  round_index: number;
+  sub_deadline: string | null;
+  chain_so_far: string[];
+  phase_duration: number | null;
+}
+
+interface ChainProgressData {
+  seq: number;
+  round_index: number;
+  response_count: number;
+  total_count: number;
+}
+
 interface StateSyncData {
   seq: number;
   phase: GamePhase;
@@ -57,6 +81,9 @@ interface StateSyncData {
   winner: string | null;
   is_host: boolean;
   phase_deadline: string | null;
+  phase_duration: number | null;
+  chain_rounds: ChainRoundData[];
+  current_sub_round: number;
 }
 
 interface PlayerEventData {
@@ -73,6 +100,7 @@ interface PhaseChangedData {
   prompt_text?: string;
   prompt_category?: string;
   phase_deadline?: string;
+  phase_duration?: number;
   answers?: Record<string, string>;
   round_type?: string;
   assignments?: Record<string, string>;
@@ -192,6 +220,15 @@ interface GameState {
 
   // Timer
   phaseDeadline: string | null;
+  phaseDuration: number | null;
+
+  // Word Chain
+  chainRounds: ChainRoundData[];
+  currentSubRound: number;
+  currentSeedWord: string | null;
+  chainSoFar: string[];
+  chainResponseCount: number;
+  chainTotalCount: number;
 
   // Elimination
   eliminatedId: string | null;
@@ -232,8 +269,14 @@ interface GameState {
   onResponseSubmitted: (data: ResponseSubmittedData) => void;
   onSynthesisReady: (data: SynthesisReadyData) => void;
   onVerdict: (data: VerdictData) => void;
+  onChainSeed: (data: ChainSeedData) => void;
+  onChainProgress: (data: ChainProgressData) => void;
   reset: () => void;
 }
+
+// Stable empty references to avoid unnecessary re-renders
+const EMPTY_CHAIN_ROUNDS: ChainRoundData[] = [];
+const EMPTY_CHAIN_SO_FAR: string[] = [];
 
 const initialState = {
   gameId: null as string | null,
@@ -269,6 +312,13 @@ const initialState = {
   voteCount: 0,
   voteTotalCount: 0,
   phaseDeadline: null as string | null,
+  phaseDuration: null as number | null,
+  chainRounds: [] as ChainRoundData[],
+  currentSubRound: 0,
+  currentSeedWord: null as string | null,
+  chainSoFar: [] as string[],
+  chainResponseCount: 0,
+  chainTotalCount: 0,
   eliminatedId: null as string | null,
   eliminatedAlias: null as string | null,
   wasHuman: null as boolean | null,
@@ -306,6 +356,7 @@ export const useGameStore = create<GameState>((set) => ({
       winner: data.winner,
       isHost: data.is_host,
       phaseDeadline: data.phase_deadline,
+      phaseDuration: data.phase_duration ?? null,
       lastSeq: data.seq,
       myVotes: [],
       myQuestionSubmitted: false,
@@ -313,6 +364,13 @@ export const useGameStore = create<GameState>((set) => ({
       voteResults: null,
       voteTallies: null,
       spotlightIndex: 0,
+      chainRounds: data.chain_rounds || [],
+      currentSubRound: data.current_sub_round || 0,
+      currentSeedWord:
+        data.chain_rounds?.length > 0
+          ? data.chain_rounds[data.chain_rounds.length - 1].seed
+          : null,
+      chainSoFar: data.chain_rounds?.map((cr: ChainRoundData) => cr.seed) || [],
     }),
 
   onPlayerJoined: (data) =>
@@ -354,6 +412,7 @@ export const useGameStore = create<GameState>((set) => ({
       promptText: data.prompt_text || null,
       promptCategory: data.prompt_category || null,
       phaseDeadline: data.phase_deadline || null,
+      phaseDuration: data.phase_duration ?? null,
       answers: data.answers || {},
       roundType: data.round_type || null,
       assignments: data.assignments || {},
@@ -386,6 +445,12 @@ export const useGameStore = create<GameState>((set) => ({
       voteTallies: null,
       verdict: null,
       spotlightIndex: 0,
+      chainRounds: EMPTY_CHAIN_ROUNDS,
+      currentSubRound: 0,
+      currentSeedWord: null,
+      chainSoFar: EMPTY_CHAIN_SO_FAR,
+      chainResponseCount: 0,
+      chainTotalCount: 0,
     }),
 
   onAnswerSubmitted: (data) =>
@@ -434,6 +499,25 @@ export const useGameStore = create<GameState>((set) => ({
   onVerdict: (data) =>
     set({
       verdict: data.verdict,
+      lastSeq: data.seq,
+    }),
+
+  onChainSeed: (data) =>
+    set({
+      currentSeedWord: data.word,
+      currentSubRound: data.round_index,
+      chainSoFar: data.chain_so_far,
+      phaseDeadline: data.sub_deadline,
+      phaseDuration: data.phase_duration ?? 8,
+      lastSeq: data.seq,
+      chainResponseCount: 0,
+      chainTotalCount: 0,
+    }),
+
+  onChainProgress: (data) =>
+    set({
+      chainResponseCount: data.response_count,
+      chainTotalCount: data.total_count,
       lastSeq: data.seq,
     }),
 

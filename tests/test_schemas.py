@@ -7,8 +7,6 @@ import pytest
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
     CastVoteRequest,
-    EliminationEvent,
-    PhaseChangedEvent,
     PlayerJoinedEvent,
 )
 from schemas.game_state import (
@@ -19,8 +17,7 @@ from schemas.game_state import (
     RoundType,
     TellGameState,
 )
-from schemas.prompts import PROMPTS, PromptCategory, select_prompt
-
+from schemas.prompts import PROMPTS, TASK_PROMPTS, PromptCategory, select_prompt, select_task_prompt
 
 # ---------------------------------------------------------------------------
 # Prompt selection
@@ -105,6 +102,31 @@ class TestModelDefaults:
         assert rs.questions == []
         assert rs.votes == {}
         assert rs.nominated_id is None
+        assert rs.chain_rounds == []
+        assert rs.current_sub_round == 0
+
+
+# ---------------------------------------------------------------------------
+# Task prompt selection
+# ---------------------------------------------------------------------------
+
+
+class TestTaskPromptSelection:
+    def test_task_prompts_exist(self):
+        assert len(TASK_PROMPTS) >= 40
+
+    def test_no_repeats(self):
+        used = []
+        seen_indices = set()
+        for _ in range(10):
+            idx, prompt = select_task_prompt(used, None)
+            assert idx not in seen_indices
+            seen_indices.add(idx)
+            used.append(idx)
+
+    def test_avoids_same_category(self):
+        idx, prompt = select_task_prompt([], "haiku")
+        assert prompt.category.value != "haiku"
 
 
 # ---------------------------------------------------------------------------

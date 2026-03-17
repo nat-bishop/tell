@@ -1,6 +1,6 @@
 export function Timer({ remaining, total }: { remaining: number; total: number }) {
   const fraction = total > 0 ? remaining / total : 0;
-  const isWarning = remaining <= 10;
+  const isWarning = remaining <= Math.min(10, Math.floor(total * 0.25));
 
   return (
     <div className="fixed top-0 left-0 right-0 z-50 flex items-center">

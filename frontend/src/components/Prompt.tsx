@@ -5,12 +5,23 @@ import { useGameStore } from "@/hooks/useGameStore";
 import { submitAnswer } from "@/api/actions";
 import { SystemText } from "./SystemText";
 
+const robotJustification: Record<string, string> = {
+  haiku: "5-7-5 syllable structure. trivially optimizable.",
+  concise: "compression is a core capability.",
+  humor: "humor is pattern recognition plus subverted expectations.",
+  corporate: "professional communication. template-optimized.",
+  casual: "informal register. social protocol adaptation.",
+  style: "style transfer. straightforward transformation matrix.",
+  emotional_task: "emotional response templates loaded.",
+};
+
 export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
   const {
     gameId,
     playerId,
     roundNumber,
     promptText,
+    promptCategory,
     answerCount,
     totalCount,
     myAnswer,
@@ -40,6 +51,10 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
       <p className="max-w-md text-center font-literary text-[1.3rem] italic leading-[1.6] text-ink">
         {promptText}
       </p>
+
+      {roundType === "task" && promptCategory && (
+        <SystemText>{robotJustification[promptCategory] || "task loaded."}</SystemText>
+      )}
 
       {readOnly ? (
         <SystemText>

@@ -40,9 +40,13 @@ class StateSyncEvent(GameEvent):
     verdict: str | None = None
     votes: dict[str, list[str]] = Field(default_factory=dict)
     phase_deadline: str | None = None
+    phase_duration: int | None = None
     winner: str | None = None
     is_host: bool = False
     my_answer: str | None = None
+    # Word Chain
+    chain_rounds: list[dict] = Field(default_factory=list)
+    current_sub_round: int = 0
 
 
 class PlayerJoinedEvent(GameEvent):
@@ -69,6 +73,7 @@ class PhaseChangedEvent(GameEvent):
     prompt_text: str | None = None
     prompt_category: str | None = None
     phase_deadline: str | None = None
+    phase_duration: int | None = None
     answers: dict[str, str] = Field(default_factory=dict)
     round_type: str | None = None
     assignments: dict[str, str] = Field(default_factory=dict)
@@ -168,6 +173,22 @@ class HostChangedEvent(GameEvent):
     new_host_alias: str
 
 
+class ChainSeedEvent(GameEvent):
+    event_type: str = "chain_seed"
+    word: str
+    round_index: int
+    sub_deadline: str | None = None
+    chain_so_far: list[str] = Field(default_factory=list)
+    phase_duration: int | None = None
+
+
+class ChainProgressEvent(GameEvent):
+    event_type: str = "chain_progress"
+    round_index: int
+    response_count: int
+    total_count: int
+
+
 # --- POST Request models ---
 
 
@@ -218,6 +239,12 @@ class SubmitResponseRequest(BaseModel):
 class CastVoteRequest(BaseModel):
     player_id: str
     target_ids: list[str]
+
+
+class SubmitChainWordRequest(BaseModel):
+    player_id: str
+    word: str
+    round_index: int
 
 
 class GameInfoResponse(BaseModel):

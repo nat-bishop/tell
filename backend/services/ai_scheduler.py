@@ -13,6 +13,7 @@ from backend.llm.agents import (
     AIPlayerDeps,
     decide_vote,
     generate_answer,
+    generate_association,
     generate_nomination,
     generate_question,
     generate_question_response,
@@ -297,6 +298,11 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
             tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
 
     _ai_tasks[game_id] = tasks
+
+
+def register_task(game_id: str, task: asyncio.Task) -> None:
+    """Register an external background task for cleanup tracking."""
+    _ai_tasks.setdefault(game_id, []).append(task)
 
 
 def cancel_all(game_id: str) -> None:
@@ -678,6 +684,93 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
         pass
     except Exception:
         log.exception("ai_vote_task_error", game_id=game_id, player_id=player_id)
+
+
+async def on_chain_sub_round(game_id: str, sub_round: int) -> None:
+    """Schedule AI word associations for a chain sub-round."""
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        return
+
+    state = session.state
+    ai_players = [p for p in state.players if p.role == PlayerRole.AI and p.is_alive]
+    if not ai_players:
+        return
+
+    tasks: list[asyncio.Task] = []
+    for player in ai_players:
+        delay = random.uniform(1, 4)
+        tasks.append(asyncio.create_task(_ai_chain_task(game_id, player.id, sub_round, delay)))
+
+    _ai_tasks.setdefault(game_id, []).extend(tasks)
+
+
+async def _ai_chain_task(game_id: str, player_id: str, sub_round: int, delay: float) -> None:
+    """AI player submits a word association after a delay."""
+    try:
+        await asyncio.sleep(delay)
+
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session or session.state.phase != GamePhase.CHAIN:
+            return
+
+        state = session.state
+        rs = state.current_round
+        if not rs or rs.current_sub_round != sub_round:
+            return
+
+        current_cr = rs.chain_rounds[sub_round]
+        if player_id in current_cr.responses:
+            return
+
+        seed = current_cr.seed
+        personality = get_personality(game_id, player_id)
+        chain_history = [cr.seed for cr in rs.chain_rounds]
+
+        # Generate association (lightweight LLM call)
+        word = await generate_association(seed, personality, chain_history)
+
+        cm = get_connection_manager()
+        lock = cm.get_lock(game_id)
+
+        async with lock:
+            repo = get_game_repository()
+            session = repo.get(game_id)
+            if not session or session.state.phase != GamePhase.CHAIN:
+                return
+
+            state = session.state
+            rs = state.current_round
+            if not rs or rs.current_sub_round != sub_round:
+                return
+
+            current_cr = rs.chain_rounds[sub_round]
+            if player_id in current_cr.responses:
+                return
+
+            current_cr.responses[player_id] = word.strip().lower()
+
+            from schemas.api_models import ChainProgressEvent
+
+            alive = get_alive_players(state)
+            await cm.broadcast(
+                game_id,
+                ChainProgressEvent(
+                    seq=session.next_seq(),
+                    round_index=sub_round,
+                    response_count=len(current_cr.responses),
+                    total_count=len(alive),
+                ),
+            )
+
+            log.info("ai_chain_word_submitted", game_id=game_id, player_id=player_id, word=word)
+
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        log.exception("ai_chain_task_error", game_id=game_id, player_id=player_id)
 
 
 def cleanup_game(game_id: str) -> None:

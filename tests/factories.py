@@ -102,7 +102,7 @@ def make_game_state(
 def make_standard_game(
     *,
     phase: GamePhase = GamePhase.PROMPT,
-    round_type: RoundType = RoundType.PROBE,
+    round_type: RoundType = RoundType.TASK,
 ) -> tuple[TellGameState, list[Player]]:
     """4-player game: 2 human (first is host), 2 AI. Returns (state, players)."""
     h1 = make_player(role=PlayerRole.HUMAN, alias="UNIT-01", player_id="h1", is_host=True)
@@ -115,6 +115,6 @@ def make_standard_game(
         phase=phase,
         players=players,
         round_type=round_type,
-        round_types=[RoundType.PROBE, RoundType.INTERROGATION, RoundType.PROBE],
+        round_types=[RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN],
     )
     return state, players

@@ -40,6 +40,9 @@ class Settings:
         self.prompt_duration: int = int(
             os.environ.get("TELL_PROMPT_DURATION", game.get("prompt_duration", 45))
         )
+        self.task_prompt_duration: int = int(
+            os.environ.get("TELL_TASK_PROMPT_DURATION", game.get("task_prompt_duration", 25))
+        )
         self.question_duration: int = int(
             os.environ.get("TELL_QUESTION_DURATION", game.get("question_duration", 25))
         )
@@ -54,6 +57,15 @@ class Settings:
         )
         self.elimination_duration: int = int(
             os.environ.get("TELL_ELIMINATION_DURATION", game.get("elimination_duration", 8))
+        )
+        self.chain_duration: int = int(
+            os.environ.get("TELL_CHAIN_DURATION", game.get("chain_duration", 64))
+        )
+        self.chain_sub_round_duration: int = int(
+            os.environ.get("TELL_CHAIN_SUB_ROUND_DURATION", game.get("chain_sub_round_duration", 8))
+        )
+        self.chain_sub_rounds: int = int(
+            os.environ.get("TELL_CHAIN_SUB_ROUNDS", game.get("chain_sub_rounds", 8))
         )
 
         # Player limits

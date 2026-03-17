@@ -23,6 +23,8 @@ export interface GameEventCallbacks {
   onResponseSubmitted: EventHandler;
   onSynthesisReady: EventHandler;
   onVerdict: EventHandler;
+  onChainSeed: EventHandler;
+  onChainProgress: EventHandler;
 }
 
 export function connectGameEvents(
@@ -53,6 +55,8 @@ export function connectGameEvents(
     response_submitted: callbacks.onResponseSubmitted,
     synthesis_ready: callbacks.onSynthesisReady,
     verdict: callbacks.onVerdict,
+    chain_seed: callbacks.onChainSeed,
+    chain_progress: callbacks.onChainProgress,
   };
 
   for (const [eventType, handler] of Object.entries(eventMap)) {
