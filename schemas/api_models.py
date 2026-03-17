@@ -227,6 +227,35 @@ class GameInfoResponse(BaseModel):
     max_players: int
 
 
+# --- Matchmaking models ---
+
+
+class MatchmakingJoinRequest(BaseModel):
+    player_name: str
+
+
+class MatchmakingJoinResponse(BaseModel):
+    player_id: str
+    alias: str
+    position: int
+
+
+class MatchmakingLeaveRequest(BaseModel):
+    player_id: str
+
+
+class LobbyStatusEvent(GameEvent):
+    event_type: str = "lobby_status"
+    human_count: int
+    countdown_seconds: int | None = None
+    message: str = ""
+
+
+class GameAssignedEvent(GameEvent):
+    event_type: str = "game_assigned"
+    game_id: str
+
+
 # --- Debug models ---
 
 

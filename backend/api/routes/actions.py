@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
-
 import structlog
 from fastapi import APIRouter, HTTPException
 
@@ -13,8 +11,6 @@ from backend.api.deps import (
     get_settings,
     get_timer_manager,
 )
-from backend.services.ai_scheduler import assign_personalities
-from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
 from backend.services.game_logic import (
     count_expected_questions,
     count_responses,
@@ -26,10 +22,7 @@ from backend.services.game_logic import (
     is_question_anonymous,
     is_question_eligible,
     is_response_eligible,
-    make_phase_changed_event,
     max_votes_for_player,
-    select_round_types,
-    transition_to_prompt,
     validate_player_alive,
 )
 from backend.services.transitions import (
@@ -37,9 +30,9 @@ from backend.services.transitions import (
     do_prompt_complete,
     do_question_complete,
     do_respond_complete,
-    start_phase_timer,
+    initialize_and_start_game,
 )
-from schemas.aliases import generate_aliases
+from schemas.aliases import generate_aliases, generate_player_id
 from schemas.api_models import (
     AnswerSubmittedEvent,
     CastVoteRequest,
@@ -57,7 +50,7 @@ from schemas.api_models import (
     VoteCastEvent,
 )
 from schemas.constants import MISSING_ALIAS, NO_RESPONSE
-from schemas.game_state import GamePhase, Player, PlayerRole, QuestionEntry, RoundType
+from schemas.game_state import GamePhase, Player, PlayerRole, QuestionEntry
 
 router = APIRouter()
 
@@ -86,7 +79,7 @@ async def join_game(game_id: str, req: JoinGameRequest):
         if len(state.players) >= settings.max_players:
             raise HTTPException(status_code=400, detail="Game is full")
 
-        player_id = uuid.uuid4().hex[:12]
+        player_id = generate_player_id()
         existing_aliases = {p.alias for p in state.players}
         aliases = generate_aliases(1, existing_aliases)
         alias = aliases[0]
@@ -142,60 +135,10 @@ async def start_game(game_id: str, req: StartGameRequest):
                 detail=f"Need at least {settings.min_humans} human players",
             )
 
-        # Spawn AI players
-        ai_count = min(max(req.ai_count, settings.min_ai), settings.max_ai)
-        existing_aliases = {p.alias for p in state.players}
-        ai_aliases = generate_aliases(ai_count, existing_aliases)
+    ai_count = min(max(req.ai_count, settings.min_ai), settings.max_ai)
+    await initialize_and_start_game(game_id, ai_count)
 
-        for i in range(ai_count):
-            ai_player = Player(
-                id=f"ai-{uuid.uuid4().hex[:8]}",
-                alias=ai_aliases[i],
-                role=PlayerRole.AI,
-                is_connected=True,
-            )
-            state.players.append(ai_player)
-
-            event = PlayerJoinedEvent(
-                seq=session.next_seq(),
-                player_id=ai_player.id,
-                alias=ai_player.alias,
-                player_count=len(state.players),
-            )
-            await cm.broadcast(game_id, event)
-
-        # Assign AI personalities
-        ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI]
-        assign_personalities(game_id, ai_player_ids)
-
-        # Calculate max rounds and generate round types
-        state.max_rounds = max(3, human_count + 1)
-        state.round_types = select_round_types(state.max_rounds)
-
-        # Transition to first prompt
-        transition_to_prompt(state, settings.prompt_duration)
-        round_state = state.current_round
-        await cm.broadcast(
-            game_id,
-            make_phase_changed_event(
-                state,
-                session.next_seq(),
-                prompt_text=round_state.prompt_text if round_state else None,
-                prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else RoundType.PROBE,
-            ),
-        )
-
-    await start_phase_timer(game_id, GamePhase.PROMPT)
-    await ai_on_phase_change(game_id, GamePhase.PROMPT)
-
-    log.info(
-        "game_started",
-        player_count=len(state.players),
-        ai_count=ai_count,
-        max_rounds=state.max_rounds,
-    )
-    return {"status": "started", "round": state.round_number}
+    return {"status": "started"}
 
 
 @router.post("/{game_id}/answer")

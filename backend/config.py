@@ -73,3 +73,16 @@ class Settings:
 
         # Debug routes enabled when log level is DEBUG
         self.debug: bool = self.log_level.upper() == "DEBUG"
+
+        # Matchmaking
+        mm = toml.get("matchmaking", {})
+        self.mm_min_humans: int = int(os.environ.get("TELL_MM_MIN_HUMANS", mm.get("min_humans", 2)))
+        self.mm_max_humans: int = int(os.environ.get("TELL_MM_MAX_HUMANS", mm.get("max_humans", 5)))
+        self.mm_countdown_seconds: int = int(
+            os.environ.get("TELL_MM_COUNTDOWN", mm.get("countdown_seconds", 20))
+        )
+        self.mm_solo_timeout_seconds: int = int(
+            os.environ.get("TELL_MM_SOLO_TIMEOUT", mm.get("solo_timeout_seconds", 45))
+        )
+        self.mm_min_total: int = int(os.environ.get("TELL_MM_MIN_TOTAL", mm.get("min_total", 5)))
+        self.mm_max_total: int = int(os.environ.get("TELL_MM_MAX_TOTAL", mm.get("max_total", 7)))

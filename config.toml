@@ -14,3 +14,11 @@ min_humans = 2
 max_players = 10
 min_ai = 1
 max_ai = 3
+
+[matchmaking]
+min_humans = 2
+max_humans = 5
+countdown_seconds = 20
+solo_timeout_seconds = 45
+min_total = 5
+max_total = 7
