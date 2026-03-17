@@ -101,10 +101,13 @@ export default function QueuePage() {
     <Stage>
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-10">
         <div className="text-center">
-          <h1 className="font-literary text-[3rem] font-normal text-ink">
+          <h1
+            className="font-system text-[2.5rem] font-normal text-ink tracking-[0.15em] uppercase"
+            style={{ textShadow: '0 0 40px var(--cold-glow)' }}
+          >
             tell
           </h1>
-          <p className="mt-3 font-literary text-[1.1rem] text-dim">
+          <p className="mt-3 font-system text-[0.8rem] text-dim tracking-[0.15em]">
             finding a game
           </p>
         </div>
@@ -124,7 +127,7 @@ export default function QueuePage() {
               placeholder="your name"
               maxLength={20}
               autoFocus
-              className="w-48 border-b border-rule bg-transparent py-1 text-center font-literary text-[1.1rem] text-ink outline-none placeholder:text-dim focus:border-ink"
+              className="w-48 border-b border-rule bg-transparent py-1 text-center font-system text-[1rem] text-ink tracking-wide outline-none"
             />
             <button
               type="submit"
@@ -138,7 +141,10 @@ export default function QueuePage() {
           <div className="flex flex-col items-center gap-6">
             {alias && (
               <div className="animate-fade-in text-center">
-                <span className="font-literary-sc text-[1rem] tracking-[0.08em] text-ink">
+                <span
+                  className="font-system text-[0.9rem] tracking-[0.12em] uppercase text-ink"
+                  style={{ textShadow: '0 0 12px var(--cold-glow)' }}
+                >
                   {alias}
                 </span>
               </div>
@@ -150,7 +156,10 @@ export default function QueuePage() {
               )}
 
               {countdown !== null && countdown > 0 && (
-                <div className="font-system text-[0.85rem] text-ink animate-fade-in">
+                <div
+                  className="font-system text-[1rem] text-warm tracking-widest animate-fade-in"
+                  style={{ textShadow: '0 0 12px var(--glow)' }}
+                >
                   {countdown}
                 </div>
               )}
@@ -158,7 +167,7 @@ export default function QueuePage() {
 
             <button
               onClick={handleLeave}
-              className="font-system text-[0.7rem] text-dim transition-opacity hover:opacity-70"
+              className="font-system text-[0.7rem] text-dim tracking-wide transition-all hover:text-cold"
             >
               leave queue
             </button>

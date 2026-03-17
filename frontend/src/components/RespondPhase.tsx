@@ -45,9 +45,11 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
       <div className="flex flex-col items-center gap-6 pt-8">
         <SystemText>respond phase</SystemText>
         {roundType === "interrogation" && synthesis && (
-          <div className="w-full max-w-md">
-            <SystemText>synthesis</SystemText>
-            <p className="mt-2 font-literary text-[1.05rem] italic leading-[1.6] text-ink">
+          <div className="w-full max-w-md card p-5">
+            <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
+              synthesis
+            </div>
+            <p className="font-literary text-[1.05rem] italic leading-[1.6] text-ink">
               {synthesis}
             </p>
           </div>
@@ -64,7 +66,7 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
     return (
       <div className="flex flex-col items-center gap-6 pt-8">
         <SystemText>no question received</SystemText>
-        <p className="font-literary text-[1rem] text-dim">
+        <p className="font-system text-[0.85rem] text-dim tracking-wide">
           awaiting others.
         </p>
         <SystemText>
@@ -80,19 +82,21 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
     return (
       <div className="flex flex-col items-center gap-6 pt-8">
         {synthesis ? (
-          <div className="w-full max-w-md">
-            <SystemText>synthesis</SystemText>
-            <p className="mt-2 font-literary text-[1.05rem] italic leading-[1.6] text-ink">
+          <div className="w-full max-w-md card p-5">
+            <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
+              synthesis
+            </div>
+            <p className="font-literary text-[1.05rem] italic leading-[1.6] text-ink">
               {synthesis}
             </p>
           </div>
         ) : (
-          <div className="synthesizing-dots font-system text-[0.75rem] text-dim">
-            synthesizing...
+          <div className="synthesizing-dots font-system text-[0.75rem] text-cold tracking-wide">
+            synthesizing
           </div>
         )}
-        <p className="font-literary text-[1rem] text-dim">
-          awaiting {nominee?.alias || "nominee"}&apos;s response...
+        <p className="font-system text-[0.8rem] text-dim tracking-wide">
+          awaiting <span className="text-ink uppercase">{nominee?.alias || "nominee"}</span>&apos;s response...
         </p>
         <SystemText>
           {responseCount} of {responseTotal} responded
@@ -104,18 +108,16 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
   return (
     <div className="flex flex-col gap-6 pt-4">
       {/* Show the question */}
-      <div>
-        <p className="font-literary text-[1.1rem] text-ink">
+      <div className="card p-5">
+        <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
           {roundType === "interrogation"
             ? "the group asks"
             : "anonymous question"}
-        </p>
-        <p className="mt-2 font-literary text-[1.1rem] italic leading-[1.6] text-ink">
+        </div>
+        <p className="font-literary text-[1.1rem] italic leading-[1.6] text-ink">
           {questionText}
         </p>
       </div>
-
-      <hr className="divider" />
 
       {!hasSubmitted ? (
         <div className="w-full">
@@ -152,7 +154,7 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
         </div>
       ) : (
         <div className="animate-fade-in">
-          <p className="font-literary text-[1.05rem] leading-[1.55] text-ink border-l-2 border-rule pl-4">
+          <p className="font-literary text-[1.05rem] leading-[1.55] text-ink border-l-2 pl-4" style={{ borderColor: 'var(--cold)' }}>
             {response}
           </p>
           <div className="mt-3 flex items-center justify-between">

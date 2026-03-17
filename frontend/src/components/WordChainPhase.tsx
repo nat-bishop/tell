@@ -41,19 +41,20 @@ export function WordChainPhase({
 
   return (
     <div className="flex flex-col items-center gap-8 pt-8">
-      <div className="flex items-center gap-3">
-        <SystemText>word chain</SystemText>
-      </div>
+      <SystemText>word chain</SystemText>
 
       {/* Growing chain thread */}
       {chainSoFar.length > 0 && (
-        <p className="max-w-md text-center font-literary text-[0.95rem] text-dim leading-[1.8]">
+        <p className="max-w-md text-center font-system text-[0.85rem] text-dim leading-[1.8] tracking-wide">
           {chainSoFar.join(" \u2192 ")}
         </p>
       )}
 
       {/* Current seed word */}
-      <p className="font-literary text-[2rem] text-ink">
+      <p
+        className="font-system text-[2rem] text-ink tracking-[0.1em] uppercase"
+        style={{ textShadow: '0 0 20px var(--cold-glow)' }}
+      >
         {currentSeedWord || "..."}
       </p>
 
@@ -79,7 +80,7 @@ export function WordChainPhase({
             <button
               onClick={handleSubmit}
               disabled={!word.trim()}
-              className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
+              className="btn-action"
             >
               submit &rarr;
             </button>
@@ -88,9 +89,11 @@ export function WordChainPhase({
       ) : (
         <div className="w-full max-w-xs text-center">
           <SystemText>word submitted</SystemText>
-          <SystemText>
-            {chainResponseCount} of {chainTotalCount} submitted
-          </SystemText>
+          <div className="mt-1">
+            <SystemText>
+              {chainResponseCount} of {chainTotalCount} submitted
+            </SystemText>
+          </div>
         </div>
       )}
     </div>

@@ -27,14 +27,14 @@ export function AnswerCard({
 }: AnswerCardProps) {
   const content = (
     <div className="flex flex-col h-full">
-      {/* Answer — the primary content */}
+      {/* Answer — the human voice */}
       {answer ? (
-        <div className="font-literary text-[1.05rem] leading-[1.55] text-ink">
+        <div className="font-literary text-[1.1rem] leading-[1.6] text-ink">
           {answer}
         </div>
       ) : (
-        <div className="font-literary text-[0.95rem] italic text-dim">
-          no answer submitted
+        <div className="font-system text-[0.85rem] text-dim tracking-wide">
+          NO RESPONSE
         </div>
       )}
 
@@ -44,19 +44,19 @@ export function AnswerCard({
       {/* Attribution — name pinned to bottom */}
       <div className="mt-auto pt-3 border-t border-rule flex items-baseline justify-between">
         <div
-          className={`font-literary-sc text-[0.8rem] tracking-[0.08em] ${
+          className={`font-system text-[0.75rem] tracking-[0.1em] uppercase ${
             highlighted ? "text-warm" : "text-dim"
           }`}
         >
           {alias}
         </div>
         {label && (
-          <div className="font-system text-[0.65rem] text-warm">
+          <div className="font-system text-[0.6rem] text-warm tracking-wider uppercase">
             {label}
           </div>
         )}
         {showVotedLabel && (
-          <div className="font-system text-[0.65rem] text-warm">
+          <div className="font-system text-[0.6rem] text-warm tracking-wider uppercase">
             voted
           </div>
         )}
@@ -64,12 +64,12 @@ export function AnswerCard({
     </div>
   );
 
-  const baseClass = `border p-5 h-full animate-fade-in transition-colors duration-150 ${
-    !highlighted ? "border-rule" : "animate-vote-select"
-  }`;
+  const baseClass = `card p-5 h-full animate-fade-in ${
+    highlighted ? "card-highlighted animate-vote-select" : ""
+  } ${as === "button" && !disabled ? "card-interactive" : ""}`;
+
   const style = {
     animationDelay: delay ? `${delay}ms` : undefined,
-    borderColor: highlighted ? "var(--warm)" : undefined,
   };
 
   if (as === "button") {

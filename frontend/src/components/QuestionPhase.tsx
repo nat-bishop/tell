@@ -47,10 +47,13 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   if (isHotSeated) {
     return (
       <div className="flex flex-col items-center gap-8 pt-8">
-        <p className="font-literary text-[1.1rem] text-ink text-center">
-          you are on the hot seat
+        <p
+          className="font-system text-[0.9rem] text-warm tracking-[0.15em] uppercase"
+          style={{ textShadow: '0 0 20px var(--glow)' }}
+        >
+          YOU ARE ON THE HOT SEAT
         </p>
-        <p className="font-literary text-[1.1rem] text-dim text-center">
+        <p className="font-system text-[0.8rem] text-dim tracking-wide">
           awaiting questions from the group...
         </p>
         <SystemText>
@@ -63,17 +66,17 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   return (
     <div className="flex flex-col gap-6 pt-4">
       {/* Target's answer */}
-      <div>
-        <SystemText>
-          {targetPlayer?.alias || "unknown"}&apos;s answer
-        </SystemText>
+      <div className="card p-5">
+        <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
+          {targetPlayer?.alias || "UNKNOWN"}&apos;s answer
+        </div>
         {targetAnswer ? (
-          <p className="mt-2 font-literary text-[1.1rem] italic leading-[1.6] text-ink">
+          <p className="font-literary text-[1.1rem] italic leading-[1.6] text-ink">
             {targetAnswer}
           </p>
         ) : (
-          <p className="mt-2 font-literary text-[1rem] text-dim">
-            no answer submitted
+          <p className="font-system text-[0.85rem] text-dim tracking-wide">
+            NO ANSWER SUBMITTED
           </p>
         )}
       </div>
@@ -121,7 +124,7 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
             </div>
           ) : (
             <div className="animate-fade-in">
-              <p className="font-literary text-[1.05rem] italic leading-[1.55] text-ink border-l-2 border-rule pl-4">
+              <p className="font-literary text-[1.05rem] italic leading-[1.55] text-ink border-l-2 pl-4" style={{ borderColor: 'var(--cold)' }}>
                 {question}
               </p>
               <div className="mt-3 flex items-center justify-between">

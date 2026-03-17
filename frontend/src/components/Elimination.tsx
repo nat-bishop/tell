@@ -27,7 +27,7 @@ export function Elimination() {
   if (eliminationNoVotes) {
     return (
       <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
-        <p className="animate-fade-in font-literary text-[1.2rem] text-ink">
+        <p className="animate-fade-in font-system text-[1rem] text-dim tracking-wider uppercase">
           no consensus reached.
         </p>
       </div>
@@ -37,26 +37,30 @@ export function Elimination() {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
       {step >= 1 && (
-        <p className="animate-fade-in font-literary text-[1.2rem] text-ink">
+        <p className="animate-fade-in font-system text-[1rem] text-ink tracking-wide">
           {eliminationTieMessage
             ? eliminationTieMessage
-            : `${eliminatedAlias} received ${eliminationVoteCount} vote${eliminationVoteCount !== 1 ? "s" : ""}.`}
+            : (
+              <>
+                <span className="text-warm uppercase">{eliminatedAlias}</span>
+                {` received ${eliminationVoteCount} vote${eliminationVoteCount !== 1 ? "s" : ""}.`}
+              </>
+            )}
         </p>
       )}
 
       {step >= 2 && (
-        <div className="animate-line-draw h-px bg-rule mx-auto" />
+        <div className="animate-line-draw h-px mx-auto" style={{ backgroundColor: 'var(--rule)' }} />
       )}
 
       {step >= 3 && (
-        <p className="animate-reveal-expand font-literary text-[1.2rem]">
-          <span className="text-ink">{eliminatedAlias} was </span>
+        <p className="animate-reveal-expand font-system text-[1.1rem] tracking-[0.12em] uppercase">
+          <span className="text-dim">{eliminatedAlias} was </span>
           <span
-            className={`font-semibold ${wasHuman ? "text-warm" : "text-ink"}`}
+            className={`font-semibold ${wasHuman ? "text-warm glow-warm" : "text-cold glow-cold"}`}
           >
-            {wasHuman ? "human" : "ai"}
+            {wasHuman ? "HUMAN" : "AI"}
           </span>
-          <span className="text-ink">.</span>
         </p>
       )}
 

@@ -47,18 +47,18 @@ function PlayerCard({
     >
       {questionText && (
         <div className="mt-3 pt-3 border-t border-rule">
-          <div className="font-system text-[0.7rem] text-dim">
+          <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase">
             {isNominee ? "synthesis" : "question received"}
           </div>
-          <div className="mt-0.5 font-literary text-[0.9rem] italic leading-[1.5] text-ink">
+          <div className="mt-1 font-literary text-[0.95rem] italic leading-[1.5] text-ink">
             {questionText}
           </div>
           {responseText && (
             <>
-              <div className="mt-2 font-system text-[0.7rem] text-dim">
+              <div className="mt-2 font-system text-[0.65rem] text-cold tracking-wider uppercase">
                 response
               </div>
-              <div className="mt-0.5 font-literary text-[0.9rem] leading-[1.5] text-ink">
+              <div className="mt-1 font-literary text-[0.95rem] leading-[1.5] text-ink">
                 {responseText}
               </div>
             </>
@@ -99,15 +99,15 @@ function WordChainCard({
           const wasChosen = cr.chosen_player_id === player.id;
           return (
             <div key={i} className="flex items-baseline gap-2 text-[0.85rem]">
-              <span className="font-system text-[0.7rem] text-dim shrink-0">
-                {cr.seed} →
+              <span className="font-system text-[0.65rem] text-cold shrink-0 tracking-wide">
+                {cr.seed} &rarr;
               </span>
               <span
                 className={`font-literary ${
                   wasChosen ? "text-warm" : "text-ink"
                 }`}
               >
-                {response || "—"}
+                {response || "\u2014"}
               </span>
             </div>
           );
@@ -172,8 +172,8 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <p className="text-center font-literary text-[1.1rem] text-ink">
-        {spectator ? "review" : "who is human?"}
+      <p className="text-center font-system text-[0.9rem] text-ink tracking-[0.15em] uppercase">
+        {spectator ? "REVIEW" : "IDENTIFY HUMAN"}
       </p>
 
       {isTask && promptText && (
@@ -189,7 +189,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
       )}
 
       {isWordChain && chainRounds.length > 0 && (
-        <p className="text-center font-literary text-[0.95rem] text-dim">
+        <p className="text-center font-system text-[0.85rem] text-dim tracking-wide">
           {chainRounds.map((cr) => cr.seed).join(" \u2192 ")}
         </p>
       )}
@@ -204,7 +204,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
               voted={selected.includes(p.id)}
               canVote={!spectator && p.id !== playerId}
               onToggle={() => toggleVote(p.id)}
-              delay={i * 60}
+              delay={i * 80}
             />
           ) : (
             <PlayerCard
@@ -213,7 +213,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
               voted={selected.includes(p.id)}
               canVote={!spectator && p.id !== playerId}
               onToggle={() => toggleVote(p.id)}
-              delay={i * 60}
+              delay={i * 80}
             />
           ),
         )}
@@ -226,11 +226,15 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
             {Array.from({ length: maxVotes }).map((_, i) => (
               <span
                 key={i}
-                className={`inline-block w-2 h-2 rounded-full transition-all duration-200 ${
+                className={`inline-block w-2.5 h-2.5 rounded-full transition-all duration-200 ${
                   i < selected.length
-                    ? "bg-warm scale-110"
+                    ? "scale-110"
                     : "border border-rule"
                 }`}
+                style={i < selected.length ? {
+                  backgroundColor: 'var(--warm)',
+                  boxShadow: '0 0 8px var(--glow)',
+                } : undefined}
               />
             ))}
           </div>

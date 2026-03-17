@@ -17,12 +17,15 @@ export function Timer({ remaining, total }: { remaining: number; total: number }
         style={{
           width: `${fraction * 100}%`,
           height: isUrgent ? "3px" : "2px",
-          backgroundColor: isWarning ? 'var(--warm)' : 'var(--rule)',
+          backgroundColor: isWarning ? 'var(--warm)' : 'var(--cold)',
+          boxShadow: isWarning
+            ? '0 0 12px var(--warm), 0 0 24px var(--glow)'
+            : '0 0 8px var(--cold-glow)',
         }}
       />
       <span
-        className={`shrink-0 pr-3 pl-1 font-system text-xs ${
-          isWarning ? 'text-warm' : 'text-dim'
+        className={`shrink-0 pr-3 pl-1 font-system text-xs tracking-wider ${
+          isWarning ? 'text-warm' : 'text-cold'
         } ${pulseClass}`}
       >
         {remaining}

@@ -1,12 +1,17 @@
 @import "tailwindcss";
 
-/* Design tokens — cool clinical palette */
+/* Design tokens — Observation Terminal palette */
 :root {
-  --page:  #F7F7F9;
-  --ink:   #18181B;
-  --dim:   #8B8B94;
-  --rule:  #E2E2E7;
-  --warm:  #B85C38;
+  --page:    #0F1114;
+  --surface: #1A1D23;
+  --raised:  #242830;
+  --ink:     #E8E6E3;
+  --dim:     #6B7084;
+  --rule:    #2A2D35;
+  --warm:    #E07A5F;
+  --glow:    rgba(224, 122, 95, 0.12);
+  --cold:    #5B8FB9;
+  --cold-glow: rgba(91, 143, 185, 0.12);
 }
 
 /* Selection highlight */
@@ -15,11 +20,31 @@
   color: var(--page);
 }
 
-/* Animations */
+/* Body — dark canvas with subtle radial vignette */
+body {
+  background: radial-gradient(ellipse at 50% 20%, #1A1D2308 0%, var(--page) 70%);
+  background-color: var(--page);
+}
+
+/* Subtle noise grain overlay — atmosphere */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ─── Animations ─── */
+
 @keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -40,7 +65,7 @@
 @keyframes elimination-reveal {
   from {
     opacity: 0;
-    transform: scale(0.97);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
@@ -48,15 +73,17 @@
   }
 }
 
-/* Phase interstitial — chapter heading between phases */
+/* Phase interstitial — system status change */
 @keyframes interstitial-in {
   from {
     opacity: 0;
-    transform: scale(0.98);
+    transform: scale(0.96);
+    filter: blur(2px);
   }
   to {
     opacity: 1;
     transform: scale(1);
+    filter: blur(0);
   }
 }
 
@@ -65,17 +92,45 @@
   to { opacity: 0; }
 }
 
+/* Scan-line sweep for interstitials */
+@keyframes scan-line {
+  from {
+    transform: translateY(-100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
+}
+
 .animate-interstitial-in {
-  animation: interstitial-in 400ms ease-out both;
+  animation: interstitial-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-interstitial-out {
   animation: interstitial-out 300ms ease both;
 }
 
-/* Utility classes for animations */
+/* Scan-line pseudo-element for interstitials */
+.interstitial-scan::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    var(--cold-glow) 50%,
+    transparent 100%
+  );
+  height: 2px;
+  animation: scan-line 800ms ease-out 200ms both;
+  pointer-events: none;
+}
+
+/* Utility animation classes */
 .animate-fade-in {
-  animation: fade-in 200ms ease-out both;
+  animation: fade-in 250ms ease-out both;
 }
 
 .animate-phase-exit {
@@ -87,7 +142,7 @@
 }
 
 .animate-elimination-reveal {
-  animation: elimination-reveal 400ms ease-out both;
+  animation: elimination-reveal 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Timer warning transition */
@@ -109,50 +164,117 @@
   animation: timer-pulse 0.6s ease-in-out infinite;
 }
 
-/* Vote selection pulse */
+/* Vote selection — glow pulse */
 @keyframes vote-select {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.015); }
-  100% { transform: scale(1); }
+  0% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 0px var(--glow);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4), 0 0 24px var(--glow);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 0 16px var(--glow);
+  }
 }
 
 .animate-vote-select {
-  animation: vote-select 200ms ease-out;
+  animation: vote-select 300ms ease-out;
 }
 
 /* Elimination reveal animations */
 @keyframes reveal-expand {
-  from { opacity: 0; letter-spacing: 0.3em; }
-  to { opacity: 1; letter-spacing: normal; }
+  from { opacity: 0; letter-spacing: 0.4em; }
+  to { opacity: 1; letter-spacing: 0.12em; }
 }
 
 @keyframes line-draw {
-  from { width: 0; }
-  to { width: 3rem; }
+  from { width: 0; opacity: 0; }
+  to { width: 3rem; opacity: 1; }
 }
 
 .animate-reveal-expand {
-  animation: reveal-expand 600ms ease-out both;
+  animation: reveal-expand 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .animate-line-draw {
-  animation: line-draw 400ms ease-out both;
+  animation: line-draw 500ms ease-out both;
 }
 
-/* Action button — machine voice */
+/* Role reveal glow */
+.glow-warm {
+  text-shadow: 0 0 20px var(--warm), 0 0 40px rgba(224, 122, 95, 0.3);
+}
+
+.glow-cold {
+  text-shadow: 0 0 20px var(--cold), 0 0 40px rgba(91, 143, 185, 0.3);
+}
+
+/* Landing title glitch */
+@keyframes glitch {
+  0%, 90%, 100% { transform: translate(0); }
+  92% { transform: translate(-2px, 1px); }
+  94% { transform: translate(2px, -1px); }
+  96% { transform: translate(-1px, -1px); }
+  98% { transform: translate(1px, 1px); }
+}
+
+.animate-glitch {
+  animation: glitch 4s ease-in-out infinite;
+}
+
+/* ─── Card system ─── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.15);
+  transition: all 200ms ease;
+}
+
+.card-interactive:hover {
+  background: var(--raised);
+  border-color: var(--dim);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.card-highlighted {
+  border-color: var(--warm) !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25), 0 0 20px var(--glow), 0 0 40px rgba(224, 122, 95, 0.06) !important;
+}
+
+/* ─── Action button ─── */
+
 .btn-action {
   font-family: var(--font-system);
   font-size: 0.8rem;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   min-height: 44px;
-  padding: 0.5rem 0.5rem;
+  padding: 0.5rem 1rem;
   color: var(--ink);
-  transition: opacity 150ms;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface);
+  transition: all 200ms ease;
 }
-.btn-action:hover { opacity: 0.7; }
-.btn-action:disabled { opacity: 0.3; }
+.btn-action:hover {
+  background: var(--raised);
+  border-color: var(--dim);
+  box-shadow: 0 0 12px var(--cold-glow);
+}
+.btn-action:disabled {
+  opacity: 0.3;
+  border-color: var(--rule);
+  background: transparent;
+  box-shadow: none;
+}
 
-/* Divider */
+/* ─── Divider ─── */
+
 .divider {
   width: 3rem;
   margin: 1.5rem auto;
@@ -160,7 +282,8 @@
   border-top: 1px solid var(--rule);
 }
 
-/* Smooth scrollbar for chat */
+/* ─── Scrollbar ─── */
+
 .chat-scroll {
   scrollbar-width: thin;
   scrollbar-color: var(--rule) transparent;
@@ -173,7 +296,8 @@
   border-radius: 2px;
 }
 
-/* Synthesizing dots animation */
+/* ─── Synthesizing dots ─── */
+
 @keyframes pulse-dots {
   0%, 80%, 100% { opacity: 0.3; }
   40% { opacity: 1; }
@@ -184,7 +308,8 @@
   animation: pulse-dots 1.4s infinite ease-in-out;
 }
 
-/* Spotlight fade */
+/* ─── Spotlight fade ─── */
+
 @keyframes spotlight-fade {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -194,29 +319,46 @@
   animation: spotlight-fade 300ms ease-out both;
 }
 
-/* Input styling */
+/* ─── Input styling ─── */
+
 input, textarea {
-  caret-color: var(--ink);
+  caret-color: var(--cold);
 }
 
 input::placeholder, textarea::placeholder {
   color: var(--dim);
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
-/* Font utility classes */
+/* ─── Font utility classes ─── */
+
 .font-literary { font-family: var(--font-literary); }
 .font-literary-sc { font-family: var(--font-literary-sc); }
 .font-system { font-family: var(--font-system); }
 
-/* Color utility classes */
+/* ─── Color utility classes ─── */
+
 .text-ink { color: var(--ink); }
 .text-dim { color: var(--dim); }
 .text-warm { color: var(--warm); }
+.text-cold { color: var(--cold); }
 .border-rule { border-color: var(--rule); }
 .bg-page { background-color: var(--page); }
+.bg-surface { background-color: var(--surface); }
+.bg-raised { background-color: var(--raised); }
 
-/* Focus styles */
+/* ─── Focus styles ─── */
+
 input:focus, textarea:focus {
-  border-color: var(--ink) !important;
+  border-color: var(--cold) !important;
+  box-shadow: 0 1px 0 0 var(--cold);
+}
+
+/* ─── Submitted answer panel ─── */
+
+.submitted-panel {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 1.25rem;
 }

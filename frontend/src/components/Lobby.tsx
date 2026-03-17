@@ -37,7 +37,10 @@ export function Lobby() {
 
   return (
     <div className="flex flex-col items-center gap-8 pt-16">
-      <h1 className="font-literary text-[3rem] font-normal text-ink">
+      <h1
+        className="font-system text-[2.5rem] font-normal text-ink tracking-[0.15em] uppercase animate-glitch"
+        style={{ textShadow: '0 0 40px var(--cold-glow)' }}
+      >
         tell
       </h1>
 
@@ -45,18 +48,19 @@ export function Lobby() {
         {players.map((p) => (
           <div key={p.id} className="flex items-center gap-2 animate-fade-in">
             <span
-              className={`font-literary-sc text-[1rem] tracking-[0.08em] ${p.is_connected ? 'text-ink' : 'text-dim'}`}
+              className={`inline-block w-2 h-2 rounded-full ${p.is_connected ? 'bg-cold' : 'bg-rule'}`}
+              style={p.is_connected ? { boxShadow: '0 0 6px var(--cold)' } : undefined}
+            />
+            <span
+              className={`font-system text-[0.85rem] tracking-[0.1em] uppercase ${p.is_connected ? 'text-ink' : 'text-dim'}`}
             >
               {p.alias}
             </span>
-            {p.is_connected && (
-              <span className="text-dim">&middot;</span>
-            )}
           </div>
         ))}
       </div>
 
-      <div className="synthesizing-dots font-system text-[0.75rem] text-dim">
+      <div className="synthesizing-dots font-system text-[0.75rem] text-cold tracking-wide">
         {playerCount} connected
       </div>
 
@@ -70,11 +74,12 @@ export function Lobby() {
                 <button
                   key={n}
                   onClick={() => setAiCount(n)}
-                  className={`font-system text-[0.8rem] w-8 h-8 transition-colors ${
+                  className={`font-system text-[0.8rem] w-8 h-8 rounded transition-all duration-200 ${
                     aiCount === n
-                      ? "text-ink border border-ink"
+                      ? "text-ink border border-cold bg-raised"
                       : "text-dim border border-rule"
                   }`}
+                  style={aiCount === n ? { boxShadow: '0 0 8px var(--cold-glow)' } : undefined}
                 >
                   {n}
                 </button>
@@ -85,7 +90,7 @@ export function Lobby() {
           <button
             onClick={handleStart}
             disabled={!canStart}
-            className="btn-action uppercase px-4"
+            className="btn-action"
           >
             begin
           </button>
@@ -96,7 +101,7 @@ export function Lobby() {
 
       <button
         onClick={handleCopyLink}
-        className="font-system text-[0.75rem] text-dim transition-opacity hover:text-ink"
+        className="font-system text-[0.75rem] text-dim tracking-wide transition-all hover:text-cold"
       >
         {copied ? "copied" : "copy invite link"}
       </button>

@@ -94,8 +94,8 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
         </div>
       ) : (
         <div className="w-full max-w-md animate-fade-in">
-          <div className="border border-rule p-5">
-            <p className="font-literary text-[1.05rem] leading-[1.55] text-ink">
+          <div className="submitted-panel">
+            <p className="font-literary text-[1.1rem] leading-[1.6] text-ink">
               {answer || myAnswer}
             </p>
           </div>

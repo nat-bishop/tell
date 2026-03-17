@@ -8,10 +8,10 @@ interface PhaseInterstitialProps {
 }
 
 const DIRECTIVES: Partial<Record<GamePhase, { text: string; subtitle?: string }>> = {
-  nominate: { text: "who should be interrogated?" },
-  respond: { text: "defend yourself" },
-  review: { text: "who is human?" },
-  elimination: { text: "the vote" },
+  nominate: { text: "SELECT TARGET" },
+  respond: { text: "DEFEND YOURSELF" },
+  review: { text: "IDENTIFY HUMAN" },
+  elimination: { text: "VOTE RESULT" },
 };
 
 export function PhaseInterstitial({
@@ -24,27 +24,30 @@ export function PhaseInterstitial({
   let subtitle: string | undefined;
 
   if (phase === "prompt") {
-    text = `round ${roundNumber}`;
-    subtitle = roundType || undefined;
+    text = `ROUND ${roundNumber}`;
+    subtitle = roundType?.toUpperCase() || undefined;
   } else if (phase === "question") {
-    text = roundType === "interrogation" ? "the interrogation" : "cross-examine";
+    text = roundType === "interrogation" ? "INTERROGATION" : "CROSS-EXAMINE";
   } else {
     const directive = DIRECTIVES[phase];
-    text = directive?.text || phase;
+    text = directive?.text || phase.toUpperCase();
     subtitle = directive?.subtitle;
   }
 
   return (
     <div
-      className={`flex min-h-[60vh] flex-col items-center justify-center gap-3 ${
+      className={`relative flex min-h-[60vh] flex-col items-center justify-center gap-4 ${
         fading ? "animate-interstitial-out" : "animate-interstitial-in"
-      }`}
+      } ${!fading ? "interstitial-scan" : ""}`}
     >
-      <p className="font-literary text-[1.5rem] text-ink text-center">
+      <p
+        className="font-system text-[1.4rem] text-ink tracking-[0.2em] uppercase"
+        style={{ textShadow: '0 0 30px var(--cold-glow)' }}
+      >
         {text}
       </p>
       {subtitle && (
-        <p className="font-system text-[0.75rem] text-dim tracking-wide">
+        <p className="font-system text-[0.7rem] text-cold tracking-[0.25em] uppercase">
           {subtitle}
         </p>
       )}

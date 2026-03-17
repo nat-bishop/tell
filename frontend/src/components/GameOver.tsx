@@ -28,8 +28,15 @@ export function GameOver() {
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-10">
-      <p className="animate-elimination-reveal font-literary text-[1.5rem] text-ink">
-        {winner === "ai" ? "the machines win." : "humanity survives."}
+      <p
+        className="animate-elimination-reveal font-system text-[1.3rem] text-ink tracking-[0.15em] uppercase"
+        style={{
+          textShadow: winner === "ai"
+            ? '0 0 30px var(--cold), 0 0 60px rgba(91, 143, 185, 0.2)'
+            : '0 0 30px var(--warm), 0 0 60px rgba(224, 122, 95, 0.2)',
+        }}
+      >
+        {winner === "ai" ? "THE MACHINES WIN" : "HUMANITY SURVIVES"}
       </p>
 
       <div className="flex flex-col gap-3">
@@ -40,18 +47,20 @@ export function GameOver() {
             style={{ animationDelay: `${(i * 400) + 1000}ms` }}
           >
             <span
-              className={`w-24 font-literary-sc text-[0.9rem] tracking-[0.08em] ${p.is_alive ? 'text-ink' : 'text-dim line-through'}`}
+              className={`w-28 font-system text-[0.8rem] tracking-[0.1em] uppercase ${p.is_alive ? 'text-ink' : 'text-dim line-through'}`}
             >
               {p.alias}
             </span>
             <span
-              className={`font-literary text-[1rem] ${p.role === 'human' ? 'text-warm' : 'text-dim'}`}
+              className={`font-system text-[0.8rem] tracking-wider uppercase ${
+                p.role === 'human' ? 'text-warm glow-warm' : 'text-cold glow-cold'
+              }`}
             >
               {p.role}
             </span>
             {!p.is_alive && (
-              <span className="font-system text-[0.7rem] text-dim">
-                round {p.eliminated_round}
+              <span className="font-system text-[0.65rem] text-dim tracking-wide">
+                R{p.eliminated_round}
               </span>
             )}
           </div>

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import logfire
 import structlog
@@ -83,10 +84,11 @@ app = FastAPI(
     description="Multiplayer social deduction game — reverse Turing test",
 )
 
-# CORS — allow all origins for dev
+# CORS — configurable via TELL_CORS_ORIGINS env var (comma-separated), defaults to * for dev
+_cors_origins = os.environ.get("TELL_CORS_ORIGINS", "*").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

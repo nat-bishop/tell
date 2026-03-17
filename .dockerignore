@@ -1,0 +1,12 @@
+.git
+.env
+.claude
+.ruff_cache
+__pycache__
+*.pyc
+frontend
+tests
+test-screenshots
+node_modules
+.next
+*.md

@@ -28,7 +28,10 @@ export function NominatePhase({ spectator = false }: { spectator?: boolean }) {
     return (
       <div className="flex flex-col items-center gap-6 pt-8">
         <SystemText>nominated for the hot seat</SystemText>
-        <p className="font-literary-sc text-[1.3rem] tracking-[0.08em] text-warm animate-fade-in">
+        <p
+          className="font-system text-[1.1rem] tracking-[0.15em] uppercase text-warm animate-fade-in"
+          style={{ textShadow: '0 0 20px var(--glow)' }}
+        >
           {nominee?.alias || "???"}
         </p>
       </div>
@@ -71,8 +74,8 @@ export function NominatePhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <p className="text-center font-literary text-[1.1rem] text-ink">
-        who should be interrogated?
+      <p className="text-center font-system text-[0.9rem] text-ink tracking-[0.15em] uppercase">
+        SELECT TARGET
       </p>
 
       {promptText && (

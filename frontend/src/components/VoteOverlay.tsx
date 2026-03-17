@@ -56,23 +56,25 @@ export function VoteOverlay() {
 
   return (
     <div className="border-t border-rule pt-4 mt-4">
-      <span className="font-literary text-[1rem] text-ink">
-        who is human?
+      <span className="font-system text-[0.85rem] text-ink tracking-[0.12em] uppercase">
+        IDENTIFY HUMAN
       </span>
       <div className="flex flex-col gap-2 mt-3">
         {alivePlayers.map((p: PlayerInfo) => (
           <button
             key={p.id}
             onClick={() => toggleVote(p.id)}
-            className="flex items-center py-2 pl-3 text-left transition-all min-h-[44px]"
+            className="flex items-center py-2 pl-3 text-left transition-all duration-200 min-h-[44px] rounded"
             style={{
               borderLeft: selected.includes(p.id)
                 ? "3px solid var(--warm)"
                 : "3px solid transparent",
+              background: selected.includes(p.id) ? 'var(--raised)' : 'transparent',
+              boxShadow: selected.includes(p.id) ? '0 0 12px var(--glow)' : 'none',
             }}
           >
             <span
-              className={`font-literary-sc text-[0.95rem] tracking-[0.08em] ${
+              className={`font-system text-[0.8rem] tracking-[0.1em] uppercase ${
                 selected.includes(p.id) ? "text-warm" : "text-ink"
               }`}
             >
