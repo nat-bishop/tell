@@ -250,6 +250,7 @@ async def do_question_complete(game_id: str, session) -> None:
                     target_alias,
                     target_answer,
                     round_state.prompt_text,
+                    game_id=game_id,
                 )
             except Exception:
                 log.exception("synthesis_failed", game_id=game_id)
@@ -361,6 +362,7 @@ async def do_vote_resolution(game_id: str, session) -> None:
                 vote_count=elimination.vote_count,
                 round_number=round_state.round_number,
                 max_rounds=state.max_rounds,
+                game_id=game_id,
             )
             if verdict:
                 round_state.verdict = verdict

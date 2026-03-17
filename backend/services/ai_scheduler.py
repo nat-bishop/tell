@@ -24,6 +24,13 @@ from backend.llm.agents import (
     generate_question_response,
 )
 from backend.llm.personalities import PERSONALITIES, Personality
+from backend.llm.prompts import (
+    build_answer_prompt,
+    build_nomination_prompt,
+    build_question_prompt,
+    build_response_prompt,
+    build_vote_prompt,
+)
 from backend.services.game_logic import (
     count_expected_questions,
     count_responses,
@@ -35,7 +42,6 @@ from backend.services.game_logic import (
     is_question_anonymous,
     is_question_eligible,
     is_response_eligible,
-    max_votes_for_player,
 )
 from backend.services.transitions import (
     do_nominate_complete,
@@ -93,71 +99,6 @@ def _set_history(game_id: str, player_id: str, history: list[ModelMessage]) -> N
     """Store updated conversation history for an AI player."""
     if game_id in _conversation_history:
         _conversation_history[game_id][player_id] = history
-
-
-# ---------------------------------------------------------------------------
-# Build action prompts — the user message for each phase action
-# ---------------------------------------------------------------------------
-
-
-def _build_answer_prompt(deps: AIPlayerDeps) -> str:
-    return (
-        f'The prompt is: "{deps.current_prompt}"\n\n'
-        "Respond in character. 1-3 sentences. Do not include your name."
-    )
-
-
-def _build_question_prompt(deps: AIPlayerDeps) -> str:
-    target_alias = deps.assigned_target or deps.nominated_alias or "unknown"
-    target_answer = deps.all_answers.get(target_alias, "")
-    return (
-        f'The prompt was: "{deps.current_prompt}"\n'
-        f'{target_alias} answered: "{target_answer}"\n\n'
-        f"Your questioning style: {deps.personality.question_style}\n\n"
-        "Write ONE short follow-up question (1 sentence, max 120 characters). "
-        "Probe for emotional authenticity, suspicious specificity, or logical gaps. "
-        "Your question is anonymous — they won't know who asked.\n\n"
-        "Respond with ONLY the question."
-    )
-
-
-def _build_response_prompt(deps: AIPlayerDeps, question: str) -> str:
-    return (
-        f'The prompt was: "{deps.current_prompt}"\n'
-        f'Your answer was: "{deps.my_answer}"\n'
-        f'Question you received: "{question}"\n\n'
-        "Write a brief response (1-2 sentences). Elaborate on or defend your answer naturally. "
-        "Robots don't get defensive or emotional — they clarify and compute.\n\n"
-        "Respond with ONLY your response."
-    )
-
-
-def _build_nomination_prompt(deps: AIPlayerDeps) -> str:
-    other_players = [a for a in deps.alive_players if a != deps.player_alias]
-    answers_text = "\n".join(
-        f"  {alias}: {answer}"
-        for alias, answer in deps.all_answers.items()
-        if alias != deps.player_alias
-    )
-    return (
-        f"Choose one player to put on the hot seat for interrogation. "
-        f"Pick the player whose answer is most worth scrutinizing.\n\n"
-        f"{deps.personality.vote_strategy}\n\n"
-        f"Answers this round:\n{answers_text}\n\n"
-        f"Valid players: {', '.join(other_players)}\n"
-        f"Respond with a JSON object containing target_alias and reasoning."
-    )
-
-
-def _build_vote_prompt(deps: AIPlayerDeps) -> str:
-    other_players = [a for a in deps.alive_players if a != deps.player_alias]
-    max_v = max_votes_for_player(len(deps.alive_players))
-    return (
-        f"Time to vote. Choose up to {max_v} players you suspect of being human.\n\n"
-        f"{deps.personality.vote_strategy}\n\n"
-        f"Valid players: {', '.join(other_players)}\n"
-        f"Respond with a JSON object containing targets (list of aliases) and reasoning."
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +275,7 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        deps.action_prompt = _build_answer_prompt(deps)
+        deps.action_prompt = build_answer_prompt(deps)
         answer_text, updated_history = await generate_answer(deps, history)
 
         cm = get_connection_manager()
@@ -367,7 +308,12 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
                 ),
             )
 
-            log.info("ai_answer_submitted", game_id=game_id, player_id=player_id)
+            log.info(
+                "ai_answer_submitted",
+                game_id=game_id,
+                player_id=player_id,
+                personality=get_personality(game_id, player_id).name,
+            )
 
             if answer_count >= total_count:
                 get_timer_manager().cancel_timer(game_id)
@@ -389,7 +335,7 @@ async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        deps.action_prompt = _build_nomination_prompt(deps)
+        deps.action_prompt = build_nomination_prompt(deps)
         nominee_alias, updated_history = await generate_nomination(deps, history)
 
         cm = get_connection_manager()
@@ -435,7 +381,11 @@ async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
             )
 
             log.info(
-                "ai_nomination_cast", game_id=game_id, player_id=player_id, target=target.alias
+                "ai_nomination_cast",
+                game_id=game_id,
+                player_id=player_id,
+                target=target.alias,
+                personality=get_personality(game_id, player_id).name,
             )
 
             if nom_count >= total_count:
@@ -466,7 +416,7 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        deps.action_prompt = _build_question_prompt(deps)
+        deps.action_prompt = build_question_prompt(deps)
         question_text, updated_history = await generate_question(deps, history)
 
         cm = get_connection_manager()
@@ -516,7 +466,12 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
                 ),
             )
 
-            log.info("ai_question_submitted", game_id=game_id, player_id=player_id)
+            log.info(
+                "ai_question_submitted",
+                game_id=game_id,
+                player_id=player_id,
+                personality=get_personality(game_id, player_id).name,
+            )
 
             if q_count >= expected:
                 get_timer_manager().cancel_timer(game_id)
@@ -561,7 +516,7 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        deps.action_prompt = _build_response_prompt(deps, question_text)
+        deps.action_prompt = build_response_prompt(deps, question_text)
         response_text, updated_history = await generate_question_response(
             deps, question_text, history
         )
@@ -612,7 +567,12 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
                 ),
             )
 
-            log.info("ai_response_submitted", game_id=game_id, player_id=player_id)
+            log.info(
+                "ai_response_submitted",
+                game_id=game_id,
+                player_id=player_id,
+                personality=get_personality(game_id, player_id).name,
+            )
 
             if responded_count >= expected:
                 get_timer_manager().cancel_timer(game_id)
@@ -634,7 +594,7 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
         deps = _build_deps(game_id, player_id)
         if not deps:
             return
-        deps.action_prompt = _build_vote_prompt(deps)
+        deps.action_prompt = build_vote_prompt(deps)
         vote_aliases, updated_history = await decide_vote(deps, history)
 
         cm = get_connection_manager()
@@ -683,7 +643,13 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
                 ),
             )
 
-            log.info("ai_vote_cast", game_id=game_id, player_id=player_id, targets=vote_aliases)
+            log.info(
+                "ai_vote_cast",
+                game_id=game_id,
+                player_id=player_id,
+                targets=vote_aliases,
+                personality=get_personality(game_id, player_id).name,
+            )
 
             # NO early-complete for REVIEW
 
@@ -737,7 +703,7 @@ async def _ai_chain_task(game_id: str, player_id: str, sub_round: int, delay: fl
         chain_history = [cr.seed for cr in rs.chain_rounds]
 
         # Generate association (lightweight LLM call)
-        word = await generate_association(seed, personality, chain_history)
+        word = await generate_association(seed, personality, chain_history, game_id=game_id)
 
         cm = get_connection_manager()
         lock = cm.get_lock(game_id)
@@ -772,7 +738,13 @@ async def _ai_chain_task(game_id: str, player_id: str, sub_round: int, delay: fl
                 ),
             )
 
-            log.info("ai_chain_word_submitted", game_id=game_id, player_id=player_id, word=word)
+            log.info(
+                "ai_chain_word_submitted",
+                game_id=game_id,
+                player_id=player_id,
+                word=word,
+                personality=get_personality(game_id, player_id).name,
+            )
 
     except asyncio.CancelledError:
         pass
