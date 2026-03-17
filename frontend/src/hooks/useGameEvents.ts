@@ -34,6 +34,8 @@ export function useGameEvents(gameId: string, playerId: string) {
       onVerdict: useGameStore.getState().onVerdict,
       onChainSeed: useGameStore.getState().onChainSeed,
       onChainProgress: useGameStore.getState().onChainProgress,
+      onOpen: useGameStore.getState().onOpen,
+      onError: useGameStore.getState().onError,
     }, lastSeq);
 
     return () => {

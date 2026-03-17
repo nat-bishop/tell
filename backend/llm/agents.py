@@ -20,6 +20,7 @@ from backend.llm.prompts import (
     VERDICT_SYSTEM_PROMPT,
     build_system_prompt,
 )
+from schemas.game_state import RoundType
 
 log = structlog.get_logger(__name__)
 
@@ -39,8 +40,7 @@ class AIPlayerDeps:
     all_answers: dict[str, str]  # alias -> answer text
     alive_players: list[str]  # list of aliases
     round_number: int
-    round_type: str = "probe"
-    # Probe-specific
+    round_type: RoundType = RoundType.TASK
     assigned_target: str | None = None  # alias of assigned target
     my_answer: str | None = None
     questions: list[dict] | None = None  # [{target_alias, question, response}]

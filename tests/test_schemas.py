@@ -96,8 +96,10 @@ class TestModelDefaults:
         assert player.eliminated_round is None
 
     def test_round_state_defaults(self):
-        rs = RoundState(round_number=1, prompt_text="Test", prompt_category="logical")
-        assert rs.round_type == RoundType.PROBE
+        rs = RoundState(
+            round_number=1, prompt_text="Test", prompt_category="logical", round_type=RoundType.TASK
+        )
+        assert rs.round_type == RoundType.TASK
         assert rs.answers == {}
         assert rs.questions == []
         assert rs.votes == {}

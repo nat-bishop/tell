@@ -40,7 +40,7 @@ def make_player(
 def make_round_state(
     *,
     round_number: int = 1,
-    round_type: RoundType = RoundType.PROBE,
+    round_type: RoundType = RoundType.TASK,
     prompt_text: str = "Test prompt",
     prompt_category: str = "logical",
     answers: dict[str, str] | None = None,
@@ -74,7 +74,7 @@ def make_game_state(
     phase: GamePhase = GamePhase.PROMPT,
     players: list[Player] | None = None,
     round_number: int = 1,
-    round_type: RoundType = RoundType.PROBE,
+    round_type: RoundType = RoundType.TASK,
     max_rounds: int = 3,
     round_types: list[RoundType] | None = None,
     current_round: RoundState | None = "auto",

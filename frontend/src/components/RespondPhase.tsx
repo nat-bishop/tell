@@ -61,7 +61,7 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
     );
   }
 
-  // No question received (Probe: questioner timed out)
+  // No question received (questioner timed out)
   if (!canRespond) {
     return (
       <div className="flex flex-col items-center gap-6 pt-8">

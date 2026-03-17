@@ -46,7 +46,7 @@ export interface ChainRoundData {
   chosen_player_id: string | null;
 }
 
-interface ChainSeedData {
+export interface ChainSeedData {
   seq: number;
   word: string;
   round_index: number;
@@ -55,14 +55,14 @@ interface ChainSeedData {
   phase_duration: number | null;
 }
 
-interface ChainProgressData {
+export interface ChainProgressData {
   seq: number;
   round_index: number;
-  response_count: number;
-  total_count: number;
+  count: number;
+  total: number;
 }
 
-interface StateSyncData {
+export interface StateSyncData {
   seq: number;
   phase: GamePhase;
   players: PlayerInfo[];
@@ -78,6 +78,7 @@ interface StateSyncData {
   synthesis: string | null;
   verdict: string | null;
   my_answer: string | null;
+  my_votes: string[];
   winner: string | null;
   is_host: boolean;
   phase_deadline: string | null;
@@ -87,14 +88,14 @@ interface StateSyncData {
   current_sub_round: number;
 }
 
-interface PlayerEventData {
+export interface PlayerEventData {
   seq: number;
   player_id: string;
   alias?: string;
   player_count?: number;
 }
 
-interface PhaseChangedData {
+export interface PhaseChangedData {
   seq: number;
   phase: GamePhase;
   round_number: number;
@@ -111,22 +112,19 @@ interface PhaseChangedData {
   writing_begins_at?: string;
 }
 
-interface CountData {
+export interface CountData {
   seq: number;
-  answer_count?: number;
-  total_count?: number;
-  vote_count?: number;
-  count?: number;
-  total?: number;
+  count: number;
+  total: number;
 }
 
-interface VoteResultsData {
+export interface VoteResultsData {
   seq: number;
   votes: Record<string, string[]>;
   vote_tallies: Record<string, number>;
 }
 
-interface EliminationData {
+export interface EliminationData {
   seq: number;
   eliminated_id: string | null;
   eliminated_alias: string | null;
@@ -137,34 +135,34 @@ interface EliminationData {
   no_votes: boolean;
 }
 
-interface GameOverData {
+export interface GameOverData {
   seq: number;
   winner: string;
   players: RevealedPlayer[];
 }
 
-interface HostChangedData {
+export interface HostChangedData {
   seq: number;
   new_host_id: string;
 }
 
-interface NominatedData {
+export interface NominatedData {
   seq: number;
   nominated_id: string;
   nominated_alias: string;
 }
 
-interface SynthesisReadyData {
+export interface SynthesisReadyData {
   seq: number;
   synthesis: string;
 }
 
-interface VerdictData {
+export interface VerdictData {
   seq: number;
   verdict: string;
 }
 
-interface ResponseSubmittedData {
+export interface ResponseSubmittedData {
   seq: number;
   target_id: string;
   target_alias: string;
@@ -173,7 +171,7 @@ interface ResponseSubmittedData {
   total: number;
 }
 
-interface SeqData {
+export interface SeqData {
   seq: number;
 }
 
@@ -251,6 +249,9 @@ interface GameState {
   // Game over
   revealedPlayers: RevealedPlayer[] | null;
 
+  // Connection
+  connectionStatus: "connected" | "reconnecting" | "disconnected";
+
   // Spotlight
   spotlightIndex: number;
 
@@ -276,6 +277,8 @@ interface GameState {
   onVerdict: (data: VerdictData) => void;
   onChainSeed: (data: ChainSeedData) => void;
   onChainProgress: (data: ChainProgressData) => void;
+  onOpen: () => void;
+  onError: () => void;
   reset: () => void;
 }
 
@@ -335,6 +338,7 @@ const initialState = {
   voteResults: null as Record<string, string[]> | null,
   voteTallies: null as Record<string, number> | null,
   revealedPlayers: null as RevealedPlayer[] | null,
+  connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
   spotlightIndex: 0,
 };
 
@@ -365,7 +369,8 @@ export const useGameStore = create<GameState>((set) => ({
       phaseDuration: data.phase_duration ?? null,
       writingBeginsAt: data.writing_begins_at ?? null,
       lastSeq: data.seq,
-      myVotes: [],
+      connectionStatus: "connected",
+      myVotes: data.my_votes || [],
       myQuestionSubmitted: false,
       myResponseSubmitted: false,
       voteResults: null,
@@ -463,8 +468,8 @@ export const useGameStore = create<GameState>((set) => ({
 
   onAnswerSubmitted: (data) =>
     set({
-      answerCount: data.answer_count || 0,
-      totalCount: data.total_count || 0,
+      answerCount: data.count,
+      totalCount: data.total,
       lastSeq: data.seq,
     }),
 
@@ -524,15 +529,15 @@ export const useGameStore = create<GameState>((set) => ({
 
   onChainProgress: (data) =>
     set({
-      chainResponseCount: data.response_count,
-      chainTotalCount: data.total_count,
+      chainResponseCount: data.count,
+      chainTotalCount: data.total,
       lastSeq: data.seq,
     }),
 
   onVoteCast: (data) =>
     set({
-      voteCount: data.vote_count || 0,
-      voteTotalCount: data.total_count || 0,
+      voteCount: data.count,
+      voteTotalCount: data.total,
       lastSeq: data.seq,
     }),
 
@@ -579,6 +584,10 @@ export const useGameStore = create<GameState>((set) => ({
       isHost: s.playerId === data.new_host_id,
       lastSeq: data.seq,
     })),
+
+  onOpen: () => set({ connectionStatus: "connected" }),
+
+  onError: () => set({ connectionStatus: "reconnecting" }),
 
   reset: () => set(initialState),
 }));

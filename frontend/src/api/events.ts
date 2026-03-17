@@ -1,30 +1,45 @@
 import { API_URL } from "./client";
-
-// Callbacks accept parsed JSON — type safety is enforced by the store, not the transport layer
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type EventHandler = (data: any) => void;
+import type {
+  StateSyncData,
+  PlayerEventData,
+  PhaseChangedData,
+  CountData,
+  VoteResultsData,
+  EliminationData,
+  GameOverData,
+  SeqData,
+  HostChangedData,
+  NominatedData,
+  ResponseSubmittedData,
+  SynthesisReadyData,
+  VerdictData,
+  ChainSeedData,
+  ChainProgressData,
+} from "@/hooks/useGameStore";
 
 export interface GameEventCallbacks {
-  onStateSync: EventHandler;
-  onPlayerJoined: EventHandler;
-  onPlayerDisconnected: EventHandler;
-  onPlayerReconnected: EventHandler;
-  onPhaseChanged: EventHandler;
-  onAnswerSubmitted: EventHandler;
-  onVoteCast: EventHandler;
-  onVoteResults: EventHandler;
-  onElimination: EventHandler;
-  onGameOver: EventHandler;
-  onTimerTick: EventHandler;
-  onHostChanged: EventHandler;
-  onNominationCast: EventHandler;
-  onNominated: EventHandler;
-  onQuestionSubmitted: EventHandler;
-  onResponseSubmitted: EventHandler;
-  onSynthesisReady: EventHandler;
-  onVerdict: EventHandler;
-  onChainSeed: EventHandler;
-  onChainProgress: EventHandler;
+  onStateSync: (data: StateSyncData) => void;
+  onPlayerJoined: (data: PlayerEventData) => void;
+  onPlayerDisconnected: (data: PlayerEventData) => void;
+  onPlayerReconnected: (data: PlayerEventData) => void;
+  onPhaseChanged: (data: PhaseChangedData) => void;
+  onAnswerSubmitted: (data: CountData) => void;
+  onVoteCast: (data: CountData) => void;
+  onVoteResults: (data: VoteResultsData) => void;
+  onElimination: (data: EliminationData) => void;
+  onGameOver: (data: GameOverData) => void;
+  onTimerTick: (data: SeqData) => void;
+  onHostChanged: (data: HostChangedData) => void;
+  onNominationCast: (data: CountData) => void;
+  onNominated: (data: NominatedData) => void;
+  onQuestionSubmitted: (data: CountData) => void;
+  onResponseSubmitted: (data: ResponseSubmittedData) => void;
+  onSynthesisReady: (data: SynthesisReadyData) => void;
+  onVerdict: (data: VerdictData) => void;
+  onChainSeed: (data: ChainSeedData) => void;
+  onChainProgress: (data: ChainProgressData) => void;
+  onOpen: () => void;
+  onError: () => void;
 }
 
 export function connectGameEvents(
@@ -36,7 +51,8 @@ export function connectGameEvents(
   const url = `${API_URL}/games/${gameId}/events?player_id=${playerId}&last_seq=${lastSeq}`;
   const es = new EventSource(url);
 
-  const eventMap: Record<string, EventHandler> = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const eventMap: Record<string, (data: any) => void> = {
     state_sync: callbacks.onStateSync,
     player_joined: callbacks.onPlayerJoined,
     player_disconnected: callbacks.onPlayerDisconnected,
@@ -70,8 +86,13 @@ export function connectGameEvents(
     });
   }
 
+  es.onopen = () => {
+    callbacks.onOpen();
+  };
+
   es.onerror = () => {
     console.warn("SSE connection error, will auto-reconnect");
+    callbacks.onError();
   };
 
   return { close: () => es.close() };

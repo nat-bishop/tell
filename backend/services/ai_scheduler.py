@@ -39,7 +39,6 @@ from backend.services.game_logic import (
     get_alive_players,
     get_player_by_id,
     get_question_target,
-    is_question_anonymous,
     is_question_eligible,
     is_response_eligible,
 )
@@ -124,7 +123,7 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
 
     all_answers: dict[str, str] = {}
     current_prompt = ""
-    round_type: str = RoundType.PROBE
+    round_type: RoundType = RoundType.TASK
     assigned_target: str | None = None
     my_answer: str | None = None
     questions: list[dict] | None = None
@@ -145,7 +144,7 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
 
         my_answer = rs.answers.get(player_id)
 
-        # Assigned target (Probe)
+        # Assigned target
         target_id = rs.assignments.get(player_id)
         if target_id:
             target_p = player_map.get(target_id)
@@ -303,8 +302,8 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
                 AnswerSubmittedEvent(
                     seq=session.next_seq(),
                     player_id=player_id,
-                    answer_count=answer_count,
-                    total_count=total_count,
+                    count=answer_count,
+                    total=total_count,
                 ),
             )
 
@@ -449,7 +448,6 @@ async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
                 target_id=target_id,
                 target_alias=target_alias,
                 question=question_text,
-                anonymous=is_question_anonymous(round_state.round_type),
             )
             round_state.questions.append(entry)
             _set_history(game_id, player_id, updated_history)
@@ -506,7 +504,7 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
             (q for q in round_state.questions if q.target_id == player_id and q.response is None),
             None,
         )
-        # Use synthesis if available (interrogation), else direct question (probe)
+        # Use synthesis if available (interrogation), else direct question
         question_text = round_state.synthesis or (pending_q.question if pending_q else None)
 
         if not pending_q or not question_text:
@@ -638,8 +636,8 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
                 VoteCastEvent(
                     seq=session.next_seq(),
                     voter_id=player_id,
-                    vote_count=vote_count,
-                    total_count=total_count,
+                    count=vote_count,
+                    total=total_count,
                 ),
             )
 
@@ -733,8 +731,8 @@ async def _ai_chain_task(game_id: str, player_id: str, sub_round: int, delay: fl
                 ChainProgressEvent(
                     seq=session.next_seq(),
                     round_index=sub_round,
-                    response_count=len(current_cr.responses),
-                    total_count=len(alive),
+                    count=len(current_cr.responses),
+                    total=len(alive),
                 ),
             )
 

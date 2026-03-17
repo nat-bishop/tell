@@ -11,6 +11,14 @@ The robots are running the test. They pick tasks they believe will expose the hu
 
 The diegetic framing justifies the game's design: "Of course this round is a haiku challenge — the robots think they're great at haiku."
 
+## Why This Game, Right Now
+
+"Is this AI?" has become a reflexive question. "Slop" was Merriam-Webster's Word of the Year 2025. Bot traffic exceeded human traffic for the first time. Dead Internet Theory went mainstream. A casual scroll through any feed now feels like a test.
+
+Human or Not (AI21 Labs, 2023) proved 15 million people wanted to play "spot the AI" — but 1:1 chat couldn't sustain engagement. Two minutes, one binary guess, no social dynamics. Tell adds the layer that makes it replayable: it's not just "detect AI," it's "deceive a group while reading a room." The multiplayer social deduction structure — alliances, betrayals, public accusations, private suspicions — creates the emergent stories that 1:1 detection games can't.
+
+The reverse framing is the key insight: everyone pretends to be a robot. This creates comedy (humans sweating to sound artificial), strategic depth (AI blends in more easily when everyone's performing), and cultural resonance (we're all already performing for algorithms). The question isn't "can you spot the AI?" — it's "can you hide your humanity?"
+
 ## Design Vision
 
 **Aesthetic**: Editorial minimalism. A screenplay unfolding in real-time. The page is the stage. Words are the only actors.
@@ -162,6 +170,77 @@ Speed. Instinct over deliberation. You can't overthink a word association in 8 s
 
 ---
 
+## Pacing
+
+### The Tension Curve
+
+Two forces drive every social deduction game (Marc LeBlanc's Dramatic Game Dynamics):
+
+- **Uncertainty** — "Who's human?" Starts high, decreases as evidence accumulates.
+- **Inevitability** — "Someone's getting eliminated." Starts low, increases with each vote.
+
+The climax occurs at their intersection: enough evidence to suspect, not enough to be sure. Every round should deliver this arc in miniature, and the full game should deliver it across all rounds.
+
+### Why Three Round Types Matter
+
+Contrast-based intensity — never sustain maximum tension. The three round types oscillate:
+
+| Round | Duration | Pressure type | Agency |
+|-------|----------|---------------|--------|
+| Task | ~73s | Low — fast, everyone equal | High (writing) then low (voting) |
+| Interrogation | ~163s | High — one player in the spotlight | Mixed (writing, questioning, defending) |
+| Word Chain | ~112s | Medium — distributed, instinctive | High (rapid-fire association) |
+
+This maps to the Among Us insight: alternate between high-agency/low-communication phases (writing answers) and low-agency/high-communication phases (reviewing + voting). Monotonous round lengths kill pacing; varied lengths keep attention.
+
+### Timing
+
+Total game: ~15-20 minutes (4-5 rounds). This is the party game sweet spot (15-45 minutes total, individual rounds 30s-3m).
+
+Timer pressure for creative tasks: 25-45 seconds. Enough to think, not enough to overthink. Research shows moderate time pressure is the sweet spot — it bypasses self-censorship, which means imperfect answers under pressure are both funnier and more human. This is a feature, not a constraint.
+
+### Late-Game Acceleration
+
+Research says tension peaks should accelerate toward the ending. This happens naturally: fewer players = faster phases = quicker rounds. The final round with 3 players left moves noticeably faster than the opening round with 7.
+
+Future consideration: shorter timers in round 4+ for explicit acceleration.
+
+---
+
+## Humor
+
+The game is funny. This section explains why, so future design decisions preserve it.
+
+### The Jackbox Principle
+
+"The game's job is to make the player look funny, not to be funny itself." The prompts are the setup; the players are the punchline. A good prompt reliably produces funny answers from normal people. The game never tells a joke — it creates conditions where players can't help being funny.
+
+### Constraint Creates Comedy
+
+"Explain love in 5 words" is funnier than "write something funny." The constraint eliminates the blank-page problem and narrows the comedic path. Every format restriction — word count, syllable count, style imitation — forces creative compression, which is where comedy lives. Time pressure amplifies this: you can't self-edit in 25 seconds, so you get gut reactions instead of polished responses.
+
+### Four Sources of Humor
+
+1. **The answers themselves** — constrained prompts produce inherently quotable responses. A haiku about Monday mornings written in 25 seconds will be imperfect and human and funny.
+2. **The juxtaposition** — seeing all answers side-by-side during review. One player wrote a corporate memo, another wrote a cry for help, the AI wrote something technically perfect but soulless. The comparison is the joke. (This is Quiplash's "head-to-head reveal" principle.)
+3. **The deception** — watching someone desperately try to sound robotic. The human who writes "I am functioning within normal parameters" and the AI that writes the same thing. Who's performing? The uncertainty is comedic.
+4. **The reveal** — "UNIT-7 was HUMAN" after everyone was sure they were a robot. The post-reveal conversation ("I KNEW it because of the haiku!") is half the entertainment.
+
+### The Comedy of Misplaced Confidence
+
+The diegetic framing (robots designed the test) creates comedy even before anyone writes anything. "Write a haiku" is funny because the robots think they're great at haiku — but LLMs notoriously can't count syllables. "Be casual" is funny because AI casual sounds like an executive who just discovered slang. The comedy is structural: the robots are confidently testing skills they're bad at.
+
+### Prompt Design Principles
+
+From Jackbox's published design research:
+
+- **Start with funny words or relatable scenarios.** "Write a passive-aggressive out-of-office reply" is inherently funny. "Write a response" is not.
+- **Balance specificity.** Too vague = blank-page paralysis. Too constrained = no room for personality. The sweet spot: a clear format with room for voice.
+- **Ask questions you genuinely want answers to.** If the designer wouldn't laugh reading the responses, the prompt is wrong.
+- **Vary format across categories.** Haiku, then one-liner, then word association, then hot-seat defense. Variety prevents fatigue and ensures different skills (and different types of humor) surface each round.
+
+---
+
 ## Shared Mechanics
 
 ### Matchmaking
@@ -182,9 +261,23 @@ Multi-vote means a coordinated group can focus suspicion. A lone vote rarely eli
 
 ### Elimination & Verdict
 
-Vote tallies revealed → identity reveal ("`NODE-3` was human.") → one-line LLM verdict sentence. Maximum restraint for maximum tension.
+The elimination reveal is the guaranteed spectacle moment — where all accumulated tension resolves at once. It's a stepped sequence designed to build anticipation:
 
-The verdict is generated by an LLM narrator with a literary, dry-wit tone — one sentence referencing the eliminated player's actual answer. 3-second timeout; fallback: no verdict.
+1. **Vote tallies** — who voted for whom. The social map becomes visible.
+2. **Identity reveal** — "`NODE-3` was human." The moment of truth.
+3. **LLM verdict** — one sentence of literary commentary. Dry wit, referencing the eliminated player's actual answer. The verdict reframes the entire round — it's the punchline.
+
+3-second timeout on the verdict; fallback: no verdict. Maximum restraint for maximum tension.
+
+This is the Secret Hitler litmus test: "A good game should leave your player with a story to tell their friends." Every elimination produces a retellable moment: the bold lie that almost worked, the dramatic accusation that turned out right, the AI that fooled everyone for three rounds, the human whose haiku was too perfect.
+
+### Eliminated Players
+
+The #1 design flaw in social deduction is eliminated players with nothing to do. Tell's approach:
+
+- **Short games**: 15-20 minutes total. Elimination happens ~minute 5+. Waiting 10 minutes is tolerable, especially with entertainment value.
+- **Information advantage**: Eliminated players see true identities. They know something the living don't. Spectating becomes satisfying because you're watching people make wrong decisions with incomplete information.
+- **Future consideration**: Blood on the Clocktower's ghost vote — eliminated players get one vote in the final round. Their accumulated knowledge makes this vote dramatically weighted. Low-effort addition with high engagement value.
 
 ### AI Personalities
 

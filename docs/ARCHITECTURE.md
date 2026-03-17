@@ -59,13 +59,15 @@ CHAIN is subdivided into 8 sub-rounds of 8s each, driven by `_start_chain_loop` 
 
 ### Phase Transitions
 
+The canonical valid phase sequences are defined in `PHASE_SEQUENCES` (a dict keyed by `RoundType`) in `game_logic.py`. `next_phase()` consults this table; `transitions.py` helper functions drive the actual async work.
+
 All transitions funnel through helper functions in `transitions.py` (shared by `actions.py` routes and `ai_scheduler.py`):
 
 | Function | Trigger | What it does |
 |---|---|---|
 | `start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps then calls `handle_phase_expiry` |
 | `handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to `do_*_complete` |
-| `do_prompt_complete` | All answers in | TASK → REVIEW; INTERROGATION → NOMINATE; PROBE → QUESTION |
+| `do_prompt_complete` | All answers in | TASK → REVIEW; INTERROGATION → NOMINATE |
 | `do_question_complete` | All questions in | Interrogation: calls LLM synthesis, broadcasts `synthesis_ready`, → RESPOND |
 | `do_vote_resolution` | REVIEW timer expires | Tallies multi-votes, generates LLM verdict, → ELIMINATION |
 | `do_after_elimination` | ELIMINATION timer | Checks game-over; branches on next round type |
@@ -188,7 +190,7 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 ## Prompt Selection
 
-**Regular prompts**: 30 prompts across 5 categories (emotional, logical, creative, philosophical, social). Used in Interrogation/Probe rounds. Selection rules: no repeats, no same-category back-to-back, social prompts excluded from round 1.
+**Regular prompts**: 30 prompts across 5 categories (emotional, logical, creative, philosophical, social). Used in Interrogation rounds. Selection rules: no repeats, no same-category back-to-back, social prompts excluded from round 1.
 
 **Task prompts**: 42 prompts across 7 categories (haiku, concise, humor, corporate, casual, style, emotional_task). Used in Task rounds. Separate `used_task_prompt_indices` + `last_task_prompt_category` tracked in `TellGameState`. Same no-repeat, no-same-category rules via `select_task_prompt()`.
 

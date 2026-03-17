@@ -21,7 +21,6 @@ class GamePhase(str, enum.Enum):
 
 
 class RoundType(str, enum.Enum):
-    PROBE = "probe"
     INTERROGATION = "interrogation"
     TASK = "task"
     WORD_CHAIN = "word_chain"
@@ -48,7 +47,7 @@ class QuestionEntry(BaseModel):
     target_alias: str
     question: str
     response: str | None = None
-    anonymous: bool = True
+
 
 
 class ChainRound(BaseModel):
@@ -62,7 +61,7 @@ class RoundState(BaseModel):
     round_number: int
     prompt_text: str
     prompt_category: str
-    round_type: RoundType = RoundType.PROBE
+    round_type: RoundType
     answers: dict[str, str] = Field(default_factory=dict)
     questions: list[QuestionEntry] = Field(default_factory=list)
     assignments: dict[str, str] = Field(default_factory=dict)  # questioner_id -> target_id

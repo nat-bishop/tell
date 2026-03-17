@@ -14,7 +14,6 @@ from backend.api.deps import (
     get_timer_manager,
 )
 from backend.services.game_logic import (
-    assign_question_targets,
     check_game_over,
     fill_missing_answers,
     fill_missing_responses,
@@ -120,7 +119,6 @@ async def do_prompt_complete(game_id: str, session) -> None:
     """PROMPT complete → depends on round type:
     - TASK: straight to REVIEW
     - INTERROGATION: NOMINATE
-    - PROBE: QUESTION
 
     Assumes caller holds the game lock and has called fill_missing_answers.
     """
@@ -143,7 +141,9 @@ async def do_prompt_complete(game_id: str, session) -> None:
             ),
         )
         next_phase = GamePhase.REVIEW
-    elif round_state and round_state.round_type == RoundType.INTERROGATION:
+    else:
+        # Interrogation — proceed to nomination
+        assert round_state, "No active round in PROMPT phase"
         transition_to_nominate(state, settings.nominate_duration)
         await cm.broadcast(
             game_id,
@@ -156,22 +156,6 @@ async def do_prompt_complete(game_id: str, session) -> None:
             ),
         )
         next_phase = GamePhase.NOMINATE
-    else:
-        if round_state:
-            round_state.assignments = assign_question_targets(state)
-        transition_to_question(state, settings.question_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                answers=round_state.answers if round_state else {},
-                round_type=round_state.round_type if round_state else RoundType.PROBE,
-                assignments=round_state.assignments if round_state else {},
-            ),
-        )
-        next_phase = GamePhase.QUESTION
 
     await start_phase_timer(game_id, next_phase)
     from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
@@ -234,7 +218,7 @@ async def do_question_complete(game_id: str, session) -> None:
     state = session.state
     round_state = state.current_round
 
-    if round_state and round_state.round_type == RoundType.INTERROGATION:
+    if round_state:
         # Synthesize questions for the nominee
         synthesis = None
         if round_state.questions:
@@ -282,19 +266,6 @@ async def do_question_complete(game_id: str, session) -> None:
                 nominated_id=round_state.nominated_id,
             ),
         )
-    else:
-        # Probe: go directly to RESPOND
-        transition_to_respond(state, settings.respond_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                round_type=round_state.round_type if round_state else RoundType.PROBE,
-                questions=[q.model_dump() for q in round_state.questions] if round_state else [],
-            ),
-        )
 
     await start_phase_timer(game_id, GamePhase.RESPOND)
     from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
@@ -319,7 +290,7 @@ async def do_respond_complete(game_id: str, session) -> None:
             state,
             session,
             settings,
-            round_type=round_state.round_type if round_state else RoundType.PROBE,
+            round_type=round_state.round_type if round_state else None,
             questions=[q.model_dump() for q in round_state.questions] if round_state else [],
             synthesis=round_state.synthesis if round_state else None,
         ),
@@ -386,7 +357,7 @@ async def do_after_elimination(game_id: str, session) -> None:
 
     Branch on next round type:
     - TASK: select task prompt → PROMPT (25s)
-    - INTERROGATION/PROBE: select prompt → PROMPT (45s)
+    - INTERROGATION: select prompt → PROMPT (45s)
     - WORD_CHAIN: select seed → CHAIN (64s) + start chain loop
 
     Assumes caller holds the game lock.
@@ -454,7 +425,7 @@ async def do_after_elimination(game_id: str, session) -> None:
         await _start_chain_loop(game_id, session)
 
     else:
-        # INTERROGATION or PROBE
+        # INTERROGATION
         total_duration = get_phase_duration(settings, GamePhase.PROMPT) or 55
         transition_to_prompt(state, total_duration, settings.prompt_reading_duration)
         round_state = state.current_round
@@ -466,7 +437,7 @@ async def do_after_elimination(game_id: str, session) -> None:
                 settings,
                 prompt_text=round_state.prompt_text if round_state else None,
                 prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else RoundType.PROBE,
+                round_type=round_state.round_type if round_state else None,
             ),
         )
         await start_phase_timer(game_id, GamePhase.PROMPT)

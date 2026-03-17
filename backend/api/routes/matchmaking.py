@@ -14,6 +14,8 @@ from schemas.api_models import (
     MatchmakingJoinRequest,
     MatchmakingJoinResponse,
     MatchmakingLeaveRequest,
+    MatchmakingStatusResponse,
+    StatusResponse,
 )
 from schemas.constants import MATCHMAKING_LOBBY_ID
 
@@ -31,7 +33,7 @@ async def matchmaking_join(req: MatchmakingJoinRequest):
     return result
 
 
-@router.post("/leave")
+@router.post("/leave", response_model=StatusResponse)
 async def matchmaking_leave(req: MatchmakingLeaveRequest):
     """Leave the matchmaking queue."""
     mm = get_matchmaking_service()
@@ -39,11 +41,16 @@ async def matchmaking_leave(req: MatchmakingLeaveRequest):
     return {"status": "ok"}
 
 
-@router.get("/status")
+@router.get("/status", response_model=MatchmakingStatusResponse)
 async def matchmaking_status():
     """Current matchmaking lobby state."""
     mm = get_matchmaking_service()
-    return mm.get_status()
+    status = mm.get_status()
+    return MatchmakingStatusResponse(
+        human_count=status["human_count"],
+        countdown_seconds=None,
+        message=f"{status['human_count']} in queue" if status["human_count"] > 0 else "",
+    )
 
 
 @router.get("/events")

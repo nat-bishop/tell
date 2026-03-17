@@ -37,7 +37,13 @@
       "Bash(make test:*)",
       "WebFetch(domain:ai.pydantic.dev)",
       "Skill(commit-commands:commit)",
-      "WebFetch(domain:humanornot.so)"
+      "WebFetch(domain:humanornot.so)",
+      "WebFetch(domain:www.google.com)",
+      "WebFetch(domain:mechanicsofmagic.com)",
+      "WebFetch(domain:platinumparagon.info)",
+      "Bash(python -m pytest tests/ -x -q)",
+      "WebFetch(domain:duckduckgo.com)",
+      "WebFetch(domain:html.duckduckgo.com)"
     ]
   }
 }

@@ -21,7 +21,6 @@ from backend.services.game_logic import (
     get_alive_players,
     get_player_by_id,
     get_question_target,
-    is_question_anonymous,
     is_question_eligible,
     is_response_eligible,
     max_votes_for_player,
@@ -47,6 +46,7 @@ from schemas.api_models import (
     QuestionSubmittedEvent,
     ResponseSubmittedEvent,
     StartGameRequest,
+    StatusResponse,
     SubmitAnswerRequest,
     SubmitChainWordRequest,
     SubmitQuestionRequest,
@@ -109,7 +109,7 @@ async def join_game(game_id: str, req: JoinGameRequest):
     return JoinGameResponse(player_id=player_id, alias=alias, game_id=game_id)
 
 
-@router.post("/{game_id}/start")
+@router.post("/{game_id}/start", response_model=StatusResponse)
 async def start_game(game_id: str, req: StartGameRequest):
     """Start the game (host only). Spawns AI players and begins round 1."""
     structlog.contextvars.clear_contextvars()
@@ -130,7 +130,7 @@ async def start_game(game_id: str, req: StartGameRequest):
 
         host = next((p for p in state.players if p.id == req.player_id and p.is_host), None)
         if not host:
-            raise HTTPException(status_code=403, detail="Only the host can start the game")
+            raise HTTPException(status_code=400, detail="Only the host can start the game")
 
         human_count = len([p for p in state.players if p.role == PlayerRole.HUMAN])
         if human_count < settings.min_humans:
@@ -142,10 +142,10 @@ async def start_game(game_id: str, req: StartGameRequest):
     ai_count = min(max(req.ai_count, settings.min_ai), settings.max_ai)
     await initialize_and_start_game(game_id, ai_count)
 
-    return {"status": "started"}
+    return {"status": "ok"}
 
 
-@router.post("/{game_id}/answer")
+@router.post("/{game_id}/answer", response_model=StatusResponse)
 async def submit_answer(game_id: str, req: SubmitAnswerRequest):
     """Submit an answer to the current prompt."""
     structlog.contextvars.clear_contextvars()
@@ -191,15 +191,15 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
         event = AnswerSubmittedEvent(
             seq=session.next_seq(),
             player_id=req.player_id,
-            answer_count=answer_count,
-            total_count=total_count,
+            count=answer_count,
+            total=total_count,
         )
         await cm.broadcast(game_id, event)
         log.info(
             "answer_submitted",
             player_id=req.player_id,
-            answer_count=answer_count,
-            total_count=total_count,
+            count=answer_count,
+            total=total_count,
         )
 
         # Check if all answered — early transition
@@ -211,7 +211,7 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
     return {"status": "ok"}
 
 
-@router.post("/{game_id}/nominate")
+@router.post("/{game_id}/nominate", response_model=StatusResponse)
 async def nominate_player(game_id: str, req: NominateRequest):
     """Nominate a player for the hot seat (Interrogation only)."""
     structlog.contextvars.clear_contextvars()
@@ -271,7 +271,7 @@ async def nominate_player(game_id: str, req: NominateRequest):
     return {"status": "ok"}
 
 
-@router.post("/{game_id}/question")
+@router.post("/{game_id}/question", response_model=StatusResponse)
 async def submit_question(game_id: str, req: SubmitQuestionRequest):
     """Submit a follow-up question during QUESTION phase."""
     structlog.contextvars.clear_contextvars()
@@ -318,7 +318,6 @@ async def submit_question(game_id: str, req: SubmitQuestionRequest):
             target_id=target_id,
             target_alias=target_alias,
             question=req.question.strip(),
-            anonymous=is_question_anonymous(round_state.round_type),
         )
         round_state.questions.append(entry)
 
@@ -343,7 +342,7 @@ async def submit_question(game_id: str, req: SubmitQuestionRequest):
     return {"status": "ok"}
 
 
-@router.post("/{game_id}/respond")
+@router.post("/{game_id}/respond", response_model=StatusResponse)
 async def submit_response(game_id: str, req: SubmitResponseRequest):
     """Submit a response to a question during RESPOND phase."""
     structlog.contextvars.clear_contextvars()
@@ -413,7 +412,7 @@ async def submit_response(game_id: str, req: SubmitResponseRequest):
     return {"status": "ok"}
 
 
-@router.post("/{game_id}/vote")
+@router.post("/{game_id}/vote", response_model=StatusResponse)
 async def cast_vote(game_id: str, req: CastVoteRequest):
     """Cast votes for who you think is human (up to 3, changeable)."""
     structlog.contextvars.clear_contextvars()
@@ -446,7 +445,9 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
         if len(req.target_ids) > max_v:
             raise HTTPException(status_code=400, detail=f"Max {max_v} votes allowed")
 
-        # Validate all targets are alive
+        # Validate not self-voting and all targets are alive
+        if req.player_id in req.target_ids:
+            raise HTTPException(status_code=400, detail="Cannot vote for yourself")
         alive_ids = {p.id for p in alive}
         for tid in req.target_ids:
             if tid not in alive_ids:
@@ -461,12 +462,12 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
         event = VoteCastEvent(
             seq=session.next_seq(),
             voter_id=req.player_id,
-            vote_count=vote_count,
-            total_count=total_count,
+            count=vote_count,
+            total=total_count,
         )
         await cm.broadcast(game_id, event)
         log.info(
-            "vote_cast", player_id=req.player_id, vote_count=vote_count, total_count=total_count
+            "vote_cast", player_id=req.player_id, count=vote_count, total=total_count
         )
 
         # NO early-complete for REVIEW — always runs full timer
@@ -474,7 +475,7 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
     return {"status": "ok"}
 
 
-@router.post("/{game_id}/chain-word")
+@router.post("/{game_id}/chain-word", response_model=StatusResponse)
 async def submit_chain_word(game_id: str, req: SubmitChainWordRequest):
     """Submit a word during a Word Chain sub-round."""
     structlog.contextvars.clear_contextvars()
@@ -521,15 +522,15 @@ async def submit_chain_word(game_id: str, req: SubmitChainWordRequest):
             ChainProgressEvent(
                 seq=session.next_seq(),
                 round_index=req.round_index,
-                response_count=len(current_cr.responses),
-                total_count=len(alive),
+                count=len(current_cr.responses),
+                total=len(alive),
             ),
         )
         log.info(
             "chain_word_submitted",
             player_id=req.player_id,
             round_index=req.round_index,
-            response_count=len(current_cr.responses),
+            count=len(current_cr.responses),
         )
 
     return {"status": "ok"}

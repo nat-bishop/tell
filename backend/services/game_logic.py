@@ -157,11 +157,6 @@ def count_responses(round_state: RoundState) -> tuple[int, int]:
     return (responded, len(targets))
 
 
-def is_question_anonymous(round_type: RoundType) -> bool:
-    """Whether questions should be anonymous for this round type."""
-    return round_type == RoundType.PROBE
-
-
 def assign_question_targets(state: TellGameState) -> dict[str, str]:
     """Round-robin chain: player i questions player (i+1) % len."""
     alive = [p for p in state.players if p.is_alive]
@@ -203,7 +198,7 @@ def get_next_round_type(state: TellGameState) -> RoundType:
 def transition_to_prompt(
     state: TellGameState, duration: int, reading_duration: int = 0
 ) -> TellGameState:
-    """Start a new round with a new prompt (Interrogation or Probe)."""
+    """Start a new round with a new prompt (Interrogation)."""
     state.round_number += 1
     idx, prompt = select_prompt(
         state.used_prompt_indices,
@@ -213,7 +208,7 @@ def transition_to_prompt(
     state.used_prompt_indices.append(idx)
     state.last_prompt_category = prompt.category.value
 
-    round_type = RoundType.PROBE
+    round_type = RoundType.INTERROGATION
     if state.round_types and state.round_number <= len(state.round_types):
         round_type = state.round_types[state.round_number - 1]
 
@@ -500,16 +495,14 @@ def build_state_sync(
         synthesis = round_state.synthesis
         verdict = round_state.verdict
 
-        # Serialize questions — hide questioner identity if anonymous
         for q in round_state.questions:
             qd: dict = {
+                "questioner_id": q.questioner_id,
                 "target_id": q.target_id,
                 "target_alias": q.target_alias,
                 "question": q.question,
                 "response": q.response,
             }
-            if not q.anonymous:
-                qd["questioner_id"] = q.questioner_id
             questions.append(qd)
 
         # Word Chain state
@@ -537,7 +530,11 @@ def build_state_sync(
         "nominations": nominations,
         "synthesis": synthesis,
         "verdict": verdict,
-        "votes": {},
+        "my_votes": (
+            round_state.votes.get(player_id, [])
+            if round_state and state.phase == GamePhase.REVIEW
+            else []
+        ),
         "phase_deadline": state.phase_deadline.isoformat() if state.phase_deadline else None,
         "phase_duration": phase_duration,
         "winner": state.winner,

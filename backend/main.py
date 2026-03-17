@@ -85,7 +85,7 @@ app = FastAPI(
 )
 
 # CORS — configurable via TELL_CORS_ORIGINS env var (comma-separated), defaults to * for dev
-_cors_origins = os.environ.get("TELL_CORS_ORIGINS", "*").split(",")
+_cors_origins = [o.strip() for o in os.environ.get("TELL_CORS_ORIGINS", "*").split(",")]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,

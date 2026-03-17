@@ -115,7 +115,7 @@ GET-based `EventSource` for persistent game stream, POST for actions. Each clien
 AI players call LLM **outside** the lock, then acquire `asyncio.Lock` only to write result + broadcast. If phase changed during LLM generation, result is discarded. One lock per game, held for microseconds (never during I/O).
 
 ### Type pipeline
-Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run `make codegen` after changing any schema or route signature.
+Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run `make codegen` after changing any schema or route signature. SSE event types in `schemas/api_models.py` use `Literal["event_name"]` for the `event_type` field — ensures exhaustive matching on the frontend.
 
 ### State machine — three round types
 
@@ -141,6 +141,8 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 ### Game logic is pure
 `game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, assignment logic, client state sanitization. Routes call these under the lock.
 
+`PHASE_SEQUENCES` dict in `game_logic.py` is the canonical definition of valid phase → next-phase transitions per round type. `next_phase()` uses it to drive the state machine.
+
 ### Voting: multi-vote
 Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are changeable until timer expires. No early-complete for REVIEW.
 
@@ -162,7 +164,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
 - **Eliminated players see spectator views**: `game/[id]/page.tsx` checks `isAlive` and passes `spectator` prop to phase components.
-- **Round-robin assignments** (Interrogation only now): player `i` questions player `(i+1) % len(alive)`. Generated in `assign_question_targets()` — Probe round type is no longer in rotation.
+- **Round-robin assignments** (Interrogation only): player `i` questions player `(i+1) % len(alive)`. Generated in `assign_question_targets()`.
 - **Hot-seated player** (Interrogation): nominated player can't submit questions, only responds to synthesis.
 - **Word Chain sub-rounds**: The CHAIN phase runs 8 sub-rounds of 8s each inside a background loop (`_start_chain_loop`). A safety timer of 64s also runs. Sub-round winner is chosen by `select_chain_next_word()` (prefers unique words). Next seed = chosen word.
 - **Matchmaking join window**: `MatchmakingService._join_window_open` event blocks new joins while a game is being fired. Clears after lobby SSE clients are disconnected.

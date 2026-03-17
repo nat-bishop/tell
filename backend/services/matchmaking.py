@@ -32,6 +32,7 @@ class MatchmakingService:
 
     def __init__(self) -> None:
         self._queue: list[QueuedPlayer] = []
+        self._queue_lock: asyncio.Lock = asyncio.Lock()
         self._countdown_task: asyncio.Task | None = None
         self._solo_timeout_task: asyncio.Task | None = None
         self._join_window_open: asyncio.Event = asyncio.Event()
@@ -57,41 +58,45 @@ class MatchmakingService:
         await asyncio.wait_for(self._join_window_open.wait(), timeout=5.0)
 
         player_id = generate_player_id()
-        existing_aliases = {p.alias for p in self._queue}
-        aliases = generate_aliases(1, existing_aliases)
-        alias = aliases[0]
 
-        entry = QueuedPlayer(player_id=player_id, alias=alias)
-        self._queue.append(entry)
+        async with self._queue_lock:
+            existing_aliases = {p.alias for p in self._queue}
+            aliases = generate_aliases(1, existing_aliases)
+            alias = aliases[0]
 
-        log.info("matchmaking_joined", alias=alias, queue_size=len(self._queue))
-        await self._on_player_change()
+            entry = QueuedPlayer(player_id=player_id, alias=alias)
+            self._queue.append(entry)
+            queue_size = len(self._queue)
+
+        log.info("matchmaking_joined", alias=alias, queue_size=queue_size)
+        await self._on_player_change(queue_size)
 
         return MatchmakingJoinResponse(
             player_id=player_id,
             alias=alias,
-            position=len(self._queue),
+            position=queue_size,
         )
 
     async def leave(self, player_id: str) -> None:
         """Remove a player from the matchmaking queue."""
-        before = len(self._queue)
-        self._queue = [p for p in self._queue if p.player_id != player_id]
-        if len(self._queue) == before:
-            return  # player wasn't in queue — skip side effects
+        async with self._queue_lock:
+            before = len(self._queue)
+            self._queue = [p for p in self._queue if p.player_id != player_id]
+            if len(self._queue) == before:
+                return  # player wasn't in queue — skip side effects
+            queue_size = len(self._queue)
 
-        log.info("matchmaking_left", player_id=player_id, queue_size=len(self._queue))
+        log.info("matchmaking_left", player_id=player_id, queue_size=queue_size)
         cm = get_connection_manager()
         cm.disconnect(MATCHMAKING_LOBBY_ID, player_id)
-        await self._on_player_change()
+        await self._on_player_change(queue_size)
 
-    async def _on_player_change(self) -> None:
+    async def _on_player_change(self, count: int) -> None:
         """Check thresholds after any join/leave and manage countdown."""
         settings = get_settings()
-        count = self.human_count
 
         if count >= settings.mm_min_humans and self._countdown_task is None:
-            await self._start_countdown()
+            await self._start_countdown(count)
             return
         elif count < settings.mm_min_humans and self._countdown_task is not None:
             self._cancel_countdown()
@@ -107,16 +112,17 @@ class MatchmakingService:
             return
 
         if self._countdown_task is None:
-            await self._broadcast_status(f"{count} assembled — waiting for more")
+            await self._broadcast_status(f"{count} assembled — waiting for more", count=count)
 
-    async def _start_countdown(self) -> None:
+    async def _start_countdown(self, count: int) -> None:
         """Begin the countdown to game creation."""
         settings = get_settings()
         seconds = settings.mm_countdown_seconds
         log.info("matchmaking_countdown_started", seconds=seconds)
         await self._broadcast_status(
-            f"{self.human_count} assembled — game begins shortly",
+            f"{count} assembled — game begins shortly",
             countdown_seconds=seconds,
+            count=count,
         )
         self._countdown_task = asyncio.create_task(self._countdown_timer(seconds))
 
@@ -164,8 +170,9 @@ class MatchmakingService:
 
         try:
             # Snapshot and clear queue
-            players = list(self._queue)
-            self._queue.clear()
+            async with self._queue_lock:
+                players = list(self._queue)
+                self._queue.clear()
             self._cancel_countdown()
             if self._solo_timeout_task:
                 self._solo_timeout_task.cancel()
@@ -230,12 +237,13 @@ class MatchmakingService:
         self,
         message: str,
         countdown_seconds: int | None = None,
+        count: int | None = None,
     ) -> None:
         """Send a lobby status update to all connected matchmaking clients."""
         cm = get_connection_manager()
         event = LobbyStatusEvent(
             seq=self._next_seq(),
-            human_count=self.human_count,
+            human_count=count if count is not None else self.human_count,
             countdown_seconds=countdown_seconds,
             message=message,
         )

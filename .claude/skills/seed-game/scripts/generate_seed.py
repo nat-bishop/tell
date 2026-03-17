@@ -184,7 +184,7 @@ def _derive_round_state(
     elif round_type == RoundType.WORD_CHAIN:
         prompt_text = "word chain"
         prompt_category = "word_chain"
-    else:  # INTERROGATION (or legacy PROBE)
+    else:  # INTERROGATION
         idx, prompt = select_prompt(used_prompt_indices, last_prompt_category, round_number)
         prompt_text = prompt.text
         prompt_category = prompt.category.value
@@ -233,7 +233,6 @@ def _derive_round_state(
                         if PHASE_ORDER.get(phase, 0) >= PHASE_ORDER[GamePhase.REVIEW]
                         else None
                     ),
-                    anonymous=False,
                 )
                 for pid in alive_ids
                 if pid != nominated.id
@@ -355,7 +354,7 @@ def _track_prior_rounds(
             idx, prompt = select_task_prompt(used_task_prompt_indices, last_task_prompt_category)
             used_task_prompt_indices.append(idx)
             last_task_prompt_category = prompt.category.value
-        elif rt in (RoundType.INTERROGATION, RoundType.PROBE):
+        elif rt == RoundType.INTERROGATION:
             idx, prompt = select_prompt(used_prompt_indices, last_prompt_category, r)
             used_prompt_indices.append(idx)
             last_prompt_category = prompt.category.value
@@ -549,7 +548,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--round-type",
-        choices=[rt.value for rt in RoundType if rt != RoundType.PROBE],
+        choices=[rt.value for rt in RoundType],
         help="Override round type (default: auto from cycle)",
     )
     parser.add_argument(

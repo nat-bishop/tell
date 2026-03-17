@@ -91,29 +91,31 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
         finally:
             log.info("sse_disconnected")
             cm.disconnect(game_id, player_id)
-            repo_session = repo.get(game_id)
-            if repo_session:
-                # Mark disconnected and check host promotion in one pass
-                was_host = False
-                for p in repo_session.state.players:
-                    if p.id == player_id:
-                        p.is_connected = False
-                        was_host = p.is_host
-                        if was_host:
-                            p.is_host = False
-                        break
-
-                if was_host:
+            lock = cm.get_lock(game_id)
+            async with lock:
+                repo_session = repo.get(game_id)
+                if repo_session:
+                    # Mark disconnected and check host promotion in one pass
+                    was_host = False
                     for p in repo_session.state.players:
-                        if p.id != player_id and p.is_connected and p.role == PlayerRole.HUMAN:
-                            p.is_host = True
-                            log.info("host_promoted", new_host_id=p.id)
-                            event = HostChangedEvent(
-                                seq=repo_session.next_seq(),
-                                new_host_id=p.id,
-                                new_host_alias=p.alias,
-                            )
-                            await cm.broadcast(game_id, event)
+                        if p.id == player_id:
+                            p.is_connected = False
+                            was_host = p.is_host
+                            if was_host:
+                                p.is_host = False
                             break
+
+                    if was_host:
+                        for p in repo_session.state.players:
+                            if p.id != player_id and p.is_connected and p.role == PlayerRole.HUMAN:
+                                p.is_host = True
+                                log.info("host_promoted", new_host_id=p.id)
+                                event = HostChangedEvent(
+                                    seq=repo_session.next_seq(),
+                                    new_host_id=p.id,
+                                    new_host_alias=p.alias,
+                                )
+                                await cm.broadcast(game_id, event)
+                                break
 
     return EventSourceResponse(event_generator(), ping=15)

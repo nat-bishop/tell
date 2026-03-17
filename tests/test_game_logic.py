@@ -12,7 +12,6 @@ from backend.services.game_logic import (
     count_responses,
     fill_missing_answers,
     fill_missing_responses,
-    is_question_anonymous,
     is_question_eligible,
     is_response_eligible,
     make_game_over_event,
@@ -314,10 +313,6 @@ class TestPhaseTransitions:
             RoundType.WORD_CHAIN,
         ]
 
-    def test_select_round_types_no_probe(self):
-        types = select_round_types(9)
-        assert RoundType.PROBE not in types
-
     def test_transition_to_task_prompt(self):
         state, _ = make_standard_game()
         state.round_number = 0
@@ -402,27 +397,12 @@ class TestStateSanitization:
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["answers"] == {"h1": "my answer", "h2": "other"}
 
-    def test_build_state_sync_hides_anonymous_questioner(self):
+    def test_build_state_sync_includes_questioner_id(self):
         q = QuestionEntry(
             questioner_id="h1",
             target_id="h2",
             target_alias="BOT-42",
             question="Why?",
-            anonymous=True,
-        )
-        state, _ = make_standard_game(phase=GamePhase.QUESTION)
-        state.current_round.questions = [q]
-
-        sync = build_state_sync(state, "h2", seq=1)
-        assert "questioner_id" not in sync["questions"][0]
-
-    def test_build_state_sync_shows_non_anonymous_questioner(self):
-        q = QuestionEntry(
-            questioner_id="h1",
-            target_id="h2",
-            target_alias="BOT-42",
-            question="Why?",
-            anonymous=False,
         )
         state, _ = make_standard_game(phase=GamePhase.QUESTION)
         state.current_round.questions = [q]
@@ -459,48 +439,21 @@ class TestStateSanitization:
 
 
 class TestQuestionResponseEligibility:
-    def test_is_question_eligible_probe(self):
-        rs = make_round_state(round_type=RoundType.PROBE)
-        assert is_question_eligible(rs, "anyone") is True
-
     def test_is_question_eligible_interrogation(self):
         rs = make_round_state(round_type=RoundType.INTERROGATION, nominated_id="nominee")
         assert is_question_eligible(rs, "other") is True
         assert is_question_eligible(rs, "nominee") is False
-
-    def test_is_response_eligible_probe(self):
-        rs = make_round_state(round_type=RoundType.PROBE)
-        assert is_response_eligible(rs, "anyone") is True
 
     def test_is_response_eligible_interrogation(self):
         rs = make_round_state(round_type=RoundType.INTERROGATION, nominated_id="nominee")
         assert is_response_eligible(rs, "nominee") is True
         assert is_response_eligible(rs, "other") is False
 
-    def test_is_question_anonymous(self):
-        assert is_question_anonymous(RoundType.PROBE) is True
-        assert is_question_anonymous(RoundType.INTERROGATION) is False
-
-    def test_count_expected_questions_probe(self):
-        state, _ = make_standard_game()
-        state.current_round.round_type = RoundType.PROBE
-        assert count_expected_questions(state) == 4  # all alive
-
     def test_count_expected_questions_interrogation(self):
         state, _ = make_standard_game()
         state.current_round.round_type = RoundType.INTERROGATION
         state.current_round.nominated_id = "h1"
         assert count_expected_questions(state) == 3  # all alive minus nominee
-
-    def test_count_responses_probe(self):
-        q1 = QuestionEntry(
-            questioner_id="h1", target_id="h2", target_alias="B", question="Q", response="R"
-        )
-        q2 = QuestionEntry(questioner_id="h2", target_id="a1", target_alias="C", question="Q")
-        rs = make_round_state(round_type=RoundType.PROBE, questions=[q1, q2])
-        responded, total = count_responses(rs)
-        assert responded == 1
-        assert total == 2  # 2 unique targets
 
     def test_count_responses_interrogation(self):
         q1 = QuestionEntry(
