@@ -7,8 +7,6 @@ import pytest
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
     CastVoteRequest,
-    EliminationEvent,
-    PhaseChangedEvent,
     PlayerJoinedEvent,
 )
 from schemas.game_state import (
@@ -20,7 +18,6 @@ from schemas.game_state import (
     TellGameState,
 )
 from schemas.prompts import PROMPTS, PromptCategory, select_prompt
-
 
 # ---------------------------------------------------------------------------
 # Prompt selection

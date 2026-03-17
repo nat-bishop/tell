@@ -38,7 +38,6 @@ from schemas.game_state import (
 )
 from tests.factories import make_game_state, make_player, make_round_state, make_standard_game
 
-
 # ---------------------------------------------------------------------------
 # Player queries
 # ---------------------------------------------------------------------------
@@ -480,9 +479,7 @@ class TestQuestionResponseEligibility:
         q1 = QuestionEntry(
             questioner_id="h1", target_id="h2", target_alias="B", question="Q", response="R"
         )
-        q2 = QuestionEntry(
-            questioner_id="h2", target_id="a1", target_alias="C", question="Q"
-        )
+        q2 = QuestionEntry(questioner_id="h2", target_id="a1", target_alias="C", question="Q")
         rs = make_round_state(round_type=RoundType.PROBE, questions=[q1, q2])
         responded, total = count_responses(rs)
         assert responded == 1
@@ -506,9 +503,7 @@ class TestQuestionResponseEligibility:
         assert total == 1
 
     def test_count_responses_interrogation_no_response(self):
-        q1 = QuestionEntry(
-            questioner_id="h1", target_id="nominee", target_alias="N", question="Q"
-        )
+        q1 = QuestionEntry(questioner_id="h1", target_id="nominee", target_alias="N", question="Q")
         rs = make_round_state(
             round_type=RoundType.INTERROGATION,
             nominated_id="nominee",

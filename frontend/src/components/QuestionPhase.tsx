@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitQuestion } from "@/api/actions";
 import { SystemText } from "./SystemText";
-import { AnswerCard } from "./AnswerCard";
 
 export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   const {
@@ -18,13 +17,11 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
     questionCount,
     questionTotal,
     myQuestionSubmitted,
-    promptText,
   } = useGameStore();
   const [question, setQuestion] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   const hasSubmitted = submitted || myQuestionSubmitted;
-  const alivePlayers = players.filter((p) => p.is_alive);
 
   // Determine target
   let targetId: string | null = null;
@@ -35,6 +32,9 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   } else {
     targetId = playerId ? assignments[playerId] || null : null;
   }
+
+  const targetPlayer = players.find((p) => p.id === targetId);
+  const targetAnswer = targetId ? answers[targetId] : null;
 
   const handleSubmit = async () => {
     if (!gameId || !playerId || !question.trim() || hasSubmitted) return;
@@ -60,26 +60,20 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      {promptText && (
-        <p className="text-center font-literary text-[1.1rem] italic leading-[1.6] text-dim">
-          {promptText}
-        </p>
-      )}
-
-      {/* Player answer cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:[grid-auto-rows:1fr]">
-        {alivePlayers.map((p) => {
-          const isTarget = p.id === targetId;
-          return (
-            <AnswerCard
-              key={p.id}
-              alias={p.alias}
-              answer={answers[p.id]}
-              highlighted={isTarget}
-              label={isTarget && !spectator ? "your target" : undefined}
-            />
-          );
-        })}
+      {/* Target's answer */}
+      <div>
+        <SystemText>
+          {targetPlayer?.alias || "unknown"}&apos;s answer
+        </SystemText>
+        {targetAnswer ? (
+          <p className="mt-2 font-literary text-[1.1rem] italic leading-[1.6] text-ink">
+            {targetAnswer}
+          </p>
+        ) : (
+          <p className="mt-2 font-literary text-[1rem] text-dim">
+            no answer submitted
+          </p>
+        )}
       </div>
 
       {!spectator && (
@@ -90,9 +84,13 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
             <div className="w-full">
               <textarea
                 value={question}
-                onChange={(e) => setQuestion(e.target.value)}
+                onChange={(e) => {
+                  setQuestion(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
                 maxLength={200}
-                rows={2}
+                rows={1}
                 className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
                 placeholder={
                   roundType === "interrogation"

@@ -121,9 +121,13 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
         <div className="w-full">
           <textarea
             value={response}
-            onChange={(e) => setResponse(e.target.value)}
+            onChange={(e) => {
+              setResponse(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = e.target.scrollHeight + "px";
+            }}
             maxLength={400}
-            rows={3}
+            rows={1}
             className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
             placeholder="your response..."
           />
