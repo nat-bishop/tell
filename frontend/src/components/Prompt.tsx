@@ -64,7 +64,17 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
         <div className="w-full max-w-md">
           <textarea
             value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            onChange={(e) => {
+              setAnswer(e.target.value);
+              e.target.style.height = "auto";
+              e.target.style.height = e.target.scrollHeight + "px";
+            }}
             maxLength={280}
             rows={3}
             className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.1rem] leading-[1.6] text-ink outline-none border-rule"

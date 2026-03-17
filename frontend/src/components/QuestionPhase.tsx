@@ -101,7 +101,17 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
             <div className="w-full">
               <textarea
                 value={question}
-                onChange={(e) => setQuestion(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
+                onChange={(e) => {
+                  setQuestion(e.target.value);
+                  e.target.style.height = "auto";
+                  e.target.style.height = e.target.scrollHeight + "px";
+                }}
                 maxLength={200}
                 rows={2}
                 className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 
 import structlog
 
@@ -25,6 +26,7 @@ from backend.services.game_logic import (
     resolve_nominations,
     resolve_votes,
     select_chain_next_word,
+    select_round_types,
     transition_to_elimination,
     transition_to_nominate,
     transition_to_prompt,
@@ -34,14 +36,16 @@ from backend.services.game_logic import (
     transition_to_task_prompt,
     transition_to_word_chain,
 )
+from schemas.aliases import generate_aliases
 from schemas.api_models import (
     ChainSeedEvent,
     NominatedEvent,
+    PlayerJoinedEvent,
     SynthesisReadyEvent,
     VerdictEvent,
 )
 from schemas.constants import MISSING_ALIAS
-from schemas.game_state import ChainRound, GamePhase, RoundType
+from schemas.game_state import ChainRound, GamePhase, Player, PlayerRole, RoundType
 from schemas.word_chain import select_seed_word
 
 log = structlog.get_logger(__name__)
@@ -598,3 +602,94 @@ async def _start_chain_loop(game_id: str, session) -> None:
     from backend.services.ai_scheduler import register_task
 
     register_task(game_id, task)
+
+
+async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
+    """Start a game — spawn AI, assign personalities, transition to first round.
+
+    Reusable by both the host-triggered start and matchmaking auto-start.
+    Caller must ensure the game exists and is in LOBBY phase.
+    """
+    from backend.services.ai_scheduler import assign_personalities
+    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
+
+    cm = get_connection_manager()
+    settings = get_settings()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            return
+        state = session.state
+
+        # Spawn AI players
+        existing_aliases = {p.alias for p in state.players}
+        ai_aliases = generate_aliases(ai_count, existing_aliases)
+
+        for i in range(ai_count):
+            ai_player = Player(
+                id=f"ai-{uuid.uuid4().hex[:8]}",
+                alias=ai_aliases[i],
+                role=PlayerRole.AI,
+                is_connected=True,
+            )
+            state.players.append(ai_player)
+
+            event = PlayerJoinedEvent(
+                seq=session.next_seq(),
+                player_id=ai_player.id,
+                alias=ai_player.alias,
+                player_count=len(state.players),
+            )
+            await cm.broadcast(game_id, event)
+
+        # Assign AI personalities
+        ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI]
+        assign_personalities(game_id, ai_player_ids)
+
+        # Calculate max rounds and generate round types
+        human_count = len([p for p in state.players if p.role == PlayerRole.HUMAN])
+        state.max_rounds = max(3, human_count + 1)
+        state.round_types = select_round_types(state.max_rounds)
+
+        # Transition to first round based on round type
+        first_round_type = state.round_types[0] if state.round_types else RoundType.TASK
+        if first_round_type == RoundType.TASK:
+            transition_to_task_prompt(state, settings.task_prompt_duration)
+        else:
+            transition_to_prompt(state, settings.prompt_duration)
+
+        round_state = state.current_round
+        pd = get_phase_duration(
+            settings, state.phase, round_state.round_type if round_state else None
+        )
+        await cm.broadcast(
+            game_id,
+            make_phase_changed_event(
+                state,
+                session.next_seq(),
+                phase_duration=pd,
+                prompt_text=round_state.prompt_text if round_state else None,
+                prompt_category=round_state.prompt_category if round_state else None,
+                round_type=round_state.round_type if round_state else RoundType.TASK,
+            ),
+        )
+
+        # Capture for logging after lock release
+        player_count = len(state.players)
+        max_rounds = state.max_rounds
+
+    await start_phase_timer(
+        game_id, GamePhase.PROMPT, state.round_types[0] if state.round_types else None
+    )
+    await ai_on_phase_change(game_id, GamePhase.PROMPT)
+
+    log.info(
+        "game_started",
+        game_id=game_id,
+        player_count=player_count,
+        ai_count=ai_count,
+        max_rounds=max_rounds,
+    )

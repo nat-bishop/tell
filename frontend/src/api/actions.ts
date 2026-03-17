@@ -106,3 +106,27 @@ export function submitChainWord(
     }),
   });
 }
+
+// --- Matchmaking ---
+
+export interface MatchmakingJoinResponse {
+  player_id: string;
+  alias: string;
+  position: number;
+}
+
+export function joinMatchmaking(
+  playerName: string,
+): Promise<MatchmakingJoinResponse> {
+  return apiFetch<MatchmakingJoinResponse>("/matchmaking/join", {
+    method: "POST",
+    body: JSON.stringify({ player_name: playerName }),
+  });
+}
+
+export function leaveMatchmaking(playerId: string): Promise<void> {
+  return apiFetch("/matchmaking/leave", {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
