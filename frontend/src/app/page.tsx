@@ -33,7 +33,7 @@ export default function Home() {
         <button
           onClick={handleNewGame}
           disabled={loading}
-          className="font-literary text-[1.1rem] text-ink transition-opacity hover:opacity-70 disabled:opacity-50"
+          className="btn-action"
         >
           {loading ? "creating..." : "new game \u2192"}
         </button>

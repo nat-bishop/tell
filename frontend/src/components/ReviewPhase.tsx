@@ -7,43 +7,8 @@ import {
   type ChainRoundData,
 } from "@/hooks/useGameStore";
 import { castVote } from "@/api/actions";
+import { AnswerCard } from "./AnswerCard";
 import { SystemText } from "./SystemText";
-
-function VotableCard({
-  voted,
-  canVote,
-  onToggle,
-  delay,
-  children,
-}: {
-  voted: boolean;
-  canVote: boolean;
-  onToggle: () => void;
-  delay: number;
-  children: React.ReactNode;
-}) {
-  const baseClass = `border p-4 animate-fade-in transition-colors duration-150 ${
-    !voted ? "border-rule" : ""
-  }`;
-  const style = {
-    animationDelay: `${delay}ms`,
-    borderColor: voted ? "var(--warm)" : undefined,
-  };
-
-  return canVote ? (
-    <button
-      onClick={onToggle}
-      className={`${baseClass} cursor-pointer text-left w-full`}
-      style={style}
-    >
-      {children}
-    </button>
-  ) : (
-    <div className={baseClass} style={style}>
-      {children}
-    </div>
-  );
-}
 
 function PlayerCard({
   player,
@@ -71,40 +36,36 @@ function PlayerCard({
   const responseText = myQuestion?.response;
 
   return (
-    <VotableCard voted={voted} canVote={canVote} onToggle={onToggle} delay={delay}>
-      <div
-        className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
-          voted ? "text-warm" : "text-ink"
-        }`}
-      >
-        {player.alias}
-      </div>
-      {answer && (
-        <div className="mt-1 font-literary text-[1rem] leading-[1.5] text-ink">
-          {answer}
-        </div>
-      )}
+    <AnswerCard
+      alias={player.alias}
+      answer={answer}
+      highlighted={voted}
+      showVotedLabel={voted}
+      delay={delay}
+      as={canVote ? "button" : "div"}
+      onClick={onToggle}
+    >
       {questionText && (
-        <>
-          <div className="mt-3 font-system text-[0.7rem] text-dim">
+        <div className="mt-3 pt-3 border-t border-rule">
+          <div className="font-system text-[0.7rem] text-dim">
             {isNominee ? "synthesis" : "question received"}
           </div>
-          <div className="mt-0.5 font-literary text-[0.95rem] italic leading-[1.5] text-ink">
+          <div className="mt-0.5 font-literary text-[0.9rem] italic leading-[1.5] text-ink">
             {questionText}
           </div>
-        </>
+          {responseText && (
+            <>
+              <div className="mt-2 font-system text-[0.7rem] text-dim">
+                response
+              </div>
+              <div className="mt-0.5 font-literary text-[0.9rem] leading-[1.5] text-ink">
+                {responseText}
+              </div>
+            </>
+          )}
+        </div>
       )}
-      {responseText && (
-        <>
-          <div className="mt-2 font-system text-[0.7rem] text-dim">
-            response
-          </div>
-          <div className="mt-0.5 font-literary text-[0.95rem] leading-[1.5] text-ink">
-            {responseText}
-          </div>
-        </>
-      )}
-    </VotableCard>
+    </AnswerCard>
   );
 }
 
@@ -124,15 +85,15 @@ function WordChainCard({
   delay: number;
 }) {
   return (
-    <VotableCard voted={voted} canVote={canVote} onToggle={onToggle} delay={delay}>
-      <div
-        className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
-          voted ? "text-warm" : "text-ink"
-        }`}
-      >
-        {player.alias}
-      </div>
-      <div className="mt-2 flex flex-col gap-1">
+    <AnswerCard
+      alias={player.alias}
+      highlighted={voted}
+      showVotedLabel={voted}
+      delay={delay}
+      as={canVote ? "button" : "div"}
+      onClick={onToggle}
+    >
+      <div className="flex flex-col gap-1">
         {chainRounds.map((cr, i) => {
           const response = cr.responses[player.id];
           const wasChosen = cr.chosen_player_id === player.id;
@@ -152,7 +113,7 @@ function WordChainCard({
           );
         })}
       </div>
-    </VotableCard>
+    </AnswerCard>
   );
 }
 
@@ -212,17 +173,25 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
-      <SystemText>{spectator ? "review" : "who is human?"}</SystemText>
+      <p className="text-center font-literary text-[1.1rem] text-ink">
+        {spectator ? "review" : "who is human?"}
+      </p>
 
       {isTask && promptText && (
-        <p className="text-center font-literary text-[0.95rem] italic text-dim">
+        <p className="text-center font-literary text-[1rem] italic leading-[1.6] text-dim">
           the task was: {promptText}
+        </p>
+      )}
+
+      {!isTask && !isWordChain && promptText && (
+        <p className="text-center font-literary text-[1rem] italic leading-[1.6] text-dim">
+          {promptText}
         </p>
       )}
 
       {isWordChain && chainRounds.length > 0 && (
         <p className="text-center font-literary text-[0.95rem] text-dim">
-          {chainRounds.map((cr) => cr.seed).join(" → ")}
+          {chainRounds.map((cr) => cr.seed).join(" \u2192 ")}
         </p>
       )}
 
@@ -253,9 +222,19 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
 
       {!spectator ? (
         <div className="flex items-center justify-between">
-          <SystemText>
-            {selected.length} of {maxVotes} votes cast
-          </SystemText>
+          {/* Vote dots */}
+          <div className="flex items-center gap-2">
+            {Array.from({ length: maxVotes }).map((_, i) => (
+              <span
+                key={i}
+                className={`inline-block w-2 h-2 rounded-full transition-all duration-200 ${
+                  i < selected.length
+                    ? "bg-warm scale-110"
+                    : "border border-rule"
+                }`}
+              />
+            ))}
+          </div>
           <SystemText>
             {voteCount} of {voteTotalCount} voted
           </SystemText>

@@ -1,11 +1,11 @@
 @import "tailwindcss";
 
-/* Design tokens */
+/* Design tokens — cool clinical palette */
 :root {
-  --page:  #FAFAF8;
-  --ink:   #1C1C1A;
-  --dim:   #9A9A92;
-  --rule:  #E5E5E0;
+  --page:  #F7F7F9;
+  --ink:   #18181B;
+  --dim:   #8B8B94;
+  --rule:  #E2E2E7;
   --warm:  #B85C38;
 }
 
@@ -48,6 +48,31 @@
   }
 }
 
+/* Phase interstitial — chapter heading between phases */
+@keyframes interstitial-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes interstitial-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.animate-interstitial-in {
+  animation: interstitial-in 400ms ease-out both;
+}
+
+.animate-interstitial-out {
+  animation: interstitial-out 300ms ease both;
+}
+
 /* Utility classes for animations */
 .animate-fade-in {
   animation: fade-in 200ms ease-out both;
@@ -69,6 +94,63 @@
 .timer-warning {
   transition: background-color 300ms ease, color 300ms ease;
 }
+
+/* Timer urgency pulse */
+@keyframes timer-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-timer-pulse {
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+.animate-timer-pulse-fast {
+  animation: timer-pulse 0.6s ease-in-out infinite;
+}
+
+/* Vote selection pulse */
+@keyframes vote-select {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+  100% { transform: scale(1); }
+}
+
+.animate-vote-select {
+  animation: vote-select 200ms ease-out;
+}
+
+/* Elimination reveal animations */
+@keyframes reveal-expand {
+  from { opacity: 0; letter-spacing: 0.3em; }
+  to { opacity: 1; letter-spacing: normal; }
+}
+
+@keyframes line-draw {
+  from { width: 0; }
+  to { width: 3rem; }
+}
+
+.animate-reveal-expand {
+  animation: reveal-expand 600ms ease-out both;
+}
+
+.animate-line-draw {
+  animation: line-draw 400ms ease-out both;
+}
+
+/* Action button — machine voice */
+.btn-action {
+  font-family: var(--font-system);
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  min-height: 44px;
+  padding: 0.5rem 0.5rem;
+  color: var(--ink);
+  transition: opacity 150ms;
+}
+.btn-action:hover { opacity: 0.7; }
+.btn-action:disabled { opacity: 0.3; }
 
 /* Divider */
 .divider {

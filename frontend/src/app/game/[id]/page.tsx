@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useRef, useCallback, use } from "react";
 import { Stage } from "@/components/Stage";
 import { Timer } from "@/components/Timer";
 import { PlayerBar } from "@/components/PlayerBar";
+import { PhaseInterstitial } from "@/components/PhaseInterstitial";
 import { Lobby } from "@/components/Lobby";
 import { Prompt } from "@/components/Prompt";
 import { QuestionPhase } from "@/components/QuestionPhase";
@@ -15,7 +16,7 @@ import { Elimination } from "@/components/Elimination";
 import { GameOver } from "@/components/GameOver";
 import { SystemText } from "@/components/SystemText";
 import { joinGame, createGame } from "@/api/actions";
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore, type GamePhase } from "@/hooks/useGameStore";
 import { useGameEvents } from "@/hooks/useGameEvents";
 import { useTimer } from "@/hooks/useTimer";
 import { useRouter } from "next/navigation";
@@ -63,7 +64,7 @@ function JoinScreen({
       <button
         onClick={handleJoin}
         disabled={joining || !name.trim()}
-        className="font-literary text-[1.1rem] py-2 px-4 min-h-[44px] text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
+        className="btn-action px-4"
       >
         {joining ? "joining..." : "enter \u2192"}
       </button>
@@ -82,24 +83,69 @@ function EliminatedBanner() {
   );
 }
 
+const INTERSTITIAL_PHASES = new Set<GamePhase>([
+  "prompt", "nominate", "question", "respond", "review", "elimination", "chain",
+]);
+
+const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
+  prompt: 45,
+  nominate: 15,
+  question: 25,
+  respond: 30,
+  review: 40,
+  elimination: 8,
+  chain: 8,
+};
+
 function GameContent() {
-  const { phase, phaseDeadline, phaseDuration, playerId, players } =
+  const { phase, phaseDeadline, phaseDuration, playerId, players, roundNumber, roundType } =
     useGameStore();
   const remaining = useTimer(phaseDeadline);
 
   const myPlayer = players.find((p) => p.id === playerId);
   const isAlive = myPlayer?.is_alive ?? true;
 
-  const fallbackDurations: Record<string, number> = {
-    prompt: 45,
-    nominate: 15,
-    question: 25,
-    respond: 30,
-    review: 40,
-    elimination: 8,
-    chain: 8,
-  };
-  const total = phaseDuration ?? fallbackDurations[phase] ?? 0;
+  // Phase interstitial state
+  const [showInterstitial, setShowInterstitial] = useState(false);
+  const [interstitialFading, setInterstitialFading] = useState(false);
+  const prevPhaseRef = useRef(phase);
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  const clearTimers = useCallback(() => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+  }, []);
+
+  useEffect(() => {
+    if (phase === prevPhaseRef.current) return;
+    prevPhaseRef.current = phase;
+    clearTimers();
+
+    if (!INTERSTITIAL_PHASES.has(phase)) {
+      setShowInterstitial(false);
+      setInterstitialFading(false);
+      return;
+    }
+
+    setShowInterstitial(true);
+    setInterstitialFading(false);
+
+    // Start fade-out after hold period
+    timersRef.current.push(
+      setTimeout(() => setInterstitialFading(true), 1200),
+    );
+    // Remove interstitial after fade-out completes
+    timersRef.current.push(
+      setTimeout(() => {
+        setShowInterstitial(false);
+        setInterstitialFading(false);
+      }, 1500),
+    );
+
+    return clearTimers;
+  }, [phase, clearTimers]);
+
+  const total = phaseDuration ?? FALLBACK_DURATIONS[phase] ?? 0;
 
   return (
     <>
@@ -108,18 +154,29 @@ function GameContent() {
         <Timer remaining={remaining} total={total} />
       )}
       <Stage>
-        {!isAlive && phase !== "game_over" && phase !== "elimination" && (
-          <EliminatedBanner />
+        {showInterstitial ? (
+          <PhaseInterstitial
+            phase={phase}
+            roundNumber={roundNumber}
+            roundType={roundType}
+            fading={interstitialFading}
+          />
+        ) : (
+          <>
+            {!isAlive && phase !== "game_over" && phase !== "elimination" && (
+              <EliminatedBanner />
+            )}
+            {phase === "lobby" && <Lobby />}
+            {phase === "prompt" && <Prompt readOnly={!isAlive} />}
+            {phase === "nominate" && <NominatePhase spectator={!isAlive} />}
+            {phase === "question" && <QuestionPhase spectator={!isAlive} />}
+            {phase === "respond" && <RespondPhase spectator={!isAlive} />}
+            {phase === "chain" && <WordChainPhase spectator={!isAlive} />}
+            {phase === "review" && <ReviewPhase spectator={!isAlive} />}
+            {phase === "elimination" && <Elimination />}
+            {phase === "game_over" && <GameOver />}
+          </>
         )}
-        {phase === "lobby" && <Lobby />}
-        {phase === "prompt" && <Prompt readOnly={!isAlive} />}
-        {phase === "nominate" && <NominatePhase spectator={!isAlive} />}
-        {phase === "question" && <QuestionPhase spectator={!isAlive} />}
-        {phase === "respond" && <RespondPhase spectator={!isAlive} />}
-        {phase === "chain" && <WordChainPhase spectator={!isAlive} />}
-        {phase === "review" && <ReviewPhase spectator={!isAlive} />}
-        {phase === "elimination" && <Elimination />}
-        {phase === "game_over" && <GameOver />}
       </Stage>
     </>
   );

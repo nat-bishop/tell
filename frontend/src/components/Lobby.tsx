@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { startGame } from "@/api/actions";
 import { SystemText } from "./SystemText";
@@ -9,9 +10,28 @@ export function Lobby() {
   const playerCount = players.filter((p) => p.is_alive).length;
   const canStart = playerCount >= 2;
 
+  const [aiCount, setAiCount] = useState(2);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    return () => clearTimeout(copyTimerRef.current);
+  }, []);
+
   const handleStart = async () => {
     if (gameId && playerId) {
-      await startGame(gameId, playerId, 2);
+      await startGame(gameId, playerId, aiCount);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback: select text for manual copy
     }
   };
 
@@ -36,21 +56,50 @@ export function Lobby() {
         ))}
       </div>
 
-      <SystemText>{playerCount} connected</SystemText>
+      <div className="synthesizing-dots font-system text-[0.75rem] text-dim">
+        {playerCount} connected
+      </div>
 
       {isHost && (
-        <button
-          onClick={handleStart}
-          disabled={!canStart}
-          className="font-literary text-[1.1rem] py-2 px-4 text-ink transition-opacity disabled:opacity-30"
-        >
-          begin
-        </button>
+        <div className="flex flex-col items-center gap-4">
+          {/* AI count selector */}
+          <div className="flex items-center gap-3">
+            <SystemText>ai players</SystemText>
+            <div className="flex items-center gap-1">
+              {[1, 2, 3].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setAiCount(n)}
+                  className={`font-system text-[0.8rem] w-8 h-8 transition-colors ${
+                    aiCount === n
+                      ? "text-ink border border-ink"
+                      : "text-dim border border-rule"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={handleStart}
+            disabled={!canStart}
+            className="btn-action uppercase px-4"
+          >
+            begin
+          </button>
+        </div>
       )}
 
       {!isHost && <SystemText>waiting for host to begin</SystemText>}
 
-      <SystemText>share this link to invite players</SystemText>
+      <button
+        onClick={handleCopyLink}
+        className="font-system text-[0.75rem] text-dim transition-opacity hover:text-ink"
+      >
+        {copied ? "copied" : "copy invite link"}
+      </button>
     </div>
   );
 }

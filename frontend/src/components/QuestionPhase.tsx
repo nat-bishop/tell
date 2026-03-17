@@ -45,7 +45,9 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   if (isHotSeated) {
     return (
       <div className="flex flex-col items-center gap-8 pt-8">
-        <SystemText>you are on the hot seat</SystemText>
+        <p className="font-literary text-[1.1rem] text-ink text-center">
+          you are on the hot seat
+        </p>
         <p className="font-literary text-[1.1rem] text-dim text-center">
           awaiting questions from the group...
         </p>
@@ -116,18 +118,23 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
                 <button
                   onClick={handleSubmit}
                   disabled={!question.trim()}
-                  className="font-literary text-[1rem] min-h-[44px] px-2 text-ink transition-opacity hover:opacity-70 disabled:opacity-30"
+                  className="btn-action"
                 >
                   ask &rarr;
                 </button>
               </div>
             </div>
           ) : (
-            <div>
-              <SystemText>question submitted</SystemText>
-              <SystemText>
-                {questionCount} of {questionTotal} submitted
-              </SystemText>
+            <div className="animate-fade-in">
+              <p className="font-literary text-[1.05rem] italic leading-[1.55] text-ink border-l-2 border-rule pl-4">
+                {question}
+              </p>
+              <div className="mt-3 flex items-center justify-between">
+                <SystemText>question submitted</SystemText>
+                <SystemText>
+                  {questionCount} of {questionTotal} submitted
+                </SystemText>
+              </div>
             </div>
           )}
         </>
