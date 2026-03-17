@@ -172,6 +172,7 @@ async def do_nominate_complete(game_id: str, session) -> None:
         make_phase_changed_event(
             state,
             session.next_seq(),
+            answers=round_state.answers,
             round_type=round_state.round_type,
             nominated_id=nominated_id,
         ),
