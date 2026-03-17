@@ -116,11 +116,17 @@ def mock_llm():
             new_callable=AsyncMock,
             return_value="wave",
         ) as mock_assoc,
+        patch(
+            "backend.llm.agents.generate_narration",
+            new_callable=AsyncMock,
+            return_value=(None, []),
+        ) as mock_narration,
     ):
         yield {
             "synthesize_questions": mock_synth,
             "generate_verdict": mock_verdict,
             "generate_association": mock_assoc,
+            "generate_narration": mock_narration,
         }
 
 

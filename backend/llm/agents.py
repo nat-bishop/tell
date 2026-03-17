@@ -99,6 +99,12 @@ ai_agent: Agent[AIPlayerDeps, str] = Agent(
     ],
 )
 
+narrator_agent: Agent[None, str] = Agent(
+    output_type=str,
+    retries=1,
+    instructions=NARRATOR_SYSTEM_PROMPT,
+)
+
 
 @ai_agent.instructions
 def _build_instructions(ctx: RunContext[AIPlayerDeps]) -> str:
@@ -401,12 +407,26 @@ async def generate_narration(
     context: str,
     *,
     game_id: str | None = None,
-) -> str | None:
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str | None, list[ModelMessage]]:
     """Generate a narrator line for a specific game moment.
 
-    Returns None on timeout/failure — narration is always optional.
+    Returns (text, updated_history). Text is None on timeout/failure.
     """
+    settings = get_settings()
     timeout = 5.0 if trigger in ("game_over", "verdict") else 3.0
-    return await _run_system_agent(
-        NARRATOR_SYSTEM_PROMPT, context, timeout=timeout, game_id=game_id
-    )
+    log.info("llm_narrator_call_start", trigger=trigger, game_id=game_id)
+    try:
+        result = await asyncio.wait_for(
+            narrator_agent.run(
+                context,
+                model=settings.ai_model,
+                message_history=message_history,
+            ),
+            timeout=timeout,
+        )
+        log.info("llm_narrator_call_done", output_len=len(result.output), game_id=game_id)
+        return result.output, result.all_messages()
+    except Exception:
+        log.exception("llm_narrator_call_failed", game_id=game_id)
+        return None, message_history or []

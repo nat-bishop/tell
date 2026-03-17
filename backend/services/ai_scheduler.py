@@ -73,6 +73,9 @@ _ai_tasks: dict[str, list[asyncio.Task]] = {}
 # Store conversation history per AI player: game_id -> {player_id -> messages}
 _conversation_history: dict[str, dict[str, list[ModelMessage]]] = {}
 
+# Store narrator message history per game: game_id -> messages
+_narrator_history: dict[str, list[ModelMessage]] = {}
+
 
 def assign_personalities(game_id: str, ai_player_ids: list[str]) -> None:
     """Assign random personalities to AI players (no duplicates)."""
@@ -81,6 +84,7 @@ def assign_personalities(game_id: str, ai_player_ids: list[str]) -> None:
         pid: personalities[i % len(personalities)] for i, pid in enumerate(ai_player_ids)
     }
     _conversation_history[game_id] = {pid: [] for pid in ai_player_ids}
+    _narrator_history[game_id] = []
     log.info(
         "ai_personalities_assigned",
         game_id=game_id,
@@ -808,8 +812,19 @@ async def _ai_brain_test_task(
         )
 
 
+def get_narrator_history(game_id: str) -> list[ModelMessage]:
+    """Get narrator conversation history for a game."""
+    return _narrator_history.get(game_id, [])
+
+
+def set_narrator_history(game_id: str, history: list[ModelMessage]) -> None:
+    """Store updated narrator conversation history for a game."""
+    _narrator_history[game_id] = history
+
+
 def cleanup_game(game_id: str) -> None:
     """Clean up all AI state for a game."""
     cancel_all(game_id)
     _personality_map.pop(game_id, None)
     _conversation_history.pop(game_id, None)
+    _narrator_history.pop(game_id, None)

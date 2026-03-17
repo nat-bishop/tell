@@ -89,12 +89,6 @@ def _build_narrator_context(state) -> str:
             chain_words = [cr.seed for cr in rs.chain_rounds]
             parts.append(f"Chain: {' -> '.join(chain_words)}")
 
-    # Previous narrator lines for continuity
-    if state.narrator_context:
-        parts.append("\nYour previous lines this game:")
-        for entry in state.narrator_context[-5:]:
-            parts.append(f'  [{entry.trigger}] "{entry.text}"')
-
     return "\n".join(parts)
 
 
@@ -104,12 +98,13 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
     async def _do_narrate():
         try:
             from backend.llm.agents import generate_narration
+            from backend.services.ai_scheduler import get_narrator_history, set_narrator_history
 
             cm = get_connection_manager()
             repo = get_game_repository()
             lock = cm.get_lock(game_id)
 
-            # Build context from current state
+            # Build context + read history under lock
             async with lock:
                 session = repo.get(game_id)
                 if not session:
@@ -119,9 +114,12 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
                     context += f"\n\nTrigger: {trigger}. {extra_context}"
                 else:
                     context += f"\n\nTrigger: {trigger}."
+                history = get_narrator_history(game_id)
 
             # LLM call outside the lock
-            text = await generate_narration(trigger, context, game_id=game_id)
+            text, updated_history = await generate_narration(
+                trigger, context, game_id=game_id, message_history=history
+            )
             if not text:
                 return
 
@@ -130,6 +128,7 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
                 session = repo.get(game_id)
                 if not session:
                     return
+                set_narrator_history(game_id, updated_history)
                 ctx = session.state.narrator_context
                 ctx.append(
                     NarratorEntry(
@@ -138,7 +137,7 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
                         round_number=session.state.round_number,
                     )
                 )
-                # Keep only the last 5 entries (that's all _build_narrator_context uses)
+                # Keep only the last 5 entries for frontend display
                 if len(ctx) > 5:
                     session.state.narrator_context = ctx[-5:]
                 await cm.broadcast(
