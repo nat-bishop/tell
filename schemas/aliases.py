@@ -1,8 +1,9 @@
-"""Robot alias generation."""
+"""Robot alias and ID generation."""
 
 from __future__ import annotations
 
 import random
+import uuid
 
 PREFIXES = [
     "UNIT",
@@ -21,6 +22,16 @@ PREFIXES = [
     "LOOP",
     "NULL",
 ]
+
+
+def generate_game_id() -> str:
+    """Generate a short hex game ID."""
+    return uuid.uuid4().hex[:8]
+
+
+def generate_player_id() -> str:
+    """Generate a hex player ID."""
+    return uuid.uuid4().hex[:12]
 
 
 def generate_aliases(n: int, exclude: set[str] | None = None) -> list[str]:

@@ -86,6 +86,12 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
             <div className="w-full">
               <textarea
                 value={question}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
                 onChange={(e) => {
                   setQuestion(e.target.value);
                   e.target.style.height = "auto";

@@ -49,6 +49,12 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
         <div className="w-full max-w-md">
           <textarea
             value={answer}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
             onChange={(e) => {
               setAnswer(e.target.value);
               e.target.style.height = "auto";

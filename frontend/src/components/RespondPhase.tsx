@@ -121,6 +121,12 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
         <div className="w-full">
           <textarea
             value={response}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
             onChange={(e) => {
               setResponse(e.target.value);
               e.target.style.height = "auto";

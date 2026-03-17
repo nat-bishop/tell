@@ -20,35 +20,43 @@ backend/
     routes/
       game.py     POST /games, GET /games/{id}
       events.py   GET /games/{id}/events (SSE stream)
-      actions.py  POST join/start/answer/question/respond/nominate/vote + transitions
+      actions.py  POST join/start/answer/question/respond/nominate/vote
   services/
     connection_manager.py  Per-game asyncio.Queue broadcast + event log
     game_repository.py     In-memory game session store
     game_logic.py          Pure functions: transitions, vote resolution, validation
     timer_manager.py       asyncio.Task per phase timer
+    transitions.py         Async phase transition sequences (start_phase_timer,
+                           handle_phase_expiry, do_*_complete helpers)
     ai_scheduler.py        Generate-then-lock AI player scheduling
   llm/
     agents.py              PydanticAI: answer, question, response, vote, nomination,
                            synthesis, verdict generation
     personalities.py       5 AI personalities with system prompts + question styles
 
+tests/
+  conftest.py     Fixtures: standard_game (4p, 2h/2ai, PROMPT), game_state/player/round_state factories
+  factories.py    Plain functions building Pydantic models with sensible defaults
+  test_game_logic.py  Tests for all pure functions in game_logic.py
+  test_schemas.py     Tests for schema models, prompt selection, alias generation
+
 frontend/src/
   app/page.tsx             Landing: "tell — a game of words and suspicion"
   app/game/[id]/page.tsx   Game page: join → phase routing (spectator for eliminated)
   components/
+    AnswerCard.tsx         Shared answer-first card (alias pinned to bottom, button/div)
     PlayerBar.tsx          Persistent player strip during gameplay
-    Gallery.tsx            Grid of player cards
-    Spotlight.tsx          Single featured player, auto-cycling
     VoteOverlay.tsx        Multi-vote selection overlay (up to 3 votes)
-    QuestionPhase.tsx      QUESTION phase — write anonymous follow-up questions
+    QuestionPhase.tsx      QUESTION phase — shows target's answer, write follow-up
     RespondPhase.tsx       RESPOND phase — answer received questions
     NominatePhase.tsx      NOMINATE phase — pick who to interrogate
-    ReviewPhase.tsx        REVIEW phase — spotlight + gallery + voting
+    ReviewPhase.tsx        REVIEW phase — AnswerCard grid + voting
     Prompt.tsx, Elimination.tsx, GameOver.tsx, Lobby.tsx
     Stage.tsx, Timer.tsx, Dialogue.tsx, SystemText.tsx
   hooks/useGameStore.ts    Zustand store — all game state + SSE event handlers
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
+  hooks/useAnswerEntries.ts Maps answers dict → [{alias, text}] for display
   api/actions.ts           Typed POST helpers
   api/events.ts            SSE client with typed event routing
   api/client.ts            Base fetch wrapper
@@ -105,7 +113,7 @@ LOBBY → PROMPT (45s) → NOMINATE (15s) → QUESTION (20s) → RESPOND (30s) �
 
 Round types alternate: round 1 = probe, round 2 = interrogation, etc. Generated at game start in `state.round_types`.
 
-Phase transitions happen in `actions.py` helper functions (`_handle_phase_expiry`, `_do_vote_resolution`, `_after_elimination`, `_synthesize_and_transition`). Timer callbacks and early-completion checks both funnel through these same helpers. AI scheduler hooks into each transition via `ai_on_phase_change()`.
+Phase transitions are in `transitions.py` (extracted from `actions.py`): `start_phase_timer`, `handle_phase_expiry`, `do_prompt_complete`, `do_nominate_complete`, `do_question_complete`, `do_respond_complete`, `do_vote_resolution`, `do_after_elimination`. Timer callbacks and early-completion checks both call these same helpers. AI scheduler hooks into each transition via `ai_on_phase_change()`.
 
 ### Game logic is pure
 `game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, assignment logic, client state sanitization. Routes call these under the lock.
@@ -124,7 +132,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **`from __future__ import annotations`** used in all Python files. Use `datetime.now(UTC)`, never `datetime.utcnow()`.
 - **`schemas/` is top-level**: Imported by both `backend/` and `scripts/`. Don't nest under `backend/`.
 - **No database**: All state is in-memory. Server restart kills all games.
-- **Circular import in ai_scheduler**: It imports from `actions.py` inside functions (not at top level) to avoid circular dependency with route helpers.
+- **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
 - **Eliminated players see spectator views**: `game/[id]/page.tsx` checks `isAlive` and passes `spectator` prop to phase components.
 - **Round-robin assignments** (Probe): player `i` questions player `(i+1) % len(alive)`. Generated in `assign_question_targets()`.
@@ -137,6 +145,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **Fonts**: Cormorant (literary content), Cormorant SC (character names), IBM Plex Mono (system text)
 - **Color**: `--page` `--ink` `--dim` `--rule` only. `--warm` (#B85C38) reserved for timer warning, vote selection, and "human" reveals.
 - **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-elimination-reveal`.
+- **Textarea submit**: All gameplay textareas submit on Enter (no Shift). Auto-resize via `scrollHeight`. `maxLength` enforced per field.
 
 ## Documentation
 

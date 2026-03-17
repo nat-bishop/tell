@@ -22,7 +22,7 @@ schemas/ ← backend/llm/
 frontend/ is independent (communicates via REST + SSE)
 ```
 
-`schemas/` is the shared contract. `game_logic.py` is pure (no I/O). Routes handle HTTP + locking + broadcasting.
+`schemas/` is the shared contract. `game_logic.py` is pure (no I/O). `transitions.py` contains the async phase-transition sequences shared by routes and the AI scheduler. Routes handle HTTP + locking + broadcasting.
 
 ## Real-Time: SSE
 
@@ -52,15 +52,15 @@ Round types are pre-generated at game start (`select_round_types()`) into `state
 
 ### Phase Transitions
 
-All transitions funnel through helper functions in `actions.py`:
+All transitions funnel through helper functions in `transitions.py` (shared by `actions.py` routes and `ai_scheduler.py`):
 
 | Function | Trigger | What it does |
 |---|---|---|
-| `_start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps then calls `_handle_phase_expiry` |
-| `_handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to next phase |
-| `_synthesize_and_transition` | All questions in (Interrogation) | Calls LLM synthesis outside lock, transitions to RESPOND |
-| `_do_vote_resolution` | REVIEW timer expires | Tallies multi-votes, generates LLM verdict, eliminates player |
-| `_after_elimination` | ELIMINATION timer expires | Checks game-over, starts next round or ends game |
+| `start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps then calls `handle_phase_expiry` |
+| `handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to `do_*_complete` |
+| `do_question_complete` | All questions in (Interrogation) | Calls LLM synthesis under lock, broadcasts `synthesis_ready`, transitions to RESPOND |
+| `do_vote_resolution` | REVIEW timer expires | Tallies multi-votes, generates LLM verdict, transitions to ELIMINATION |
+| `do_after_elimination` | ELIMINATION timer expires | Checks game-over, starts next round or ends game |
 
 **Early completion**: When all players submit (answers, nominations, questions, responses), the timer is cancelled and the transition happens immediately. Exception: **REVIEW never early-completes** — votes are changeable until the timer expires.
 
@@ -147,14 +147,13 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 | Component | Phase | Role |
 |---|---|---|
+| `AnswerCard` | Shared | Answer-first card; alias + role label pinned to bottom; renders as `button` or `div` |
 | `PlayerBar` | All gameplay phases | Persistent strip showing alive players and connection status |
-| `Gallery` | REVIEW | Grid of player cards for voting context |
-| `Spotlight` | REVIEW | Auto-cycling featured player |
 | `VoteOverlay` | REVIEW | Multi-select vote UI (up to 3, changeable) |
-| `QuestionPhase` | QUESTION | Write anonymous follow-up question to assigned target |
+| `QuestionPhase` | QUESTION | Shows target's answer, write anonymous follow-up question |
 | `RespondPhase` | RESPOND | Answer received question (or synthesis in Interrogation) |
 | `NominatePhase` | NOMINATE | Pick player for hot seat |
-| `ReviewPhase` | REVIEW | Combines Spotlight + Gallery + VoteOverlay |
+| `ReviewPhase` | REVIEW | `AnswerCard` grid with inline Q&A + voting |
 
 ## Prompt Selection
 
