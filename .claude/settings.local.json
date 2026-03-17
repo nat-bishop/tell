@@ -13,7 +13,15 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "Skill(commit-commands:commit-push-pr)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git diff:*)",
+      "Bash(make dev:*)",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(curl -s --max-time 5 http://localhost:3500/api/health)",
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "mcp__plugin_playwright_playwright__browser_network_requests",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "mcp__plugin_playwright_playwright__browser_wait_for"
     ]
   }
 }

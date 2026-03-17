@@ -35,23 +35,38 @@ The contrast between serif dialogue and monospace system text reinforces the the
 
 ## Game Flow
 
-Two round types alternate. Round 1 is always Probe.
+Three round types cycle: **Task → Interrogation → Word Chain → Task → ...**
 
-**Probe** (rounds 1, 3, 5, ...): anonymous round-robin questioning.
+**Task**: constrained creative prompt — write a haiku, a one-liner, a corporate memo. No Q&A phase. Straight to voting.
 ```
-LOBBY → PROMPT → QUESTION → RESPOND → REVIEW → ELIMINATION → repeat
+LOBBY → PROMPT → REVIEW → ELIMINATION → repeat
 ```
 
-**Interrogation** (rounds 2, 4, 6, ...): the group nominates one player for a hot seat.
+**Interrogation**: the group nominates one player for a hot seat.
 ```
 LOBBY → PROMPT → NOMINATE → QUESTION → RESPOND → REVIEW → ELIMINATION → repeat
 ```
 
+**Word Chain**: no written prompt. A seed word appears; everyone submits one word association per sub-round. The chain grows.
+```
+LOBBY → CHAIN (8 sub-rounds × 8s) → REVIEW → ELIMINATION → repeat
+```
+
+### Matchmaking
+`play →` on the landing page routes to `/queue`. Enter a name, get a robot alias, join the rolling lobby. When enough humans queue up, a countdown fires and everyone is dropped into a game. Solo players wait up to 45s before starting with AI companions. Game is pre-populated with AI players (target total: 5–7).
+
+Private game (host flow): create → share URL → host starts manually.
+
 ### Lobby
 Players join via URL, receive robot aliases (UNIT-7, BOT-42 — assigned, not chosen). Host starts the game. AI players appear at game start, indistinguishable from humans in the UI.
 
-### Prompt
-Server picks from 30 prompts across 5 categories. All players answer simultaneously. Answers are hidden until time expires or all submit. Prompts are the engine — they create situations where humans slip up or AI stumbles.
+### Task
+Server picks from 42 task prompts across 7 categories (haiku, concise, humor, corporate, casual, style, emotional_task). Players answer simultaneously (25s). Answers are hidden until time or all submit. Goes straight to Review — no questions, no interrogation.
+
+**Why Task works**: constrained formats (5 words, one sentence, a haiku) expose mechanical patterns. AI produces competent outputs; humans produce inconsistent, humanly bad ones. The constraint is the tell.
+
+### Prompt (Interrogation)
+Server picks from 30 prompts across 5 categories. All players answer simultaneously (45s).
 
 **Categories**: Emotional (humans leak authenticity), Logical (AI suspiciously competent), Creative (hard for AI to be genuinely weird), Philosophical (AI hedges, humans commit), Social (references game state — excluded from round 1).
 
@@ -59,15 +74,18 @@ Server picks from 30 prompts across 5 categories. All players answer simultaneou
 All players vote for who they want to interrogate. Plurality wins; ties broken randomly. A `nominated` event reveals the hot-seated player before the phase advances.
 
 ### Question
-- **Probe**: Round-robin chain assignment — player `i` writes one anonymous question for player `(i+1) % n`. Questioner identity is hidden.
 - **Interrogation**: All non-nominated players write one question for the hot-seated player. When all questions are in, they are synthesized into a single cross-examination paragraph by an LLM narrator.
 
 ### Respond
-- **Probe**: Each player reads their anonymous question and answers it.
 - **Interrogation**: Only the nominated player responds — to the synthesized paragraph, not the individual questions.
 
+### Word Chain
+A seed word appears. All players (and AI) submit one word association. After 8s, the server picks the next seed: it prefers unique words (submitted by exactly one player) over popular ones. The chosen word becomes the next seed. After 8 sub-rounds, the chain is shown in Review.
+
+**Why Word Chain works**: unique associations are unexpected; popular associations are safe. Blending in means being unique but not too unique. Players must simultaneously signal creativity and avoid standing out — the same tension as the rest of the game.
+
 ### Review
-Answers, questions, and responses are all visible. Players cast up to `min(3, alive_count - 1)` votes for who they think is human. Votes are changeable until the timer expires. No early completion — the full review window is always available.
+Answers (and chain in Word Chain rounds) are all visible. Players cast up to `min(3, alive_count - 1)` votes for who they think is human. Votes are changeable until the timer expires. No early completion — the full review window is always available.
 
 ### Elimination
 Vote tallies revealed → identity reveal ("`NODE-3` was human.") → one-line LLM verdict sentence. Maximum restraint for maximum tension.
@@ -95,13 +113,13 @@ Each personality has a `question_style` field that shapes how it generates follo
 
 **Vote weight**: Multi-vote (up to 3) means a coordinated group can focus suspicion. A lone vote rarely eliminates. This rewards discussion — or the appearance of it.
 
-**Anonymous questions** (Probe): Questioner identity is hidden from all players. AI questions are indistinguishable from human questions. This creates paranoia: anyone could have asked.
-
 **Synthesis** (Interrogation): The LLM narrator weaves all questions into one pointed cross-examination. This surfaces the sharpest angles, removes redundancy, and makes the interrogation feel like a tribunal rather than a pile-on.
+
+**Word Chain seed selection**: Server prefers words submitted by exactly one player (unique associations) over popular ones. This rewards creative divergence — but submitting too-unique words risks standing out.
 
 **Verdict**: After each elimination, a single sentence of literary commentary on the eliminated player's performance. Sets tone, rewards good play, makes each elimination feel significant.
 
-**Round-type alternation**: Probe rounds feel diffuse — everyone is questioned, no one is singled out. Interrogation rounds concentrate pressure. Alternating them prevents either from becoming the "obvious" solve.
+**Round-type cycling**: Task, Interrogation, and Word Chain each create different pressure surfaces. Task exposes format fluency. Interrogation concentrates pressure on one player. Word Chain distributes tension across everyone simultaneously. Cycling prevents any single strategy from being optimal.
 
 ## Edge Cases
 
@@ -114,7 +132,9 @@ Each personality has a `question_style` field that shapes how it generates follo
 - **Hot-seated player submits question**: Rejected — 400 error.
 - **All AI eliminated**: Humans win immediately.
 - **≤2 players left**: Game ends.
+- **Word Chain: no responses in a sub-round**: Server picks a random fallback association from `word_chain.py`.
+- **Matchmaking queue drop**: Player disconnecting from matchmaking SSE without explicit leave auto-removes them from the queue.
 
-## Explicitly Cut (MVP)
+## Explicitly Cut
 
-Matchmaking, accounts, database, persistence, custom prompts, spectator mode (post-game), AI difficulty, anti-cheat, sound effects, complex animations, leaderboards, scoring, game history.
+Accounts, database, persistence, custom prompts, spectator mode (post-game), AI difficulty, anti-cheat, sound effects, complex animations, leaderboards, scoring, game history.

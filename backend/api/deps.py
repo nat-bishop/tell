@@ -7,13 +7,12 @@ from functools import lru_cache
 from backend.config import Settings
 from backend.services.connection_manager import ConnectionManager
 from backend.services.game_repository import GameRepository
-from backend.services.matchmaking import MatchmakingService
 from backend.services.timer_manager import TimerManager
 
 _connection_manager: ConnectionManager | None = None
 _game_repository: GameRepository | None = None
 _timer_manager: TimerManager | None = None
-_matchmaking_service: MatchmakingService | None = None
+_matchmaking_service = None
 
 
 @lru_cache(maxsize=1)
@@ -42,7 +41,9 @@ def get_timer_manager() -> TimerManager:
     return _timer_manager
 
 
-def get_matchmaking_service() -> MatchmakingService:
+def get_matchmaking_service():
+    from backend.services.matchmaking import MatchmakingService
+
     global _matchmaking_service
     if _matchmaking_service is None:
         _matchmaking_service = MatchmakingService()

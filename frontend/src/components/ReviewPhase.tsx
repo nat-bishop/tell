@@ -153,19 +153,18 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   }, []);
 
   const toggleVote = (pid: string) => {
-    setSelected((prev) => {
-      let next: string[];
-      if (prev.includes(pid)) {
-        next = prev.filter((id) => id !== pid);
-      } else if (prev.length < maxVotes) {
-        next = [...prev, pid];
-      } else {
-        return prev;
-      }
-      sendVotes(next);
-      useGameStore.setState({ myVotes: next });
-      return next;
-    });
+    const prev = selected;
+    let next: string[];
+    if (prev.includes(pid)) {
+      next = prev.filter((id) => id !== pid);
+    } else if (prev.length < maxVotes) {
+      next = [...prev, pid];
+    } else {
+      return;
+    }
+    setSelected(next);
+    sendVotes(next);
+    useGameStore.setState({ myVotes: next });
   };
 
   const isWordChain = roundType === "word_chain";

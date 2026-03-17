@@ -1,4 +1,4 @@
-import { BASE_URL } from "./client";
+import { SSE_URL } from "./client";
 
 // Callbacks accept parsed JSON — type safety is enforced by the store, not the transport layer
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +33,7 @@ export function connectGameEvents(
   callbacks: GameEventCallbacks,
   lastSeq: number = 0,
 ): { close: () => void } {
-  const url = `${BASE_URL}/games/${gameId}/events?player_id=${playerId}&last_seq=${lastSeq}`;
+  const url = `${SSE_URL}/games/${gameId}/events?player_id=${playerId}&last_seq=${lastSeq}`;
   const es = new EventSource(url);
 
   const eventMap: Record<string, EventHandler> = {

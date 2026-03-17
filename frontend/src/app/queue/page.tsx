@@ -49,7 +49,6 @@ export default function QueuePage() {
   // Connect SSE when joined
   useEffect(() => {
     if (!joined || !playerId) return;
-
     connectionRef.current = connectMatchmakingEvents(playerId, {
       onLobbyStatus: (data) => {
         setStatus(data);

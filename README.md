@@ -20,7 +20,7 @@ make dev
 
 Backend starts on `http://localhost:8501`, frontend on `http://localhost:3500`. Dependencies install automatically.
 
-Open the frontend, create a game, share the URL with friends, and play.
+Open the frontend. Click **play** to enter matchmaking (finds a game automatically), or **private game** to create a shareable link.
 
 ## Commands
 

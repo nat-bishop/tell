@@ -6,32 +6,38 @@ Multiplayer social deduction game — reverse Turing test meets Among Us. Player
 
 ```
 schemas/          Shared Pydantic models — the contract between backend + frontend
-  game_state.py   GamePhase, Player, TellGameState, QuestionEntry, RoundState
-  api_models.py   SSE event types + POST request/response models
-  prompts.py      30 game prompts with category-aware selection
+  game_state.py   GamePhase, Player, TellGameState, QuestionEntry, RoundState, ChainRound
+  api_models.py   SSE event types + POST request/response models (incl. matchmaking)
+  prompts.py      30 game prompts (5 categories) + 42 task prompts (7 categories)
+  word_chain.py   SEED_WORDS list, select_seed_word, get_fallback_association
   aliases.py      Robot alias generator (UNIT-7, BOT-42)
-  constants.py    Timer durations, player limits
+  constants.py    MISSING_ALIAS, NO_RESPONSE, MATCHMAKING_LOBBY_ID
 
 backend/
   main.py         FastAPI entry point (CORS, structlog, Logfire opt-in)
   config.py       Settings from config.toml + TELL_* env overrides
   api/
-    deps.py       Singletons: ConnectionManager, GameRepository, TimerManager
+    deps.py       Singletons: ConnectionManager, GameRepository, TimerManager,
+                  MatchmakingService
     routes/
-      game.py     POST /games, GET /games/{id}
-      events.py   GET /games/{id}/events (SSE stream)
-      actions.py  POST join/start/answer/question/respond/nominate/vote
+      game.py         POST /games, GET /games/{id}
+      events.py       GET /games/{id}/events (SSE stream)
+      actions.py      POST join/start/answer/question/respond/nominate/vote/chain-word
+      matchmaking.py  POST /matchmaking/join|leave, GET /matchmaking/status|events
   services/
     connection_manager.py  Per-game asyncio.Queue broadcast + event log
     game_repository.py     In-memory game session store
-    game_logic.py          Pure functions: transitions, vote resolution, validation
+    game_logic.py          Pure functions: transitions, vote resolution, validation,
+                           word chain selection, round type cycling
     timer_manager.py       asyncio.Task per phase timer
     transitions.py         Async phase transition sequences (start_phase_timer,
-                           handle_phase_expiry, do_*_complete helpers)
-    ai_scheduler.py        Generate-then-lock AI player scheduling
+                           handle_phase_expiry, do_*_complete helpers,
+                           do_chain_complete, initialize_and_start_game)
+    ai_scheduler.py        Generate-then-lock AI player scheduling + chain sub-rounds
+    matchmaking.py         Rolling lobby: queue, countdown, solo timeout, fire_game
   llm/
     agents.py              PydanticAI: answer, question, response, vote, nomination,
-                           synthesis, verdict generation
+                           synthesis, verdict, word association (generate_association)
     personalities.py       5 AI personalities with system prompts + question styles
 
 tests/
@@ -41,12 +47,15 @@ tests/
   test_schemas.py     Tests for schema models, prompt selection, alias generation
 
 frontend/src/
-  app/page.tsx             Landing: "tell — a game of words and suspicion"
+  app/page.tsx             Landing: "play" (→ queue) + "private game" (→ create)
+  app/queue/page.tsx       Matchmaking queue: name input, SSE lobby updates, redirect
   app/game/[id]/page.tsx   Game page: join → phase routing (spectator for eliminated)
   components/
     AnswerCard.tsx         Shared answer-first card (alias pinned to bottom, button/div)
     PlayerBar.tsx          Persistent player strip during gameplay
     VoteOverlay.tsx        Multi-vote selection overlay (up to 3 votes)
+    PhaseInterstitial.tsx  Phase transition overlay (round N + type label, fade in/out)
+    WordChainPhase.tsx     CHAIN phase — seed word display, growing chain, word input
     QuestionPhase.tsx      QUESTION phase — shows target's answer, write follow-up
     RespondPhase.tsx       RESPOND phase — answer received questions
     NominatePhase.tsx      NOMINATE phase — pick who to interrogate
@@ -57,8 +66,9 @@ frontend/src/
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
   hooks/useAnswerEntries.ts Maps answers dict → [{alias, text}] for display
-  api/actions.ts           Typed POST helpers
+  api/actions.ts           Typed POST helpers (incl. submitChainWord, matchmaking)
   api/events.ts            SSE client with typed event routing
+  api/matchmaking-events.ts  SSE client for matchmaking lobby (LobbyStatus, GameAssigned)
   api/client.ts            Base fetch wrapper
 ```
 
@@ -85,6 +95,8 @@ Copy `.env.example` → `.env` and set `GOOGLE_API_KEY`. AI model: `google-gla:g
 Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_LOG_LEVEL=DEBUG` — enables debug logging **and** mounts debug routes (`/debug/seed`, etc.)
 - `TELL_LOGFIRE_ENABLED=true` — Pydantic Logfire tracing
+- `TELL_MM_MIN_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
+- `TELL_CHAIN_DURATION`, `TELL_CHAIN_SUB_ROUND_DURATION`, `TELL_CHAIN_SUB_ROUNDS` — word chain timing
 
 **Logging convention**: INFO for game actions (player_joined, answer_submitted, vote_cast, phase transitions). DEBUG for SSE internals (sse_connected, sse_replay, queue ops).
 
@@ -99,21 +111,26 @@ AI players call LLM **outside** the lock, then acquire `asyncio.Lock` only to wr
 ### Type pipeline
 Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run `make codegen` after changing any schema or route signature.
 
-### State machine — two round types
+### State machine — three round types
 
-**Probe** (round-robin chain, anonymous questions):
+Round types cycle: **Task → Interrogation → Word Chain → Task → ...**. Generated at game start in `state.round_types` via `select_round_types()`.
+
+**Task** (constrained creative prompt, no Q&A):
 ```
-LOBBY → PROMPT (45s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s) → PROMPT → ... → GAME_OVER
+PROMPT (25s) → REVIEW (40s) → ELIMINATION (8s) → next round
 ```
 
 **Interrogation** (hot seat, LLM synthesis):
 ```
-LOBBY → PROMPT (45s) → NOMINATE (15s) → QUESTION (20s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s) → ...
+PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s) → next round
 ```
 
-Round types alternate: round 1 = probe, round 2 = interrogation, etc. Generated at game start in `state.round_types`.
+**Word Chain** (word association sub-rounds, no prompt):
+```
+CHAIN (64s safety timer, 8 sub-rounds × 8s each) → REVIEW (40s) → ELIMINATION (8s) → next round
+```
 
-Phase transitions are in `transitions.py` (extracted from `actions.py`): `start_phase_timer`, `handle_phase_expiry`, `do_prompt_complete`, `do_nominate_complete`, `do_question_complete`, `do_respond_complete`, `do_vote_resolution`, `do_after_elimination`. Timer callbacks and early-completion checks both call these same helpers. AI scheduler hooks into each transition via `ai_on_phase_change()`.
+Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_expiry`, `do_prompt_complete`, `do_nominate_complete`, `do_question_complete`, `do_respond_complete`, `do_vote_resolution`, `do_after_elimination`, `do_chain_complete`. Also `initialize_and_start_game` (shared by host-start and matchmaking). AI scheduler hooks into each transition via `ai_on_phase_change()`.
 
 ### Game logic is pure
 `game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, assignment logic, client state sanitization. Routes call these under the lock.
@@ -121,9 +138,13 @@ Phase transitions are in `transitions.py` (extracted from `actions.py`): `start_
 ### Voting: multi-vote
 Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are changeable until timer expires. No early-complete for REVIEW.
 
+### Matchmaking
+`MatchmakingService` (singleton in `deps.py`) maintains a rolling lobby queue. Players join via `POST /matchmaking/join`, connect to `GET /matchmaking/events` SSE for status. When `mm_min_humans` (default 2) are queued, a countdown fires. After `mm_countdown_seconds` (20s), `_fire_game()` pops the queue, creates a real game, adds AI (random count from `mm_min_total`–`mm_max_total`), and calls `initialize_and_start_game()`. All lobby clients receive `game_assigned` event and redirect. Solo player gets a `mm_solo_timeout_seconds` (45s) grace period before starting with AI companions. Frontend: `/queue` page.
+
 ### LLM-powered features
 - **Question synthesis** (Interrogation): all submitted questions → LLM → one cohesive cross-examination paragraph. 5s timeout, fallback: numbered list.
 - **Verdict summary** (Elimination): one-line dramatic summary after role reveal. 3s timeout, fallback: no verdict.
+- **Word association** (Word Chain): each sub-round, AI generates a single-word association via `generate_association()`. Personality-aware style hints. 3s timeout, fallback: `get_fallback_association()` from `word_chain.py`.
 
 ## Gotchas
 
@@ -135,8 +156,11 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
 - **Eliminated players see spectator views**: `game/[id]/page.tsx` checks `isAlive` and passes `spectator` prop to phase components.
-- **Round-robin assignments** (Probe): player `i` questions player `(i+1) % len(alive)`. Generated in `assign_question_targets()`.
+- **Round-robin assignments** (Interrogation only now): player `i` questions player `(i+1) % len(alive)`. Generated in `assign_question_targets()` — Probe round type is no longer in rotation.
 - **Hot-seated player** (Interrogation): nominated player can't submit questions, only responds to synthesis.
+- **Word Chain sub-rounds**: The CHAIN phase runs 8 sub-rounds of 8s each inside a background loop (`_start_chain_loop`). A safety timer of 64s also runs. Sub-round winner is chosen by `select_chain_next_word()` (prefers unique words). Next seed = chosen word.
+- **Matchmaking join window**: `MatchmakingService._join_window_open` event blocks new joins while a game is being fired. Clears after lobby SSE clients are disconnected.
+- **Task prompts use separate pool**: `used_task_prompt_indices` + `last_task_prompt_category` tracked separately from regular prompts. `select_task_prompt()` in `prompts.py`.
 
 ## Code Conventions
 

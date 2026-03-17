@@ -1,4 +1,4 @@
-import { BASE_URL } from "./client";
+import { SSE_URL } from "./client";
 
 export interface LobbyStatusData {
   event_type: "lobby_status";
@@ -23,7 +23,7 @@ export function connectMatchmakingEvents(
   playerId: string,
   callbacks: MatchmakingCallbacks,
 ): { close: () => void } {
-  const url = `${BASE_URL}/matchmaking/events?player_id=${playerId}`;
+  const url = `${SSE_URL}/matchmaking/events?player_id=${playerId}`;
   const es = new EventSource(url);
 
   es.addEventListener("lobby_status", (e: MessageEvent) => {
