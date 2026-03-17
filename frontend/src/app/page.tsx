@@ -4,12 +4,17 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createGame } from "@/api/actions";
 import { Stage } from "@/components/Stage";
+import { SystemText } from "@/components/SystemText";
 
 export default function Home() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
-  const handleNewGame = async () => {
+  const handlePlay = () => {
+    router.push("/queue");
+  };
+
+  const handlePrivateGame = async () => {
     setLoading(true);
     try {
       const res = await createGame();
@@ -30,13 +35,27 @@ export default function Home() {
             a game of words and suspicion
           </p>
         </div>
-        <button
-          onClick={handleNewGame}
-          disabled={loading}
-          className="font-literary text-[1.1rem] text-ink transition-opacity hover:opacity-70 disabled:opacity-50"
-        >
-          {loading ? "creating..." : "new game \u2192"}
-        </button>
+
+        <div className="flex flex-col items-center gap-4">
+          <button
+            onClick={handlePlay}
+            className="font-literary text-[1.1rem] text-ink transition-opacity hover:opacity-70"
+          >
+            play &rarr;
+          </button>
+          <button
+            onClick={handlePrivateGame}
+            disabled={loading}
+            className="font-system text-[0.75rem] text-dim transition-opacity hover:opacity-70 disabled:opacity-50"
+          >
+            {loading ? "creating..." : "private game"}
+          </button>
+        </div>
+
+        <SystemText>
+          play finds a game automatically &mdash; private game creates a link to
+          share
+        </SystemText>
       </div>
     </Stage>
   );

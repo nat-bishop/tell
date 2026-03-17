@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes.actions import router as actions_router
 from backend.api.routes.events import router as events_router
 from backend.api.routes.game import router as game_router
+from backend.api.routes.matchmaking import router as matchmaking_router
 from backend.config import Settings
 
 
@@ -109,6 +110,7 @@ if _settings.logfire_enabled:
 app.include_router(game_router, prefix="/games", tags=["games"])
 app.include_router(events_router, prefix="/games", tags=["events"])
 app.include_router(actions_router, prefix="/games", tags=["actions"])
+app.include_router(matchmaking_router, prefix="/matchmaking", tags=["matchmaking"])
 
 if _settings.debug:
     from backend.api.routes.debug import router as debug_router
