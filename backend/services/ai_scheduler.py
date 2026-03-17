@@ -242,22 +242,22 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
         # Offset AI answer delays past the reading period
         reading = get_settings().prompt_reading_duration
         for player in ai_players:
-            delay = random.uniform(reading + 3, reading + 15)
+            delay = random.uniform(reading + 5, reading + 25)
             tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.NOMINATE:
         for player in ai_players:
-            delay = random.uniform(2, 8)
+            delay = random.uniform(3, 12)
             tasks.append(asyncio.create_task(_ai_nominate_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.QUESTION:
         for player in ai_players:
-            delay = random.uniform(3, 12)
+            delay = random.uniform(5, 18)
             tasks.append(asyncio.create_task(_ai_question_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.RESPOND:
         for player in ai_players:
-            delay = random.uniform(2, 8)
+            delay = random.uniform(3, 15)
             tasks.append(asyncio.create_task(_ai_respond_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.REVIEW:
@@ -265,11 +265,11 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
         for player in ai_players:
             n_msgs = random.randint(1, 2)
             for i in range(n_msgs):
-                delay = random.uniform(10, 22) + i * random.uniform(2, 5)
+                delay = random.uniform(14, 28) + i * random.uniform(2, 5)
                 tasks.append(asyncio.create_task(_ai_discussion_task(game_id, player.id, delay)))
         # Votes during VOTE window (26-40s into REVIEW)
         for player in ai_players:
-            delay = random.uniform(28, 37)
+            delay = random.uniform(36, 50)
             tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
 
     _ai_tasks[game_id] = tasks
@@ -739,7 +739,7 @@ async def on_chain_sub_round(game_id: str, sub_round: int) -> None:
 
     tasks: list[asyncio.Task] = []
     for player in ai_players:
-        delay = random.uniform(1, 4)
+        delay = random.uniform(2, 6)
         tasks.append(asyncio.create_task(_ai_chain_task(game_id, player.id, sub_round, delay)))
 
     _ai_tasks.setdefault(game_id, []).extend(tasks)
@@ -832,7 +832,7 @@ async def on_brain_test_challenge(game_id: str, challenge_index: int) -> None:
 
     tasks: list[asyncio.Task] = []
     for player in ai_players:
-        delay = random.uniform(1.5, 6)
+        delay = random.uniform(2, 8)
         tasks.append(
             asyncio.create_task(_ai_brain_test_task(game_id, player.id, challenge_index, delay))
         )

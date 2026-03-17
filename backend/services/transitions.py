@@ -196,10 +196,10 @@ def _compute_review_timestamps(
     """Compute discuss_starts_at and vote_starts_at for REVIEW sub-phases."""
     if not state.phase_deadline:
         return {}
-    # Interstitial eats ~2s, then reveal 0-8s, discuss 8-26s, vote 26-40s
+    # Interstitial eats ~2s, then reveal 0-10s, discuss 10-33s, vote 33-55s
     action_start = state.phase_deadline - dt.timedelta(seconds=review_duration)
-    discuss_starts_at = action_start + dt.timedelta(seconds=8)
-    vote_starts_at = action_start + dt.timedelta(seconds=26)
+    discuss_starts_at = action_start + dt.timedelta(seconds=10)
+    vote_starts_at = action_start + dt.timedelta(seconds=33)
     return {
         "discuss_starts_at": discuss_starts_at.isoformat(),
         "vote_starts_at": vote_starts_at.isoformat(),
