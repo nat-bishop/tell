@@ -618,6 +618,7 @@ async def do_chain_complete(game_id: str, session) -> None:
     settings = get_settings()
     state = session.state
 
+    round_state = state.current_round
     transition_to_review(state, settings.review_duration)
     await cm.broadcast(
         game_id,
@@ -626,6 +627,7 @@ async def do_chain_complete(game_id: str, session) -> None:
             session,
             settings,
             round_type=RoundType.WORD_CHAIN,
+            chain_rounds=[cr.model_dump() for cr in round_state.chain_rounds],
         ),
     )
 

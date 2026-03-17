@@ -184,7 +184,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
       if (!gameId || !playerId) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        castVote(gameId, playerId, targets);
+        castVote(gameId, playerId, targets).catch(() => {});
       }, 500);
     },
     [gameId, playerId],
@@ -219,7 +219,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     if (!allRevealed || !gameId || !playerId) return;
     if (comedyVote === pid) return; // Already selected — no server "unvote"
     setComedyVote(pid);
-    castComedyVote(gameId, playerId, pid);
+    castComedyVote(gameId, playerId, pid).catch(() => {});
     useGameStore.setState({ myComedyVote: pid });
   };
 

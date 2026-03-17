@@ -10,7 +10,7 @@ schemas/          Shared Pydantic models — the contract between backend + fron
                   ChainRound, BrainTestChallenge, NarratorEntry
   api_models.py   SSE event types + POST request/response models (incl. matchmaking)
   prompts.py      30 game prompts (5 categories) + 42 task prompts (7 categories)
-                  + 20 brain test challenges (4 types) + select_brain_test_challenges()
+                  + 19 brain test challenges (4 types) + select_brain_test_challenges()
   word_chain.py   SEED_WORDS list, select_seed_word, get_fallback_association
   aliases.py      Robot alias generator (UNIT-7, BOT-42)
   constants.py    MISSING_ALIAS, NO_RESPONSE, MATCHMAKING_LOBBY_ID
@@ -54,6 +54,10 @@ tests/
   factories.py    Plain functions building Pydantic models with sensible defaults
   test_game_logic.py  Tests for all pure functions in game_logic.py
   test_schemas.py     Tests for schema models, prompt selection, alias generation
+  test_routes.py      Integration tests for API routes
+  test_services.py    Tests for service layer (transitions, timer, matchmaking)
+  test_transitions.py Tests for async phase transition sequences
+  test_word_chain.py  Tests for word chain logic and selection
 
 frontend/src/
   app/page.tsx             Landing: "play" (→ queue) + "private game" (→ create)
@@ -74,13 +78,14 @@ frontend/src/
     NominatePhase.tsx      NOMINATE phase — pick who to interrogate
     ReviewPhase.tsx        REVIEW phase — AnswerCard grid + voting + comedy vote row
     Prompt.tsx, Elimination.tsx, GameOver.tsx, Lobby.tsx
+    GameTextarea.tsx   Shared textarea with auto-resize + Enter-to-submit
+    LabeledCard.tsx    Card wrapper with label
     Stage.tsx, Timer.tsx, Dialogue.tsx, SystemText.tsx
   hooks/useGameStore.ts    Zustand store — all game state + SSE event handlers;
                            narrationText/narrationTrigger; brain test state fields;
                            totalRounds/lastEliminationWasHuman/humansEliminated/aisEliminated
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
-  hooks/useAnswerEntries.ts Maps answers dict → [{alias, text}] for display
   api/actions.ts           Typed POST helpers (incl. submitChainWord, castComedyVote,
                            submitBrainTestAnswer, matchmaking)
   api/events.ts            SSE client with typed event routing
@@ -151,7 +156,7 @@ CHAIN (64s safety timer, 8 sub-rounds × 8s each) → REVIEW (40s) → ELIMINATI
 ```
 BRAIN_TEST (75s safety timer, 5 challenges × 12s each) → BRAIN_TEST_RESULTS (15s) → next round
 ```
-Brain Test has no voting or elimination. Results stored in `brain_test_evidence` on `TellGameState` and carry forward as context for the next voting round.
+Brain Test has no voting or elimination. Results stored in `brain_challenges` on `RoundState` and shown to all players via `BrainTestResultsEvent`.
 
 **Interrogation** (hot seat, LLM synthesis):
 ```
@@ -162,8 +167,6 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 
 ### Game logic is pure
 `game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, assignment logic, client state sanitization. Routes call these under the lock.
-
-`PHASE_SEQUENCES` dict in `game_logic.py` is the canonical definition of valid phase → next-phase transitions per round type. `next_phase()` uses it to drive the state machine.
 
 ### Voting: multi-vote
 Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are changeable until timer expires. No early-complete for REVIEW.
@@ -191,7 +194,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **Hot-seated player** (Interrogation): nominated player can't submit questions, only responds to synthesis.
 - **Word Chain sub-rounds**: The CHAIN phase runs 8 sub-rounds of 8s each inside a background loop (`_start_chain_loop`). A safety timer of 64s also runs. Sub-round winner is chosen by `select_chain_next_word()` (prefers unique words). Next seed = chosen word.
 - **Brain Test sub-rounds**: BRAIN_TEST mirrors the Word Chain architecture — `_start_brain_test_loop` background task cycles through 5 challenges at 12s each. Safety timer 75s. AI answers via `on_brain_test_challenge()` → `_ai_brain_test_task()`. No elimination; `do_after_brain_test()` starts the next round directly.
-- **Brain test evidence**: `brain_test_evidence` on `TellGameState` stores the results dict from the most recent Brain Test round. Carried forward as context for the next voting round.
+- **Brain test evidence**: `brain_challenges` on `RoundState` stores challenge results. Broadcast to clients via `BrainTestResultsEvent` for player reference but not injected into AI prompts for subsequent rounds.
 - **Comedy Cup**: During REVIEW, players can cast one comedy vote (`POST /{game_id}/comedy-vote`) alongside their deduction votes. `resolve_comedy_votes()` in `game_logic.py`. Winner broadcast via `ComedyWinnerEvent` at vote resolution. Shown in Elimination step 5 alongside verdict. Can vote for self.
 - **Narrator fires non-blocking**: `_fire_narration()` uses `asyncio.create_task()`. It acquires the lock only for the state read and write — LLM call is outside the lock. If the game ends before the narration resolves, it exits silently.
 - **Elimination is 12s** (was 8s). 5-step reveal sequence in `Elimination.tsx` with a "beat" gap. Step 1 shows the vote map (who voted for whom).
@@ -203,7 +206,7 @@ Players get `min(3, alive_count - 1)` votes during REVIEW phase. Votes are chang
 - **Python**: Pydantic v2 models, type hints, `ruff` formatting (line-length 100)
 - **TypeScript**: Strict mode, path aliases (`@/*` → `src/*`), Zustand for state
 - **Fonts**: Cormorant (literary content), Cormorant SC (character names), IBM Plex Mono (system text)
-- **Color**: `--page` `--ink` `--dim` `--rule` only. `--warm` (#B85C38) reserved for timer warning, vote selection, and "human" reveals.
+- **Color**: `--page` `--ink` `--dim` `--rule` `--surface` `--raised` `--cold`. `--warm` (#B85C38) reserved for timer warning, vote selection, and "human" reveals.
 - **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-elimination-reveal`.
 - **Textarea submit**: All gameplay textareas submit on Enter (no Shift). Auto-resize via `scrollHeight`. `maxLength` enforced per field.
 

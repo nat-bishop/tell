@@ -12,3 +12,6 @@ frontend/src/types/openapi.json
 dist/
 .playwright-mcp/
 recordings/
+.claude/settings.local.json
+.coverage
+test-screenshots/

@@ -498,7 +498,7 @@ export const useGameStore = create<GameState>((set) => ({
     })),
 
   onPhaseChanged: (data) =>
-    set({
+    set((s) => ({
       phase: data.phase,
       roundNumber: data.round_number,
       promptText: data.prompt_text || null,
@@ -519,7 +519,9 @@ export const useGameStore = create<GameState>((set) => ({
       myQuestionSubmitted: false,
       myResponseSubmitted: false,
       answerCount: 0,
-      totalCount: 0,
+      totalCount: data.phase === "prompt"
+        ? s.players.filter((p) => p.is_alive).length
+        : 0,
       voteCount: 0,
       voteTotalCount: 0,
       questionCount: 0,
@@ -543,13 +545,15 @@ export const useGameStore = create<GameState>((set) => ({
       comedyWinnerAlias: null,
       comedyWinnerVotes: 0,
       myComedyVote: null,
-      chainRounds: EMPTY_CHAIN_ROUNDS,
+      chainRounds: data.chain_rounds?.length ? data.chain_rounds : EMPTY_CHAIN_ROUNDS,
       currentSubRound: 0,
-      currentSeedWord: null,
-      chainSoFar: EMPTY_CHAIN_SO_FAR,
+      currentSeedWord: data.chain_rounds?.length
+        ? data.chain_rounds[data.chain_rounds.length - 1].seed
+        : null,
+      chainSoFar: data.chain_rounds?.map((cr: ChainRoundData) => cr.seed) || EMPTY_CHAIN_SO_FAR,
       chainResponseCount: 0,
       chainTotalCount: 0,
-    }),
+    })),
 
   onAnswerSubmitted: (data) =>
     set({
