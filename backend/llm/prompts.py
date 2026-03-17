@@ -110,8 +110,7 @@ def build_system_prompt(deps: AIPlayerDeps) -> str:
 def build_answer_prompt(deps: AIPlayerDeps) -> str:
     """User message for PROMPT phase. Personality behavior controls length."""
     return (
-        f'The prompt is: "{deps.current_prompt}"\n\n'
-        "Respond in character. Do not include your name."
+        f'The prompt is: "{deps.current_prompt}"\n\nRespond in character. Do not include your name.'
     )
 
 

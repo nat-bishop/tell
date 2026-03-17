@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from backend.services.game_logic import (
@@ -12,6 +14,8 @@ from backend.services.game_logic import (
     count_responses,
     fill_missing_answers,
     fill_missing_responses,
+    get_next_round_type,
+    get_phase_duration,
     is_question_eligible,
     is_response_eligible,
     make_game_over_event,
@@ -23,11 +27,13 @@ from backend.services.game_logic import (
     select_chain_next_word,
     select_round_types,
     transition_to_elimination,
+    transition_to_nominate,
     transition_to_prompt,
     transition_to_question,
     transition_to_respond,
     transition_to_review,
     transition_to_task_prompt,
+    transition_to_word_chain,
     validate_player_alive,
 )
 from schemas.constants import NO_RESPONSE
@@ -542,3 +548,166 @@ class TestTaskPrompts:
         result2 = transition_to_prompt(result, 45)
         assert len(result2.used_task_prompt_indices) == 1  # task indices untouched
         assert len(result2.used_prompt_indices) == 1
+
+
+# ---------------------------------------------------------------------------
+# get_phase_duration
+# ---------------------------------------------------------------------------
+
+
+def _mock_settings(**overrides):
+    defaults = {
+        "prompt_duration": 45,
+        "task_prompt_duration": 25,
+        "prompt_reading_duration": 10,
+        "question_duration": 25,
+        "respond_duration": 30,
+        "review_duration": 40,
+        "nominate_duration": 15,
+        "elimination_duration": 8,
+        "chain_duration": 64,
+    }
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+class TestGetPhaseDuration:
+    def test_prompt_interrogation(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.PROMPT) == 55  # 45 + 10
+
+    def test_prompt_task(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.PROMPT, RoundType.TASK) == 35  # 25 + 10
+
+    def test_chain(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.CHAIN) == 64
+
+    @pytest.mark.parametrize(
+        "phase,attr",
+        [
+            (GamePhase.QUESTION, "question_duration"),
+            (GamePhase.RESPOND, "respond_duration"),
+            (GamePhase.REVIEW, "review_duration"),
+            (GamePhase.NOMINATE, "nominate_duration"),
+            (GamePhase.ELIMINATION, "elimination_duration"),
+        ],
+    )
+    def test_simple_phases(self, phase, attr):
+        s = _mock_settings()
+        assert get_phase_duration(s, phase) == getattr(s, attr)
+
+    def test_unknown_phase(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.LOBBY) is None
+
+
+# ---------------------------------------------------------------------------
+# get_next_round_type
+# ---------------------------------------------------------------------------
+
+
+class TestGetNextRoundType:
+    def test_within_bounds(self):
+        state, _ = make_standard_game()
+        state.round_number = 0
+        state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
+        assert get_next_round_type(state) == RoundType.TASK
+
+    def test_second_round(self):
+        state, _ = make_standard_game()
+        state.round_number = 1
+        state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
+        assert get_next_round_type(state) == RoundType.INTERROGATION
+
+    def test_out_of_bounds_falls_back(self):
+        state, _ = make_standard_game()
+        state.round_number = 10
+        state.round_types = [RoundType.TASK]
+        assert get_next_round_type(state) == RoundType.TASK
+
+    def test_empty_round_types(self):
+        state, _ = make_standard_game()
+        state.round_number = 0
+        state.round_types = []
+        assert get_next_round_type(state) == RoundType.TASK
+
+
+# ---------------------------------------------------------------------------
+# transition_to_word_chain
+# ---------------------------------------------------------------------------
+
+
+class TestTransitionToWordChain:
+    def test_basic(self):
+        state, _ = make_standard_game()
+        state.round_number = 0
+        result = transition_to_word_chain(state, "ocean", 64)
+
+        assert result.phase == GamePhase.CHAIN
+        assert result.round_number == 1
+        assert result.current_round is not None
+        assert result.current_round.round_type == RoundType.WORD_CHAIN
+        assert result.current_round.current_sub_round == 0
+        assert len(result.current_round.chain_rounds) == 1
+        assert result.current_round.chain_rounds[0].seed == "ocean"
+        assert result.phase_deadline is not None
+
+    def test_prompt_is_word_chain(self):
+        state, _ = make_standard_game()
+        state.round_number = 0
+        result = transition_to_word_chain(state, "bridge", 64)
+        assert result.current_round.prompt_text == "word chain"
+        assert result.current_round.prompt_category == "word_chain"
+
+
+# ---------------------------------------------------------------------------
+# transition_to_nominate (explicit)
+# ---------------------------------------------------------------------------
+
+
+class TestTransitionToNominate:
+    def test_sets_phase_and_deadline(self):
+        state, _ = make_standard_game()
+        result = transition_to_nominate(state, 15)
+        assert result.phase == GamePhase.NOMINATE
+        assert result.phase_deadline is not None
+
+
+# ---------------------------------------------------------------------------
+# Additional edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestFillFunctionsEdgeCases:
+    def test_fill_missing_answers_noop_when_all_answered(self):
+        state, _ = make_standard_game()
+        state.current_round.answers = {"h1": "a", "h2": "b", "a1": "c", "a2": "d"}
+        fill_missing_answers(state)
+        assert state.current_round.answers == {"h1": "a", "h2": "b", "a1": "c", "a2": "d"}
+
+
+class TestBuildStateSyncEdgeCases:
+    def test_review_phase_includes_my_votes(self):
+        state, _ = make_standard_game(phase=GamePhase.REVIEW)
+        state.current_round.votes = {"h1": ["a1", "a2"]}
+        sync = build_state_sync(state, "h1", seq=1)
+        assert sync["my_votes"] == ["a1", "a2"]
+
+    def test_non_review_phase_empty_my_votes(self):
+        state, _ = make_standard_game(phase=GamePhase.QUESTION)
+        state.current_round.votes = {"h1": ["a1"]}
+        sync = build_state_sync(state, "h1", seq=1)
+        assert sync["my_votes"] == []
+
+    def test_chain_phase_includes_chain_rounds(self):
+        state, _ = make_standard_game(phase=GamePhase.CHAIN)
+        from schemas.game_state import ChainRound
+
+        state.current_round.chain_rounds = [ChainRound(seed="ocean")]
+        state.current_round.current_sub_round = 0
+        sync = build_state_sync(state, "h1", seq=1)
+        assert len(sync["chain_rounds"]) == 1
+        assert sync["chain_rounds"][0]["seed"] == "ocean"
+        assert sync["current_sub_round"] == 0

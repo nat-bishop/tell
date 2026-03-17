@@ -50,6 +50,13 @@ from schemas.word_chain import select_seed_word
 log = structlog.get_logger(__name__)
 
 
+async def _notify_ai(game_id: str, phase: GamePhase) -> None:
+    """Notify the AI scheduler of a phase change (runtime import to avoid circular dep)."""
+    from backend.services.ai_scheduler import on_phase_change
+
+    await on_phase_change(game_id, phase)
+
+
 def _make_event(state, session, settings, **extra):
     """Build a PhaseChangedEvent with phase_duration computed from settings."""
     rs = state.current_round
@@ -158,9 +165,7 @@ async def do_prompt_complete(game_id: str, session) -> None:
         next_phase = GamePhase.NOMINATE
 
     await start_phase_timer(game_id, next_phase)
-    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-    await ai_on_phase_change(game_id, next_phase)
+    await _notify_ai(game_id, next_phase)
 
 
 async def do_nominate_complete(game_id: str, session) -> None:
@@ -203,9 +208,7 @@ async def do_nominate_complete(game_id: str, session) -> None:
     )
 
     await start_phase_timer(game_id, GamePhase.QUESTION)
-    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-    await ai_on_phase_change(game_id, GamePhase.QUESTION)
+    await _notify_ai(game_id, GamePhase.QUESTION)
 
 
 async def do_question_complete(game_id: str, session) -> None:
@@ -268,9 +271,7 @@ async def do_question_complete(game_id: str, session) -> None:
         )
 
     await start_phase_timer(game_id, GamePhase.RESPOND)
-    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-    await ai_on_phase_change(game_id, GamePhase.RESPOND)
+    await _notify_ai(game_id, GamePhase.RESPOND)
 
 
 async def do_respond_complete(game_id: str, session) -> None:
@@ -297,9 +298,7 @@ async def do_respond_complete(game_id: str, session) -> None:
     )
 
     await start_phase_timer(game_id, GamePhase.REVIEW)
-    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-    await ai_on_phase_change(game_id, GamePhase.REVIEW)
+    await _notify_ai(game_id, GamePhase.REVIEW)
 
 
 async def do_vote_resolution(game_id: str, session) -> None:
@@ -402,9 +401,7 @@ async def do_after_elimination(game_id: str, session) -> None:
             ),
         )
         await start_phase_timer(game_id, GamePhase.PROMPT, RoundType.TASK)
-        from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-        await ai_on_phase_change(game_id, GamePhase.PROMPT)
+        await _notify_ai(game_id, GamePhase.PROMPT)
 
     elif next_round_type == RoundType.WORD_CHAIN:
         seed = select_seed_word()
@@ -441,9 +438,7 @@ async def do_after_elimination(game_id: str, session) -> None:
             ),
         )
         await start_phase_timer(game_id, GamePhase.PROMPT)
-        from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-        await ai_on_phase_change(game_id, GamePhase.PROMPT)
+        await _notify_ai(game_id, GamePhase.PROMPT)
 
 
 async def do_chain_complete(game_id: str, session) -> None:
@@ -467,9 +462,7 @@ async def do_chain_complete(game_id: str, session) -> None:
     )
 
     await start_phase_timer(game_id, GamePhase.REVIEW)
-    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
-
-    await ai_on_phase_change(game_id, GamePhase.REVIEW)
+    await _notify_ai(game_id, GamePhase.REVIEW)
 
 
 async def _start_chain_loop(game_id: str, session) -> None:
@@ -593,7 +586,6 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     Caller must ensure the game exists and is in LOBBY phase.
     """
     from backend.services.ai_scheduler import assign_personalities
-    from backend.services.ai_scheduler import on_phase_change as ai_on_phase_change
 
     cm = get_connection_manager()
     settings = get_settings()
@@ -675,7 +667,7 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     await start_phase_timer(
         game_id, GamePhase.PROMPT, state.round_types[0] if state.round_types else None
     )
-    await ai_on_phase_change(game_id, GamePhase.PROMPT)
+    await _notify_ai(game_id, GamePhase.PROMPT)
 
     log.info(
         "game_started",

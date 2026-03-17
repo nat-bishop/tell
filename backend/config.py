@@ -78,10 +78,9 @@ class Settings:
         self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 3)))
 
         # Recording
-        self.record_games: bool = (
-            os.environ.get("TELL_RECORD_GAMES", str(game.get("record_games", True))).lower()
-            in ("true", "1", "yes")
-        )
+        self.record_games: bool = os.environ.get(
+            "TELL_RECORD_GAMES", str(game.get("record_games", True))
+        ).lower() in ("true", "1", "yes")
 
         # Observability
         self.logfire_enabled: bool = (

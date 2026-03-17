@@ -17,9 +17,7 @@ log = structlog.get_logger(__name__)
 _RECORDINGS_DIR = Path(__file__).resolve().parent.parent.parent / "recordings"
 
 
-def save_recording(
-    game_id: str, state: TellGameState, events: list[GameEvent]
-) -> None:
+def save_recording(game_id: str, state: TellGameState, events: list[GameEvent]) -> None:
     """Persist the full event stream and final state for a completed game."""
     try:
         os.makedirs(_RECORDINGS_DIR, exist_ok=True)

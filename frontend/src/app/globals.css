@@ -288,20 +288,6 @@ body::before {
   border-top: 1px solid var(--rule);
 }
 
-/* ─── Scrollbar ─── */
-
-.chat-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: var(--rule) transparent;
-}
-.chat-scroll::-webkit-scrollbar {
-  width: 4px;
-}
-.chat-scroll::-webkit-scrollbar-thumb {
-  background-color: var(--rule);
-  border-radius: 2px;
-}
-
 /* ─── Synthesizing dots ─── */
 
 @keyframes pulse-dots {
@@ -312,17 +298,6 @@ body::before {
 .synthesizing-dots::after {
   content: '...';
   animation: pulse-dots 1.4s infinite ease-in-out;
-}
-
-/* ─── Spotlight fade ─── */
-
-@keyframes spotlight-fade {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.animate-spotlight-fade {
-  animation: spotlight-fade 300ms ease-out both;
 }
 
 /* ─── Input styling ─── */

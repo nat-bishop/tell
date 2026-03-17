@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+import os
+
+# Ensure logfire is disabled before any backend module is imported at module-load time
+os.environ.setdefault("TELL_LOGFIRE_ENABLED", "false")
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
 from tests.factories import make_game_state, make_player, make_round_state, make_standard_game
@@ -29,3 +36,115 @@ def player():
 def round_state():
     """RoundState factory — call with kwargs to customize."""
     return make_round_state
+
+
+# ---------------------------------------------------------------------------
+# Integration test infrastructure
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fresh_deps():
+    """Reset singleton globals in deps.py between tests."""
+    import backend.api.deps as deps
+    from backend.services.connection_manager import ConnectionManager
+    from backend.services.game_repository import GameRepository
+    from backend.services.timer_manager import TimerManager
+
+    deps._connection_manager = ConnectionManager()
+    deps._game_repository = GameRepository()
+    deps._timer_manager = TimerManager()
+    deps._matchmaking_service = None
+    deps.get_settings.cache_clear()
+
+    yield
+
+    deps._connection_manager = None
+    deps._game_repository = None
+    deps._timer_manager = None
+    deps._matchmaking_service = None
+    deps.get_settings.cache_clear()
+
+
+@pytest.fixture
+def mock_ai():
+    """Patch AI scheduler functions to no-ops."""
+    with (
+        patch(
+            "backend.services.ai_scheduler.on_phase_change",
+            new_callable=AsyncMock,
+        ) as mock_phase,
+        patch(
+            "backend.services.ai_scheduler.assign_personalities",
+        ) as mock_assign,
+        patch(
+            "backend.services.ai_scheduler.on_chain_sub_round",
+            new_callable=AsyncMock,
+        ) as mock_chain,
+        patch(
+            "backend.services.ai_scheduler.register_task",
+        ) as mock_register,
+        patch(
+            "backend.services.ai_scheduler.cleanup_game",
+        ) as mock_cleanup,
+    ):
+        yield {
+            "on_phase_change": mock_phase,
+            "assign_personalities": mock_assign,
+            "on_chain_sub_round": mock_chain,
+            "register_task": mock_register,
+            "cleanup_game": mock_cleanup,
+        }
+
+
+@pytest.fixture
+def mock_llm():
+    """Patch LLM agent functions used in transitions."""
+    with (
+        patch(
+            "backend.llm.agents.synthesize_questions",
+            new_callable=AsyncMock,
+            return_value="Synthesized question paragraph",
+        ) as mock_synth,
+        patch(
+            "backend.llm.agents.generate_verdict",
+            new_callable=AsyncMock,
+            return_value="A dramatic verdict.",
+        ) as mock_verdict,
+        patch(
+            "backend.llm.agents.generate_association",
+            new_callable=AsyncMock,
+            return_value="wave",
+        ) as mock_assoc,
+    ):
+        yield {
+            "synthesize_questions": mock_synth,
+            "generate_verdict": mock_verdict,
+            "generate_association": mock_assoc,
+        }
+
+
+@pytest.fixture
+async def client(fresh_deps):
+    """Async HTTP client for route tests."""
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as ac:
+        yield ac
+
+
+def seed_game(phase, round_type=None, **kwargs):
+    """Create a game directly in the repo at a given phase. Returns (game_id, session, players)."""
+    from backend.api.deps import get_connection_manager, get_game_repository
+
+    state, players = make_standard_game(phase=phase, round_type=round_type or "task", **kwargs)
+    repo = get_game_repository()
+    session = repo.create(state)
+    cm = get_connection_manager()
+    cm.get_lock(state.game_id)
+    return state.game_id, session, players

@@ -61,6 +61,9 @@ dev: .installed-py frontend/node_modules/.installed ## Start backend + frontend 
 test: .installed-py ## Run all tests
 	uv run pytest tests/ -x -q
 
+coverage: .installed-py ## Run tests with coverage report
+	uv run pytest tests/ --cov=backend --cov=schemas --cov-report=term-missing -q
+
 # ── Lint / Format ──────────────────────────────────────────────────
 
 .PHONY: lint

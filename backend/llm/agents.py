@@ -344,9 +344,7 @@ async def generate_verdict(
         f"They received {vote_count} votes in round {round_number} of {max_rounds}."
     )
 
-    return await _run_system_agent(
-        VERDICT_SYSTEM_PROMPT, user_prompt, timeout=3.0, game_id=game_id
-    )
+    return await _run_system_agent(VERDICT_SYSTEM_PROMPT, user_prompt, timeout=3.0, game_id=game_id)
 
 
 async def generate_association(

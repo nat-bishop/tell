@@ -466,9 +466,7 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
             total=total_count,
         )
         await cm.broadcast(game_id, event)
-        log.info(
-            "vote_cast", player_id=req.player_id, count=vote_count, total=total_count
-        )
+        log.info("vote_cast", player_id=req.player_id, count=vote_count, total=total_count)
 
         # NO early-complete for REVIEW — always runs full timer
 

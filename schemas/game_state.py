@@ -49,7 +49,6 @@ class QuestionEntry(BaseModel):
     response: str | None = None
 
 
-
 class ChainRound(BaseModel):
     seed: str
     responses: dict[str, str] = Field(default_factory=dict)  # player_id -> word

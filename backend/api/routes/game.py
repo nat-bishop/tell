@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.api.deps import get_connection_manager, get_game_repository, get_settings
 from schemas.aliases import generate_game_id
-from schemas.api_models import CreateGameRequest, CreateGameResponse, GameInfoResponse
+from schemas.api_models import CreateGameResponse, GameInfoResponse
 from schemas.game_state import TellGameState
 
 router = APIRouter()
@@ -16,7 +16,7 @@ log = structlog.get_logger(__name__)
 
 
 @router.post("", response_model=CreateGameResponse)
-async def create_game(req: CreateGameRequest | None = None):
+async def create_game():
     """Create a new game room."""
     game_id = generate_game_id()
     state = TellGameState(game_id=game_id)

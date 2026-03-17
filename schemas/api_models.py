@@ -214,10 +214,6 @@ class MatchmakingStatusResponse(BaseModel):
 # --- POST Request models ---
 
 
-class CreateGameRequest(BaseModel):
-    ai_count: int = 2
-
-
 class CreateGameResponse(BaseModel):
     game_id: str
     join_url: str

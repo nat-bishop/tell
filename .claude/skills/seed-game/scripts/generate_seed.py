@@ -23,8 +23,8 @@ while not (_project_root / "schemas").is_dir():
         sys.exit("Error: Cannot find project root (looking for schemas/ directory)")
 sys.path.insert(0, str(_project_root))
 
-from schemas.aliases import generate_aliases, generate_game_id, generate_player_id
-from schemas.game_state import (
+from schemas.aliases import generate_aliases, generate_game_id, generate_player_id  # noqa: E402
+from schemas.game_state import (  # noqa: E402
     ChainRound,
     GamePhase,
     Player,
@@ -34,8 +34,8 @@ from schemas.game_state import (
     RoundType,
     TellGameState,
 )
-from schemas.prompts import select_prompt, select_task_prompt
-from schemas.word_chain import select_seed_word
+from schemas.prompts import select_prompt, select_task_prompt  # noqa: E402
+from schemas.word_chain import select_seed_word  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Round type cycle (inlined from game_logic.py to avoid backend dependencies)
@@ -80,9 +80,26 @@ PLACEHOLDER_RESPONSES = [
 ]
 
 PLACEHOLDER_CHAIN_WORDS = [
-    "echo", "spark", "drift", "pulse", "glow", "bloom", "wave",
-    "frost", "ember", "tide", "haze", "gleam", "shade", "vapor",
-    "mist", "flare", "dust", "core", "root", "veil",
+    "echo",
+    "spark",
+    "drift",
+    "pulse",
+    "glow",
+    "bloom",
+    "wave",
+    "frost",
+    "ember",
+    "tide",
+    "haze",
+    "gleam",
+    "shade",
+    "vapor",
+    "mist",
+    "flare",
+    "dust",
+    "core",
+    "root",
+    "veil",
 ]
 
 # ---------------------------------------------------------------------------
@@ -90,14 +107,22 @@ PLACEHOLDER_CHAIN_WORDS = [
 # ---------------------------------------------------------------------------
 VALID_PHASES: dict[RoundType, set[GamePhase]] = {
     RoundType.TASK: {
-        GamePhase.PROMPT, GamePhase.REVIEW, GamePhase.ELIMINATION,
+        GamePhase.PROMPT,
+        GamePhase.REVIEW,
+        GamePhase.ELIMINATION,
     },
     RoundType.INTERROGATION: {
-        GamePhase.PROMPT, GamePhase.NOMINATE, GamePhase.QUESTION,
-        GamePhase.RESPOND, GamePhase.REVIEW, GamePhase.ELIMINATION,
+        GamePhase.PROMPT,
+        GamePhase.NOMINATE,
+        GamePhase.QUESTION,
+        GamePhase.RESPOND,
+        GamePhase.REVIEW,
+        GamePhase.ELIMINATION,
     },
     RoundType.WORD_CHAIN: {
-        GamePhase.CHAIN, GamePhase.REVIEW, GamePhase.ELIMINATION,
+        GamePhase.CHAIN,
+        GamePhase.REVIEW,
+        GamePhase.ELIMINATION,
     },
 }
 
@@ -126,20 +151,24 @@ def _make_players(
     players: list[Player] = []
 
     for i in range(num_humans):
-        players.append(Player(
-            id=generate_player_id(),
-            alias=aliases[i],
-            role=PlayerRole.HUMAN,
-            is_host=(i == 0),
-        ))
+        players.append(
+            Player(
+                id=generate_player_id(),
+                alias=aliases[i],
+                role=PlayerRole.HUMAN,
+                is_host=(i == 0),
+            )
+        )
 
     for i in range(num_ai):
         pid = f"ai-{generate_player_id()[:8]}"
-        players.append(Player(
-            id=pid,
-            alias=aliases[num_humans + i],
-            role=PlayerRole.AI,
-        ))
+        players.append(
+            Player(
+                id=pid,
+                alias=aliases[num_humans + i],
+                role=PlayerRole.AI,
+            )
+        )
 
     # Eliminate players — pick from the end of the list, spread across rounds
     if num_eliminated > 0:
@@ -255,11 +284,15 @@ def _derive_round_state(
     elif round_type == RoundType.WORD_CHAIN:
         if phase == GamePhase.CHAIN:
             rs.chain_rounds, rs.current_sub_round = _make_chain_rounds(
-                alive_ids, sub_round, completed=False,
+                alive_ids,
+                sub_round,
+                completed=False,
             )
         elif PHASE_ORDER.get(phase, 0) >= PHASE_ORDER[GamePhase.REVIEW]:
             rs.chain_rounds, rs.current_sub_round = _make_chain_rounds(
-                alive_ids, 7, completed=True,
+                alive_ids,
+                7,
+                completed=True,
             )
         if phase == GamePhase.ELIMINATION:
             rs.votes = _make_votes(alive_players)
@@ -317,12 +350,14 @@ def _make_chain_rounds(
             chosen_word = responses[chosen_player_id]
         # else: current in-progress sub-round — responses empty
 
-        rounds.append(ChainRound(
-            seed=seed,
-            responses=responses,
-            chosen_word=chosen_word,
-            chosen_player_id=chosen_player_id,
-        ))
+        rounds.append(
+            ChainRound(
+                seed=seed,
+                responses=responses,
+                chosen_word=chosen_word,
+                chosen_player_id=chosen_player_id,
+            )
+        )
 
         if chosen_word:
             seed = chosen_word
@@ -381,8 +416,7 @@ def _validate_args(args: argparse.Namespace) -> None:
 
     if args.eliminated >= total - 1:
         sys.exit(
-            f"Error: Cannot eliminate {args.eliminated} of {total} players "
-            f"— need at least 2 alive"
+            f"Error: Cannot eliminate {args.eliminated} of {total} players — need at least 2 alive"
         )
 
     if phase in (GamePhase.LOBBY, GamePhase.GAME_OVER):
@@ -518,32 +552,43 @@ def main() -> None:
         description="Generate valid TellGameState JSON for the debug seed endpoint.",
     )
     parser.add_argument(
-        "--phase", default="prompt",
+        "--phase",
+        default="prompt",
         choices=[p.value for p in GamePhase],
         help="Game phase to seed into (default: prompt)",
     )
     parser.add_argument(
-        "--round", type=int, default=1,
+        "--round",
+        type=int,
+        default=1,
         help="Round number, 1-indexed (default: 1)",
     )
     parser.add_argument(
-        "--humans", type=int, default=3,
+        "--humans",
+        type=int,
+        default=3,
         help="Number of human players (default: 3)",
     )
     parser.add_argument(
-        "--ai", type=int, default=2,
+        "--ai",
+        type=int,
+        default=2,
         help="Number of AI players (default: 2)",
     )
     parser.add_argument(
-        "--eliminated", type=int, default=0,
+        "--eliminated",
+        type=int,
+        default=0,
         help="Number of eliminated players (default: 0)",
     )
     parser.add_argument(
-        "--no-timers", action="store_true",
+        "--no-timers",
+        action="store_true",
         help="Freeze the phase (start_timers=false)",
     )
     parser.add_argument(
-        "--no-ai", action="store_true",
+        "--no-ai",
+        action="store_true",
         help="AI players don't act (trigger_ai=false)",
     )
     parser.add_argument(
@@ -552,11 +597,14 @@ def main() -> None:
         help="Override round type (default: auto from cycle)",
     )
     parser.add_argument(
-        "--sub-round", type=int, default=None,
+        "--sub-round",
+        type=int,
+        default=None,
         help="Word chain sub-round, 0-7 (default: 0)",
     )
     parser.add_argument(
-        "--winner", choices=["humans", "ai"],
+        "--winner",
+        choices=["humans", "ai"],
         help="Winner for game_over phase (default: humans)",
     )
 

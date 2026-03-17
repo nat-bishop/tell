@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from typing import Any, Callable, Coroutine
 
 import structlog
 from pydantic_ai.messages import ModelMessage
@@ -57,6 +58,9 @@ from schemas.api_models import (
 )
 from schemas.constants import MISSING_ALIAS
 from schemas.game_state import GamePhase, PlayerRole, QuestionEntry, RoundType
+
+# Type alias for apply callbacks used in _run_ai_task
+_ApplyFn = Callable[..., Coroutine[Any, Any, None]]
 
 log = structlog.get_logger(__name__)
 
@@ -261,400 +265,371 @@ def cancel_all(game_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# AI task functions — generate-then-lock pattern with conversation history
+# Generate-then-lock skeleton
+# ---------------------------------------------------------------------------
+
+
+async def _run_ai_task(
+    game_id: str,
+    player_id: str,
+    delay: float,
+    expected_phase: GamePhase,
+    generate_fn: Callable[[], Coroutine[Any, Any, Any]],
+    apply_fn: _ApplyFn,
+    label: str,
+) -> None:
+    """Shared skeleton for AI task functions.
+
+    1. Sleep for *delay* seconds.
+    2. Call *generate_fn* outside the lock (LLM call). Return ``None`` to abort.
+    3. Acquire the per-game lock, validate the phase hasn't changed.
+    4. Call *apply_fn(cm, session, result)* to update state + broadcast.
+    """
+    try:
+        await asyncio.sleep(delay)
+        result = await generate_fn()
+        if result is None:
+            return
+
+        cm = get_connection_manager()
+        lock = cm.get_lock(game_id)
+        async with lock:
+            repo = get_game_repository()
+            session = repo.get(game_id)
+            if not session or session.state.phase != expected_phase:
+                return
+            await apply_fn(cm, session, result)
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        log.exception(f"{label}_error", game_id=game_id, player_id=player_id)
+
+
+# ---------------------------------------------------------------------------
+# AI task functions — thin wrappers around _run_ai_task
 # ---------------------------------------------------------------------------
 
 
 async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player answers a prompt after a delay."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
-            return
+            return None
         deps.action_prompt = build_answer_prompt(deps)
-        answer_text, updated_history = await generate_answer(deps, history)
+        return await generate_answer(deps, history)
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        answer_text, updated_history = result
+        state = session.state
+        if not state.current_round or player_id in state.current_round.answers:
+            return
 
-        async with lock:
-            repo = get_game_repository()
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.PROMPT:
-                return
+        state.current_round.answers[player_id] = answer_text
+        _set_history(game_id, player_id, updated_history)
 
-            state = session.state
-            if not state.current_round or player_id in state.current_round.answers:
-                return
+        alive = get_alive_players(state)
+        answer_count = len(state.current_round.answers)
+        total_count = len(alive)
 
-            state.current_round.answers[player_id] = answer_text
-            _set_history(game_id, player_id, updated_history)
-
-            alive = get_alive_players(state)
-            answer_count = len(state.current_round.answers)
-            total_count = len(alive)
-
-            await cm.broadcast(
-                game_id,
-                AnswerSubmittedEvent(
-                    seq=session.next_seq(),
-                    player_id=player_id,
-                    count=answer_count,
-                    total=total_count,
-                ),
-            )
-
-            log.info(
-                "ai_answer_submitted",
-                game_id=game_id,
+        await cm.broadcast(
+            game_id,
+            AnswerSubmittedEvent(
+                seq=session.next_seq(),
                 player_id=player_id,
-                personality=get_personality(game_id, player_id).name,
-            )
+                count=answer_count,
+                total=total_count,
+            ),
+        )
+        log.info(
+            "ai_answer_submitted",
+            game_id=game_id,
+            player_id=player_id,
+            personality=get_personality(game_id, player_id).name,
+        )
+        if answer_count >= total_count:
+            get_timer_manager().cancel_timer(game_id)
+            fill_missing_answers(state)
+            await do_prompt_complete(game_id, session)
 
-            if answer_count >= total_count:
-                get_timer_manager().cancel_timer(game_id)
-                fill_missing_answers(state)
-                await do_prompt_complete(game_id, session)
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception("ai_answer_task_error", game_id=game_id, player_id=player_id)
+    await _run_ai_task(
+        game_id, player_id, delay, GamePhase.PROMPT, generate, apply, "ai_answer_task"
+    )
 
 
 async def _ai_nominate_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player nominates after a delay (Interrogation)."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
-            return
+            return None
         deps.action_prompt = build_nomination_prompt(deps)
-        nominee_alias, updated_history = await generate_nomination(deps, history)
+        return await generate_nomination(deps, history)
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        nominee_alias, updated_history = result
+        state = session.state
+        round_state = state.current_round
+        if not round_state or player_id in round_state.nominations:
+            return
 
-        async with lock:
-            repo = get_game_repository()
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.NOMINATE:
+        target = next(
+            (p for p in state.players if p.alias == nominee_alias and p.is_alive),
+            None,
+        )
+        if not target:
+            candidates = [p for p in state.players if p.is_alive and p.id != player_id]
+            if not candidates:
                 return
+            target = random.choice(candidates)
 
-            state = session.state
-            round_state = state.current_round
-            if not round_state or player_id in round_state.nominations:
-                return
+        round_state.nominations[player_id] = target.id
+        _set_history(game_id, player_id, updated_history)
 
-            # Resolve alias to id
-            target = next(
-                (p for p in state.players if p.alias == nominee_alias and p.is_alive),
-                None,
-            )
-            if not target:
-                candidates = [p for p in state.players if p.is_alive and p.id != player_id]
-                if not candidates:
-                    return
-                target = random.choice(candidates)
+        alive = get_alive_players(state)
+        nom_count = len(round_state.nominations)
+        total_count = len(alive)
 
-            round_state.nominations[player_id] = target.id
-            _set_history(game_id, player_id, updated_history)
+        await cm.broadcast(
+            game_id,
+            NominationCastEvent(
+                seq=session.next_seq(),
+                voter_id=player_id,
+                count=nom_count,
+                total=total_count,
+            ),
+        )
+        log.info(
+            "ai_nomination_cast",
+            game_id=game_id,
+            player_id=player_id,
+            target=target.alias,
+            personality=get_personality(game_id, player_id).name,
+        )
+        if nom_count >= total_count:
+            get_timer_manager().cancel_timer(game_id)
+            await do_nominate_complete(game_id, session)
 
-            alive = get_alive_players(state)
-            nom_count = len(round_state.nominations)
-            total_count = len(alive)
-
-            await cm.broadcast(
-                game_id,
-                NominationCastEvent(
-                    seq=session.next_seq(),
-                    voter_id=player_id,
-                    count=nom_count,
-                    total=total_count,
-                ),
-            )
-
-            log.info(
-                "ai_nomination_cast",
-                game_id=game_id,
-                player_id=player_id,
-                target=target.alias,
-                personality=get_personality(game_id, player_id).name,
-            )
-
-            if nom_count >= total_count:
-                get_timer_manager().cancel_timer(game_id)
-                await do_nominate_complete(game_id, session)
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception("ai_nominate_task_error", game_id=game_id, player_id=player_id)
+    await _run_ai_task(
+        game_id, player_id, delay, GamePhase.NOMINATE, generate, apply, "ai_nominate_task"
+    )
 
 
 async def _ai_question_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player submits a question after a delay."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
         # Check eligibility before generating (avoid wasted LLM call)
         repo = get_game_repository()
         session = repo.get(game_id)
         if not session:
-            return
+            return None
         round_state = session.state.current_round
         if round_state and not is_question_eligible(round_state, player_id):
-            return
+            return None
 
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
-            return
+            return None
         deps.action_prompt = build_question_prompt(deps)
-        question_text, updated_history = await generate_question(deps, history)
+        return await generate_question(deps, history)
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
-
-        async with lock:
-            repo = get_game_repository()
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.QUESTION:
-                return
-
-            state = session.state
-            round_state = state.current_round
-            if not round_state:
-                return
-
-            already_asked = any(q.questioner_id == player_id for q in round_state.questions)
-            if already_asked:
-                return
-
-            target_id = get_question_target(round_state, player_id)
-            if not target_id:
-                return
-
-            target_player = get_player_by_id(state, target_id)
-            target_alias = target_player.alias if target_player else MISSING_ALIAS
-
-            entry = QuestionEntry(
-                questioner_id=player_id,
-                target_id=target_id,
-                target_alias=target_alias,
-                question=question_text,
-            )
-            round_state.questions.append(entry)
-            _set_history(game_id, player_id, updated_history)
-
-            expected = count_expected_questions(state)
-            q_count = len(round_state.questions)
-
-            await cm.broadcast(
-                game_id,
-                QuestionSubmittedEvent(
-                    seq=session.next_seq(),
-                    count=q_count,
-                    total=expected,
-                ),
-            )
-
-            log.info(
-                "ai_question_submitted",
-                game_id=game_id,
-                player_id=player_id,
-                personality=get_personality(game_id, player_id).name,
-            )
-
-            if q_count >= expected:
-                get_timer_manager().cancel_timer(game_id)
-                await do_question_complete(game_id, session)
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception("ai_question_task_error", game_id=game_id, player_id=player_id)
-
-
-async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
-    """AI player responds to a question after a delay."""
-    try:
-        await asyncio.sleep(delay)
-
-        repo = get_game_repository()
-        session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.RESPOND:
-            return
-
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        question_text, updated_history = result
         state = session.state
         round_state = state.current_round
         if not round_state:
             return
 
-        # Check eligibility
-        if not is_response_eligible(round_state, player_id):
+        already_asked = any(q.questioner_id == player_id for q in round_state.questions)
+        if already_asked:
             return
+
+        target_id = get_question_target(round_state, player_id)
+        if not target_id:
+            return
+
+        target_player = get_player_by_id(state, target_id)
+        target_alias = target_player.alias if target_player else MISSING_ALIAS
+
+        entry = QuestionEntry(
+            questioner_id=player_id,
+            target_id=target_id,
+            target_alias=target_alias,
+            question=question_text,
+        )
+        round_state.questions.append(entry)
+        _set_history(game_id, player_id, updated_history)
+
+        expected = count_expected_questions(state)
+        q_count = len(round_state.questions)
+
+        await cm.broadcast(
+            game_id,
+            QuestionSubmittedEvent(
+                seq=session.next_seq(),
+                count=q_count,
+                total=expected,
+            ),
+        )
+        log.info(
+            "ai_question_submitted",
+            game_id=game_id,
+            player_id=player_id,
+            personality=get_personality(game_id, player_id).name,
+        )
+        if q_count >= expected:
+            get_timer_manager().cancel_timer(game_id)
+            await do_question_complete(game_id, session)
+
+    await _run_ai_task(
+        game_id, player_id, delay, GamePhase.QUESTION, generate, apply, "ai_question_task"
+    )
+
+
+async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
+    """AI player responds to a question after a delay."""
+
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session or session.state.phase != GamePhase.RESPOND:
+            return None
+
+        round_state = session.state.current_round
+        if not round_state or not is_response_eligible(round_state, player_id):
+            return None
 
         pending_q = next(
             (q for q in round_state.questions if q.target_id == player_id and q.response is None),
             None,
         )
-        # Use synthesis if available (interrogation), else direct question
         question_text = round_state.synthesis or (pending_q.question if pending_q else None)
-
         if not pending_q or not question_text:
-            return
+            return None
 
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
-            return
+            return None
         deps.action_prompt = build_response_prompt(deps, question_text)
         response_text, updated_history = await generate_question_response(
             deps, question_text, history
         )
+        return response_text, updated_history
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        response_text, updated_history = result
+        state = session.state
+        round_state = state.current_round
+        if not round_state:
+            return
 
-        async with lock:
-            repo = get_game_repository()
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.RESPOND:
-                return
+        # Re-find the pending question under lock
+        target_q = next(
+            (q for q in round_state.questions if q.target_id == player_id and q.response is None),
+            None,
+        )
+        if not target_q:
+            return
 
-            state = session.state
-            round_state = state.current_round
-            if not round_state:
-                return
+        target_q.response = response_text
+        _set_history(game_id, player_id, updated_history)
 
-            # Re-find the pending question under lock
-            target_q = next(
-                (
-                    q
-                    for q in round_state.questions
-                    if q.target_id == player_id and q.response is None
-                ),
-                None,
-            )
-            if not target_q:
-                return
+        player = get_player_by_id(state, player_id)
+        player_alias = player.alias if player else MISSING_ALIAS
+        responded_count, expected = count_responses(round_state)
 
-            target_q.response = response_text
-            _set_history(game_id, player_id, updated_history)
+        await cm.broadcast(
+            game_id,
+            ResponseSubmittedEvent(
+                seq=session.next_seq(),
+                target_id=player_id,
+                target_alias=player_alias,
+                response=response_text,
+                count=responded_count,
+                total=expected,
+            ),
+        )
+        log.info(
+            "ai_response_submitted",
+            game_id=game_id,
+            player_id=player_id,
+            personality=get_personality(game_id, player_id).name,
+        )
+        if responded_count >= expected:
+            get_timer_manager().cancel_timer(game_id)
+            fill_missing_responses(state)
+            await do_respond_complete(game_id, session)
 
-            player = get_player_by_id(state, player_id)
-            player_alias = player.alias if player else MISSING_ALIAS
-
-            responded_count, expected = count_responses(round_state)
-
-            await cm.broadcast(
-                game_id,
-                ResponseSubmittedEvent(
-                    seq=session.next_seq(),
-                    target_id=player_id,
-                    target_alias=player_alias,
-                    response=response_text,
-                    count=responded_count,
-                    total=expected,
-                ),
-            )
-
-            log.info(
-                "ai_response_submitted",
-                game_id=game_id,
-                player_id=player_id,
-                personality=get_personality(game_id, player_id).name,
-            )
-
-            if responded_count >= expected:
-                get_timer_manager().cancel_timer(game_id)
-                fill_missing_responses(state)
-                await do_respond_complete(game_id, session)
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception("ai_respond_task_error", game_id=game_id, player_id=player_id)
+    await _run_ai_task(
+        game_id, player_id, delay, GamePhase.RESPOND, generate, apply, "ai_respond_task"
+    )
 
 
 async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player votes after a delay."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[list[str], list[ModelMessage]] | None:
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
-            return
+            return None
         deps.action_prompt = build_vote_prompt(deps)
-        vote_aliases, updated_history = await decide_vote(deps, history)
+        return await decide_vote(deps, history)
 
-        cm = get_connection_manager()
-        repo = get_game_repository()
-        lock = cm.get_lock(game_id)
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        vote_aliases, updated_history = result
+        state = session.state
+        if not state.current_round:
+            return
 
-        async with lock:
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.REVIEW:
-                return
-
-            state = session.state
-            if not state.current_round:
-                return
-
-            # Resolve aliases to player_ids
-            target_ids: list[str] = []
-            for alias in vote_aliases:
-                target = next(
-                    (p for p in state.players if p.alias == alias and p.is_alive),
-                    None,
-                )
-                if target and target.id != player_id:
-                    target_ids.append(target.id)
-
-            # Pad with random if empty
-            if not target_ids:
-                candidates = [p for p in state.players if p.is_alive and p.id != player_id]
-                if candidates:
-                    target_ids = [random.choice(candidates).id]
-
-            state.current_round.votes[player_id] = target_ids
-            _set_history(game_id, player_id, updated_history)
-
-            alive = get_alive_players(state)
-            vote_count = len(state.current_round.votes)
-            total_count = len(alive)
-
-            await cm.broadcast(
-                game_id,
-                VoteCastEvent(
-                    seq=session.next_seq(),
-                    voter_id=player_id,
-                    count=vote_count,
-                    total=total_count,
-                ),
+        # Resolve aliases to player_ids
+        target_ids: list[str] = []
+        for alias in vote_aliases:
+            target = next(
+                (p for p in state.players if p.alias == alias and p.is_alive),
+                None,
             )
+            if target and target.id != player_id:
+                target_ids.append(target.id)
 
-            log.info(
-                "ai_vote_cast",
-                game_id=game_id,
-                player_id=player_id,
-                targets=vote_aliases,
-                personality=get_personality(game_id, player_id).name,
-            )
+        if not target_ids:
+            candidates = [p for p in state.players if p.is_alive and p.id != player_id]
+            if candidates:
+                target_ids = [random.choice(candidates).id]
 
-            # NO early-complete for REVIEW
+        state.current_round.votes[player_id] = target_ids
+        _set_history(game_id, player_id, updated_history)
 
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception("ai_vote_task_error", game_id=game_id, player_id=player_id)
+        alive = get_alive_players(state)
+        vote_count = len(state.current_round.votes)
+        total_count = len(alive)
+
+        await cm.broadcast(
+            game_id,
+            VoteCastEvent(
+                seq=session.next_seq(),
+                voter_id=player_id,
+                count=vote_count,
+                total=total_count,
+            ),
+        )
+        log.info(
+            "ai_vote_cast",
+            game_id=game_id,
+            player_id=player_id,
+            targets=vote_aliases,
+            personality=get_personality(game_id, player_id).name,
+        )
+        # NO early-complete for REVIEW
+
+    await _run_ai_task(game_id, player_id, delay, GamePhase.REVIEW, generate, apply, "ai_vote_task")
 
 
 async def on_chain_sub_round(game_id: str, sub_round: int) -> None:

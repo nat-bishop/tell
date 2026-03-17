@@ -252,9 +252,6 @@ interface GameState {
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
 
-  // Spotlight
-  spotlightIndex: number;
-
   // Actions
   setIdentity: (gameId: string, playerId: string, alias: string) => void;
   onStateSync: (data: StateSyncData) => void;
@@ -339,7 +336,6 @@ const initialState = {
   voteTallies: null as Record<string, number> | null,
   revealedPlayers: null as RevealedPlayer[] | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
-  spotlightIndex: 0,
 };
 
 export const useGameStore = create<GameState>((set) => ({
@@ -375,7 +371,6 @@ export const useGameStore = create<GameState>((set) => ({
       myResponseSubmitted: false,
       voteResults: null,
       voteTallies: null,
-      spotlightIndex: 0,
       chainRounds: data.chain_rounds || [],
       currentSubRound: data.current_sub_round || 0,
       currentSeedWord:
@@ -457,7 +452,6 @@ export const useGameStore = create<GameState>((set) => ({
       voteResults: null,
       voteTallies: null,
       verdict: null,
-      spotlightIndex: 0,
       chainRounds: EMPTY_CHAIN_ROUNDS,
       currentSubRound: 0,
       currentSeedWord: null,

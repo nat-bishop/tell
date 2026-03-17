@@ -54,9 +54,7 @@ PERSONALITIES: list[Personality] = [
         nomination_strategy=(
             "Nominate whoever stood out most. You don't care that much — just pick someone."
         ),
-        response_style=(
-            "Keep it brief. You don't care that much. One sentence max."
-        ),
+        response_style="Keep it brief. You don't care that much. One sentence max.",
         chain_style_hint="Think of the most obvious connection.",
         fallback_response="meh",
     ),

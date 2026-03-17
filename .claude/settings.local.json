@@ -43,7 +43,8 @@
       "WebFetch(domain:platinumparagon.info)",
       "Bash(python -m pytest tests/ -x -q)",
       "WebFetch(domain:duckduckgo.com)",
-      "WebFetch(domain:html.duckduckgo.com)"
+      "WebFetch(domain:html.duckduckgo.com)",
+      "Bash(uv run:*)"
     ]
   }
 }

@@ -30,9 +30,3 @@ class GameRepository:
 
     def get(self, game_id: str) -> TellGameSession | None:
         return self._games.get(game_id)
-
-    def delete(self, game_id: str) -> None:
-        self._games.pop(game_id, None)
-
-    def list_games(self) -> list[TellGameSession]:
-        return list(self._games.values())
