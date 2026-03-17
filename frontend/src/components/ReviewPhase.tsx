@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useGameStore, type PlayerInfo } from "@/hooks/useGameStore";
 import { castVote } from "@/api/actions";
 import { SystemText } from "./SystemText";
+import { AnswerCard } from "./AnswerCard";
 
 function PlayerCard({
   player,
@@ -30,68 +31,41 @@ function PlayerCard({
   const questionText = isNominee ? synthesis : myQuestion?.question;
   const responseText = myQuestion?.response;
 
-  const content = (
-    <>
-      <div
-        className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
-          voted ? "text-warm" : "text-ink"
-        }`}
-      >
-        {player.alias}
-      </div>
-      {answer && (
-        <div className="mt-1 font-literary text-[1rem] leading-[1.5] text-ink">
-          {answer}
-        </div>
-      )}
+  return (
+    <AnswerCard
+      alias={player.alias}
+      answer={answer}
+      highlighted={voted}
+      delay={delay}
+      as={canVote ? "button" : "div"}
+      onClick={onToggle}
+    >
       {questionText && (
-        <>
-          <div className="mt-3 font-system text-[0.7rem] text-dim">
+        <div className="mt-3 pt-3 border-t border-rule">
+          <div className="font-system text-[0.7rem] text-dim">
             {isNominee ? "synthesis" : "question received"}
           </div>
-          <div className="mt-0.5 font-literary text-[0.95rem] italic leading-[1.5] text-ink">
+          <div className="mt-0.5 font-literary text-[0.9rem] italic leading-[1.5] text-ink">
             {questionText}
           </div>
-        </>
+          {responseText && (
+            <>
+              <div className="mt-2 font-system text-[0.7rem] text-dim">
+                response
+              </div>
+              <div className="mt-0.5 font-literary text-[0.9rem] leading-[1.5] text-ink">
+                {responseText}
+              </div>
+            </>
+          )}
+        </div>
       )}
-      {responseText && (
-        <>
-          <div className="mt-2 font-system text-[0.7rem] text-dim">
-            response
-          </div>
-          <div className="mt-0.5 font-literary text-[0.95rem] leading-[1.5] text-ink">
-            {responseText}
-          </div>
-        </>
-      )}
-    </>
-  );
-
-  const baseClass = `border p-4 animate-fade-in transition-colors duration-150 ${
-    !voted ? "border-rule" : ""
-  }`;
-  const style = {
-    animationDelay: `${delay}ms`,
-    borderColor: voted ? "var(--warm)" : undefined,
-  };
-
-  return canVote ? (
-    <button
-      onClick={onToggle}
-      className={`${baseClass} cursor-pointer text-left w-full`}
-      style={style}
-    >
-      {content}
-    </button>
-  ) : (
-    <div className={baseClass} style={style}>
-      {content}
-    </div>
+    </AnswerCard>
   );
 }
 
 export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
-  const { gameId, playerId, players, voteCount, voteTotalCount } =
+  const { gameId, playerId, players, voteCount, voteTotalCount, promptText } =
     useGameStore();
   const alivePlayers = players.filter((p) => p.is_alive);
   const aliveCount = alivePlayers.length;
@@ -137,7 +111,13 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     <div className="flex flex-col gap-6 pt-4">
       <SystemText>{spectator ? "review" : "who is human?"}</SystemText>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {promptText && (
+        <p className="text-center font-literary text-[1.1rem] italic leading-[1.6] text-dim">
+          {promptText}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:[grid-auto-rows:1fr]">
         {alivePlayers.map((p, i) => (
           <PlayerCard
             key={p.id}

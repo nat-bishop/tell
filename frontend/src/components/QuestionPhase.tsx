@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitQuestion } from "@/api/actions";
 import { SystemText } from "./SystemText";
+import { AnswerCard } from "./AnswerCard";
 
 export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   const {
@@ -17,6 +18,7 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
     questionCount,
     questionTotal,
     myQuestionSubmitted,
+    promptText,
   } = useGameStore();
   const [question, setQuestion] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -58,35 +60,24 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
 
   return (
     <div className="flex flex-col gap-6 pt-4">
+      {promptText && (
+        <p className="text-center font-literary text-[1.1rem] italic leading-[1.6] text-dim">
+          {promptText}
+        </p>
+      )}
+
       {/* Player answer cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:[grid-auto-rows:1fr]">
         {alivePlayers.map((p) => {
-          const answer = answers[p.id];
           const isTarget = p.id === targetId;
           return (
-            <div
+            <AnswerCard
               key={p.id}
-              className={`border p-4 ${isTarget ? "" : "border-rule"}`}
-              style={isTarget ? { borderColor: "var(--warm)" } : undefined}
-            >
-              <div
-                className={`font-literary-sc text-[0.85rem] tracking-[0.08em] ${
-                  isTarget ? "text-warm" : "text-ink"
-                }`}
-              >
-                {p.alias}
-              </div>
-              {isTarget && !spectator && (
-                <div className="mt-0.5 font-system text-[0.65rem] text-warm">
-                  your target
-                </div>
-              )}
-              {answer && (
-                <div className="mt-1 font-literary text-[1rem] leading-[1.5] text-ink">
-                  {answer}
-                </div>
-              )}
-            </div>
+              alias={p.alias}
+              answer={answers[p.id]}
+              highlighted={isTarget}
+              label={isTarget && !spectator ? "your target" : undefined}
+            />
           );
         })}
       </div>
