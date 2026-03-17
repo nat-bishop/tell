@@ -5,10 +5,10 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class GamePhase(str, enum.Enum):
+class GamePhase(enum.StrEnum):
     LOBBY = "lobby"
     PROMPT = "prompt"
     NOMINATE = "nominate"
@@ -22,19 +22,21 @@ class GamePhase(str, enum.Enum):
     BRAIN_TEST_RESULTS = "brain_test_results"
 
 
-class RoundType(str, enum.Enum):
+class RoundType(enum.StrEnum):
     INTERROGATION = "interrogation"
     TASK = "task"
     WORD_CHAIN = "word_chain"
     BRAIN_TEST = "brain_test"
 
 
-class PlayerRole(str, enum.Enum):
+class PlayerRole(enum.StrEnum):
     HUMAN = "human"
     AI = "ai"
 
 
 class Player(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     alias: str
     role: PlayerRole
@@ -45,6 +47,8 @@ class Player(BaseModel):
 
 
 class QuestionEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     questioner_id: str
     target_id: str
     target_alias: str
@@ -53,6 +57,8 @@ class QuestionEntry(BaseModel):
 
 
 class ChainRound(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     seed: str
     responses: dict[str, str] = Field(default_factory=dict)  # player_id -> word
     chosen_word: str | None = None
@@ -60,6 +66,8 @@ class ChainRound(BaseModel):
 
 
 class BrainTestChallenge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     challenge_type: str
     question: str
     correct_answer: str | None = None  # for scoring display
@@ -67,6 +75,8 @@ class BrainTestChallenge(BaseModel):
 
 
 class RoundState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     round_number: int
     prompt_text: str
     prompt_category: str
@@ -87,15 +97,29 @@ class RoundState(BaseModel):
     chain_rounds: list[ChainRound] = Field(default_factory=list)
     # Brain Test
     brain_challenges: list[BrainTestChallenge] = Field(default_factory=list)
+    # Discussion — rate limiting per player during REVIEW
+    discussion_counts: dict[str, int] = Field(default_factory=dict)
 
 
 class NarratorEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     trigger: str
     text: str
     round_number: int = 0
 
 
+class ActiveAbility(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    holder_id: str
+    holder_alias: str
+    ability_type: str  # "partial_scan" | "double_vote"
+
+
 class TellGameState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     game_id: str
     phase: GamePhase = GamePhase.LOBBY
     players: list[Player] = Field(default_factory=list)
@@ -110,3 +134,4 @@ class TellGameState(BaseModel):
     winner: str | None = None
     phase_deadline: datetime | None = None
     narrator_context: list[NarratorEntry] = Field(default_factory=list)
+    active_ability: ActiveAbility | None = None

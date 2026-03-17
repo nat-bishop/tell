@@ -38,6 +38,9 @@ export function useGameEvents(gameId: string, playerId: string) {
       onComedyWinner: useGameStore.getState().onComedyWinner,
       onBrainTestChallenge: useGameStore.getState().onBrainTestChallenge,
       onBrainTestResults: useGameStore.getState().onBrainTestResults,
+      onDiscussionMessage: useGameStore.getState().onDiscussionMessage,
+      onAbilityAwarded: useGameStore.getState().onAbilityAwarded,
+      onScanResult: useGameStore.getState().onScanResult,
       onOpen: useGameStore.getState().onOpen,
       onError: useGameStore.getState().onError,
     }, lastSeq);

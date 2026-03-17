@@ -29,26 +29,26 @@ class TestSelectPrompt:
         used = []
         seen_indices = set()
         for _ in range(10):
-            idx, prompt = select_prompt(used, None, round_number=5)
+            idx, _prompt = select_prompt(used, None, round_number=5)
             assert idx not in seen_indices
             seen_indices.add(idx)
             used.append(idx)
 
     def test_avoids_same_category(self):
         # With last_category set, should avoid that category
-        idx, prompt = select_prompt([], "emotional", round_number=5)
+        _idx, prompt = select_prompt([], "emotional", round_number=5)
         assert prompt.category.value != "emotional"
 
     def test_min_round_filtering(self):
         # Round 1 should exclude social prompts (min_round=2)
         for _ in range(20):
-            idx, prompt = select_prompt([], None, round_number=1)
+            _idx, prompt = select_prompt([], None, round_number=1)
             assert prompt.min_round <= 1
 
     def test_fallback_when_constrained(self):
         # Use all non-social prompts, force round 1 (no social allowed)
         non_social = [i for i, p in enumerate(PROMPTS) if p.category != PromptCategory.SOCIAL]
-        idx, prompt = select_prompt(non_social, None, round_number=1)
+        _idx, prompt = select_prompt(non_social, None, round_number=1)
         # Should still return something (fallback: any unused)
         assert prompt is not None
 
@@ -121,13 +121,13 @@ class TestTaskPromptSelection:
         used = []
         seen_indices = set()
         for _ in range(10):
-            idx, prompt = select_task_prompt(used, None)
+            idx, _prompt = select_task_prompt(used, None)
             assert idx not in seen_indices
             seen_indices.add(idx)
             used.append(idx)
 
     def test_avoids_same_category(self):
-        idx, prompt = select_task_prompt([], "haiku")
+        _idx, prompt = select_task_prompt([], "haiku")
         assert prompt.category.value != "haiku"
 
 
@@ -149,6 +149,6 @@ class TestEventSerialization:
         req = CastVoteRequest(player_id="p1", target_ids=["t1", "t2"])
         assert req.target_ids == ["t1", "t2"]
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             # Missing required field
             CastVoteRequest(target_ids=["t1"])

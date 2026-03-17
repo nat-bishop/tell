@@ -48,7 +48,7 @@ class TestDoPromptComplete:
     async def test_task_round_goes_to_review(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_prompt_complete
 
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.PROMPT,
             round_type=RoundType.TASK,
             answers={"h1": "a", "h2": "b", "a1": "c", "a2": "d"},
@@ -61,7 +61,7 @@ class TestDoPromptComplete:
     async def test_interrogation_round_goes_to_nominate(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_prompt_complete
 
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.PROMPT,
             round_type=RoundType.INTERROGATION,
             answers={"h1": "a", "h2": "b", "a1": "c", "a2": "d"},
@@ -81,7 +81,7 @@ class TestDoNominateComplete:
     async def test_resolves_and_goes_to_question(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_nominate_complete
 
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.NOMINATE,
             round_type=RoundType.INTERROGATION,
             nominations={"h1": "a1", "h2": "a1", "a1": "h1", "a2": "a1"},
@@ -106,7 +106,7 @@ class TestDoQuestionComplete:
     async def test_goes_to_respond_with_synthesis(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_question_complete
 
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.QUESTION,
             round_type=RoundType.INTERROGATION,
             nominated_id="h2",
@@ -130,7 +130,7 @@ class TestDoQuestionComplete:
         from backend.services.transitions import do_question_complete
 
         mock_llm["synthesize_questions"].side_effect = Exception("LLM timeout")
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.QUESTION,
             round_type=RoundType.INTERROGATION,
             nominated_id="h2",
@@ -161,7 +161,7 @@ class TestDoRespondComplete:
     async def test_goes_to_review(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_respond_complete
 
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.RESPOND,
             round_type=RoundType.INTERROGATION,
             nominated_id="h2",
@@ -190,7 +190,7 @@ class TestDoVoteResolution:
     async def test_resolves_votes_to_elimination(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_vote_resolution
 
-        state, session, _ = _make_session(
+        _state, session, _ = _make_session(
             GamePhase.REVIEW,
             round_type=RoundType.TASK,
             votes={"h1": ["a1"], "h2": ["a1"], "a1": ["h1"], "a2": ["a1"]},
@@ -215,7 +215,7 @@ class TestDoAfterElimination:
     async def test_game_over(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_after_elimination
 
-        state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
+        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
         # Kill all AI to trigger game over
         for p in session.state.players:
             if p.role.value == "ai":
@@ -229,7 +229,7 @@ class TestDoAfterElimination:
     async def test_next_round_task(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_after_elimination
 
-        state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
+        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
         # Set up round_types so next round is TASK
         session.state.round_types = [RoundType.TASK, RoundType.TASK, RoundType.TASK]
         session.state.round_number = 1
@@ -242,7 +242,7 @@ class TestDoAfterElimination:
     async def test_next_round_interrogation(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_after_elimination
 
-        state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
+        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
         session.state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
         session.state.round_number = 1
         game_id = _store_session(session)
@@ -254,7 +254,7 @@ class TestDoAfterElimination:
     async def test_next_round_word_chain(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_after_elimination
 
-        state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
+        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
         session.state.round_types = [
             RoundType.TASK,
             RoundType.TASK,
@@ -277,7 +277,7 @@ class TestDoChainComplete:
     async def test_goes_to_review(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_chain_complete
 
-        state, session, _ = _make_session(GamePhase.CHAIN, round_type=RoundType.WORD_CHAIN)
+        _state, session, _ = _make_session(GamePhase.CHAIN, round_type=RoundType.WORD_CHAIN)
         session.state.current_round.chain_rounds = [ChainRound(seed="ocean")]
         session.state.current_round.current_sub_round = 0
         game_id = _store_session(session)
@@ -319,3 +319,169 @@ class TestInitializeAndStartGame:
         assert len(session.state.round_types) == session.state.max_rounds
 
         mock_ai["assign_personalities"].assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# do_brain_test_complete — scoring + ability award
+# ---------------------------------------------------------------------------
+
+
+class TestDoBrainTestComplete:
+    async def test_scores_and_awards_ability(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import do_brain_test_complete
+
+        _state, session, _ = _make_session(GamePhase.BRAIN_TEST, round_type=RoundType.BRAIN_TEST)
+        from schemas.game_state import BrainTestChallenge
+
+        session.state.current_round.brain_challenges = [
+            BrainTestChallenge(
+                challenge_type="trivia",
+                question="2+2?",
+                correct_answer="4",
+                responses={"h1": "4", "h2": "3", "a1": "4", "a2": "5"},
+            ),
+            BrainTestChallenge(
+                challenge_type="trivia",
+                question="Capital of France?",
+                correct_answer="Paris",
+                responses={"h1": "Paris", "h2": "Paris", "a1": "London", "a2": "Paris"},
+            ),
+        ]
+        game_id = _store_session(session)
+        await do_brain_test_complete(game_id, session)
+
+        assert session.state.phase == GamePhase.BRAIN_TEST_RESULTS
+
+        events = _get_broadcast_events(game_id)
+        event_types = [e.event_type for e in events]
+        assert "brain_test_results" in event_types
+
+        # Check scores in the results event
+        results_event = next(e for e in events if e.event_type == "brain_test_results")
+        assert results_event.scores is not None
+        # h1 got both right = 2, h2 got 1, a1 got 1, a2 got 1
+        assert results_event.scores["h1"] == 2
+
+        # Winner should be h1 (highest score)
+        assert results_event.winner_id == "h1"
+
+        # Ability should be awarded
+        assert results_event.ability_awarded in ("partial_scan", "double_vote")
+        assert session.state.active_ability is not None
+        assert session.state.active_ability.holder_id == "h1"
+
+    async def test_no_winner_when_all_wrong(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import do_brain_test_complete
+
+        _state, session, _ = _make_session(GamePhase.BRAIN_TEST, round_type=RoundType.BRAIN_TEST)
+        from schemas.game_state import BrainTestChallenge
+
+        session.state.current_round.brain_challenges = [
+            BrainTestChallenge(
+                challenge_type="trivia",
+                question="Impossible?",
+                correct_answer="xyz",
+                responses={"h1": "wrong", "h2": "nope", "a1": "bad", "a2": "no"},
+            ),
+        ]
+        game_id = _store_session(session)
+        await do_brain_test_complete(game_id, session)
+
+        assert session.state.phase == GamePhase.BRAIN_TEST_RESULTS
+
+        events = _get_broadcast_events(game_id)
+        results_event = next(e for e in events if e.event_type == "brain_test_results")
+        assert results_event.winner_id is None
+        assert results_event.ability_awarded is None
+        assert session.state.active_ability is None
+
+
+# ---------------------------------------------------------------------------
+# _trigger_ability_on_review
+# ---------------------------------------------------------------------------
+
+
+class TestTriggerAbilityOnReview:
+    async def test_partial_scan_fires(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import _trigger_ability_on_review
+        from schemas.game_state import ActiveAbility
+
+        _state, session, _ = _make_session(GamePhase.REVIEW, round_type=RoundType.TASK)
+        session.state.active_ability = ActiveAbility(
+            holder_id="h1",
+            holder_alias="UNIT-01",
+            ability_type="partial_scan",
+        )
+        game_id = _store_session(session)
+        # Connect as the holder so send_to can deliver the event
+        cm = get_connection_manager()
+        holder_queue = cm.connect(game_id, "h1")
+        await _trigger_ability_on_review(game_id, session)
+
+        # Scan result is sent only to the holder, not broadcast
+        events = _get_broadcast_events(game_id)
+        assert "scan_result" not in [e.event_type for e in events]
+
+        # Check the holder's queue for the targeted event
+        scan_event = holder_queue.get_nowait()
+        assert scan_event.event_type == "scan_result"
+        assert len(scan_event.results) == 2
+        # Each result has player_id, alias, claimed_role
+        for r in scan_event.results:
+            assert "player_id" in r
+            assert "alias" in r
+            assert "claimed_role" in r
+
+    async def test_double_vote_does_nothing(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import _trigger_ability_on_review
+        from schemas.game_state import ActiveAbility
+
+        _state, session, _ = _make_session(GamePhase.REVIEW, round_type=RoundType.TASK)
+        session.state.active_ability = ActiveAbility(
+            holder_id="h1",
+            holder_alias="UNIT-01",
+            ability_type="double_vote",
+        )
+        game_id = _store_session(session)
+        await _trigger_ability_on_review(game_id, session)
+
+        events = _get_broadcast_events(game_id)
+        event_types = [e.event_type for e in events]
+        # double_vote should not trigger scan
+        assert "scan_result" not in event_types
+
+    async def test_no_ability_does_nothing(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import _trigger_ability_on_review
+
+        _state, session, _ = _make_session(GamePhase.REVIEW, round_type=RoundType.TASK)
+        session.state.active_ability = None
+        game_id = _store_session(session)
+        await _trigger_ability_on_review(game_id, session)
+
+        events = _get_broadcast_events(game_id)
+        event_types = [e.event_type for e in events]
+        assert "scan_result" not in event_types
+
+
+# ---------------------------------------------------------------------------
+# _start_next_round — clears active_ability
+# ---------------------------------------------------------------------------
+
+
+class TestStartNextRound:
+    async def test_clears_active_ability(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import _start_next_round
+        from schemas.game_state import ActiveAbility
+
+        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
+        session.state.active_ability = ActiveAbility(
+            holder_id="h1",
+            holder_alias="UNIT-01",
+            ability_type="partial_scan",
+        )
+        session.state.round_types = [RoundType.TASK, RoundType.TASK, RoundType.TASK]
+        session.state.round_number = 1
+        game_id = _store_session(session)
+        await _start_next_round(game_id, session)
+
+        assert session.state.active_ability is None

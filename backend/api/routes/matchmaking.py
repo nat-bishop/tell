@@ -90,7 +90,7 @@ async def matchmaking_events(player_id: str, request: Request):
                         "event": event.event_type,
                         "data": event.model_dump_json(),
                     }
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield {"comment": "ping"}
         finally:
             log.info("matchmaking_sse_disconnected", player_id=player_id)

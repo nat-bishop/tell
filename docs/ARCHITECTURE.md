@@ -13,7 +13,7 @@ AI Player       ── internal asyncio task ──────────┘  
 GET /games/{id}/events     →  persistent EventSource per client
 POST /games/{id}/*         →  actions (join, start, answer, question, respond,
                                nominate, vote, chain-word, comedy-vote,
-                               brain-test-answer)
+                               brain-test-answer, discussion-message)
 POST /matchmaking/join|leave  →  matchmaking queue
 GET /matchmaking/events    →  matchmaking SSE (lobby_status, game_assigned)
 GET /matchmaking/status    →  current lobby state
@@ -58,12 +58,18 @@ CHAIN is subdivided into 8 sub-rounds of 8s each, driven by `_start_chain_loop` 
 ```
 BRAIN_TEST (75s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
 ```
-BRAIN_TEST runs 5 challenges at 12s each via `_start_brain_test_loop`. Results stored in `state.brain_test_evidence` and carried to the next voting round. `do_after_brain_test()` starts the next round directly — no ELIMINATION.
+BRAIN_TEST runs 5 challenges at 12s each via `_start_brain_test_loop`. Challenges scored in `do_brain_test_complete()` via `score_brain_test()`: `trick`/`pattern` types use fuzzy match against `correct_answer`; `estimation`/`common_knowledge` types score by uniqueness. Winner receives PARTIAL SCAN or DOUBLE VOTE ability stored in `state.active_ability`. `do_after_brain_test()` starts the next round directly — no ELIMINATION.
 
 **Interrogation** (hot seat with LLM question synthesis):
 ```
 PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (12s) → next round
 ```
+
+**REVIEW sub-phases** (all round types with REVIEW): No new `GamePhase` enum values. `PhaseChangedEvent` carries `discuss_starts_at` and `vote_starts_at` ISO timestamps. Frontend `useSubPhase()` hook in `ReviewPhase.tsx` transitions locally:
+```
+REVEAL (0-8s) → DISCUSS (8-26s) → VOTE (26-40s)
+```
+PARTIAL SCAN ability (if active) triggers in `_trigger_ability_on_review()` at REVIEW start — picks 2 random alive players (not holder), one with true role, one randomized (50/50). Results broadcast via `ScanResultEvent`, shown in `ScanResults` component during DISCUSS. During DISCUSS, players send up to 3 messages (`POST /{game_id}/discussion-message`, 120 char max) broadcast as `DiscussionMessageEvent`. Rate-limited via `discussion_counts` on `RoundState`.
 
 ### Phase Transitions
 
@@ -80,8 +86,9 @@ All transitions funnel through helper functions in `transitions.py` (shared by `
 | `do_vote_resolution` | REVIEW timer expires | Tallies multi-votes + comedy votes, generates LLM verdict, → ELIMINATION |
 | `do_after_elimination` | ELIMINATION timer | Checks game-over; branches on next round type |
 | `do_chain_complete` | CHAIN safety timer or sub-rounds done | → REVIEW |
-| `do_brain_test_complete` | BRAIN_TEST safety timer or challenges done | Builds results, stores evidence, → BRAIN_TEST_RESULTS |
+| `do_brain_test_complete` | BRAIN_TEST safety timer or challenges done | Scores challenges, assigns ability, → BRAIN_TEST_RESULTS |
 | `do_after_brain_test` | BRAIN_TEST_RESULTS timer | No elimination — starts next round directly |
+| `_trigger_ability_on_review` | REVIEW phase start | Executes PARTIAL SCAN if active; clears DOUBLE VOTE on round end |
 | `initialize_and_start_game` | Host start or matchmaking fire | Spawns AI, assigns personalities, transitions to first round |
 
 **Early completion**: When all players submit (answers, nominations, questions, responses), the timer is cancelled and the transition happens immediately. Exceptions: **REVIEW never early-completes**; **CHAIN** uses its own sub-round loop, not early-complete.
@@ -136,7 +143,8 @@ The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game
 | NOMINATE | Each AI nominates (Interrogation only) | 2-8s |
 | QUESTION | Each AI submits a question (except hot-seated) | 3-12s |
 | RESPOND | AI targets respond to their question | 2-8s |
-| REVIEW | Each AI casts votes | 5-15s |
+| REVIEW (DISCUSS) | Each AI sends 1-2 discussion messages | 10-22s |
+| REVIEW (VOTE) | Each AI casts votes | 28-37s |
 | CHAIN (each sub-round) | Each AI submits a word association | 1-4s |
 | BRAIN_TEST (each challenge) | Each AI submits an answer | 1-4s |
 
@@ -164,6 +172,7 @@ Single module-level `ai_agent: Agent[AIPlayerDeps, str]` in `agents.py`. System 
 | `synthesize_questions` | QUESTION→RESPOND | System-level call; weaves N questions into one paragraph. 5s timeout |
 | `generate_verdict` | Elimination | System-level call; one-line dramatic sentence. 3s timeout |
 | `generate_association` | CHAIN sub-round | System-level call; single word, personality-aware style hints. 3s timeout |
+| `generate_discussion_message` | REVIEW DISCUSS | Reuses `ai_agent` + conversation history; personality-aware chat message |
 | `generate_narration` | Transition hooks | System-level call; dry literary narrator voice. 3s timeout (5s for game_over) |
 
 `synthesize_questions`, `generate_verdict`, `generate_association`, and `generate_narration` use `_run_system_agent()` — a separate ephemeral `Agent` with no personality context and short timeouts.
@@ -199,12 +208,12 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 | `VoteOverlay` | REVIEW | Multi-select vote UI (up to 3, changeable) |
 | `PhaseInterstitial` | Phase transitions | Robot voice archetype overlay with directive subtitles and situation lines |
 | `Narration` | Async narrator events | Floating overlay, auto-dismiss 6s; `NarrationInline` for game over |
-| `BrainTestPhase` | BRAIN_TEST / BRAIN_TEST_RESULTS | Challenge input + per-player results grid |
+| `BrainTestPhase` | BRAIN_TEST / BRAIN_TEST_RESULTS | Challenge input + scored results grid with winner + ability awarded |
 | `WordChainPhase` | CHAIN | Seed word display, growing chain thread, single-word input per sub-round |
 | `QuestionPhase` | QUESTION | Shows target's answer, write anonymous follow-up question |
 | `RespondPhase` | RESPOND | Answer received question (or synthesis in Interrogation) |
 | `NominatePhase` | NOMINATE | Pick player for hot seat |
-| `ReviewPhase` | REVIEW | `AnswerCard` grid with inline Q&A + voting + comedy vote row |
+| `ReviewPhase` | REVIEW | 3 sub-phases via `useSubPhase()`: REVEAL (AnswerCard grid + Q&A), DISCUSS (DiscussionChat + ScanResults), VOTE (voting + comedy) |
 
 ## Prompt Selection
 

@@ -114,6 +114,8 @@ export interface PhaseChangedData {
   synthesis?: string;
   writing_begins_at?: string;
   action_starts_at?: string;
+  discuss_starts_at?: string;
+  vote_starts_at?: string;
 }
 
 export interface CountData {
@@ -198,6 +200,10 @@ export interface BrainTestResultsData {
     correct_answer: string | null;
     challenge_type: string;
   }>>;
+  scores: Record<string, number> | null;
+  winner_id: string | null;
+  winner_alias: string | null;
+  ability_awarded: string | null;
 }
 
 export interface ComedyWinnerData {
@@ -205,6 +211,29 @@ export interface ComedyWinnerData {
   winner_id: string;
   winner_alias: string;
   vote_count: number;
+}
+
+export interface DiscussionMessageData {
+  seq: number;
+  sender_id: string;
+  sender_alias: string;
+  message: string;
+}
+
+export interface AbilityAwardedData {
+  seq: number;
+  holder_id: string;
+  holder_alias: string;
+  ability_type: string;
+}
+
+export interface ScanResultData {
+  seq: number;
+  results: Array<{
+    player_id: string;
+    alias: string;
+    claimed_role: string;
+  }>;
 }
 
 export interface SeqData {
@@ -313,6 +342,24 @@ interface GameState {
   comedyWinnerVotes: number;
   myComedyVote: string | null;
 
+  // Discussion
+  discussionMessages: Array<{ sender_id: string; sender_alias: string; message: string }>;
+  myDiscussionCount: number;
+  discussStartsAt: string | null;
+  voteStartsAt: string | null;
+
+  // Abilities
+  activeAbilityHolder: string | null;
+  activeAbilityHolderAlias: string | null;
+  activeAbilityType: string | null;
+  scanResults: Array<{ player_id: string; alias: string; claimed_role: string }> | null;
+
+  // Brain Test scores
+  brainTestScores: Record<string, number> | null;
+  brainTestWinnerId: string | null;
+  brainTestWinnerAlias: string | null;
+  brainTestAbilityAwarded: string | null;
+
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
 
@@ -342,6 +389,9 @@ interface GameState {
   onComedyWinner: (data: ComedyWinnerData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
   onBrainTestResults: (data: BrainTestResultsData) => void;
+  onDiscussionMessage: (data: DiscussionMessageData) => void;
+  onAbilityAwarded: (data: AbilityAwardedData) => void;
+  onScanResult: (data: ScanResultData) => void;
   onOpen: () => void;
   onError: () => void;
   reset: () => void;
@@ -419,6 +469,18 @@ const initialState = {
   comedyWinnerAlias: null as string | null,
   comedyWinnerVotes: 0,
   myComedyVote: null as string | null,
+  discussionMessages: [] as Array<{ sender_id: string; sender_alias: string; message: string }>,
+  myDiscussionCount: 0,
+  discussStartsAt: null as string | null,
+  voteStartsAt: null as string | null,
+  activeAbilityHolder: null as string | null,
+  activeAbilityHolderAlias: null as string | null,
+  activeAbilityType: null as string | null,
+  scanResults: null as Array<{ player_id: string; alias: string; claimed_role: string }> | null,
+  brainTestScores: null as Record<string, number> | null,
+  brainTestWinnerId: null as string | null,
+  brainTestWinnerAlias: null as string | null,
+  brainTestAbilityAwarded: null as string | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -545,6 +607,13 @@ export const useGameStore = create<GameState>((set) => ({
       comedyWinnerAlias: null,
       comedyWinnerVotes: 0,
       myComedyVote: null,
+      // Discussion reset
+      discussionMessages: [],
+      myDiscussionCount: 0,
+      discussStartsAt: data.discuss_starts_at ?? null,
+      voteStartsAt: data.vote_starts_at ?? null,
+      // Scan reset per round
+      scanResults: null,
       chainRounds: data.chain_rounds?.length ? data.chain_rounds : EMPTY_CHAIN_ROUNDS,
       currentSubRound: 0,
       currentSeedWord: data.chain_rounds?.length
@@ -650,6 +719,10 @@ export const useGameStore = create<GameState>((set) => ({
   onBrainTestResults: (data) =>
     set({
       brainTestResults: data.results,
+      brainTestScores: data.scores ?? null,
+      brainTestWinnerId: data.winner_id ?? null,
+      brainTestWinnerAlias: data.winner_alias ?? null,
+      brainTestAbilityAwarded: data.ability_awarded ?? null,
       lastSeq: data.seq,
     }),
 
@@ -707,6 +780,31 @@ export const useGameStore = create<GameState>((set) => ({
       isHost: s.playerId === data.new_host_id,
       lastSeq: data.seq,
     })),
+
+  onDiscussionMessage: (data) =>
+    set((s) => ({
+      discussionMessages: [
+        ...s.discussionMessages,
+        { sender_id: data.sender_id, sender_alias: data.sender_alias, message: data.message },
+      ],
+      myDiscussionCount:
+        data.sender_id === s.playerId ? s.myDiscussionCount + 1 : s.myDiscussionCount,
+      lastSeq: data.seq,
+    })),
+
+  onAbilityAwarded: (data) =>
+    set({
+      activeAbilityHolder: data.holder_id,
+      activeAbilityHolderAlias: data.holder_alias,
+      activeAbilityType: data.ability_type,
+      lastSeq: data.seq,
+    }),
+
+  onScanResult: (data) =>
+    set({
+      scanResults: data.results,
+      lastSeq: data.seq,
+    }),
 
   onOpen: () => set({ connectionStatus: "connected" }),
 

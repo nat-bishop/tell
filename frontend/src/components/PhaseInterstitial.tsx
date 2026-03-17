@@ -14,6 +14,9 @@ interface PhaseInterstitialProps {
   humansEliminated?: number;
   aisEliminated?: number;
   lastEliminationWasHuman?: boolean | null;
+  // Ability
+  abilityHolderAlias?: string | null;
+  abilityType?: string | null;
 }
 
 // ─── Robot Voice Archetypes ───
@@ -207,6 +210,8 @@ export function PhaseInterstitial({
   humansEliminated = 0,
   aisEliminated = 0,
   lastEliminationWasHuman = null,
+  abilityHolderAlias = null,
+  abilityType = null,
 }: PhaseInterstitialProps) {
   const voice = getVoice(roundNumber);
   let text: string;
@@ -280,6 +285,15 @@ export function PhaseInterstitial({
       {!isRoundStart && subtitle && (
         <p className="font-system text-[0.65rem] text-dim tracking-[0.15em] lowercase mt-1">
           {subtitle}
+        </p>
+      )}
+      {isRoundStart && abilityHolderAlias && abilityType && !fading && (
+        <p
+          className="animate-fade-in font-system text-[0.6rem] text-cold tracking-[0.15em] uppercase mt-3"
+          style={{ animationDelay: "2s" }}
+        >
+          {abilityHolderAlias} holds{" "}
+          {abilityType === "partial_scan" ? "PARTIAL SCAN" : "DOUBLE VOTE"}
         </p>
       )}
     </div>

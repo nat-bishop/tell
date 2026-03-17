@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 from schemas.game_state import (
     ChainRound,
@@ -60,7 +61,7 @@ class TestJoinGame:
         assert resp.status_code == 404
 
     async def test_join_game_in_progress(self, client, mock_ai):
-        game_id, session, players = seed_game(GamePhase.PROMPT)
+        game_id, _session, _players = seed_game(GamePhase.PROMPT)
         resp = await client.post(f"/games/{game_id}/join", json={"player_name": "Alice"})
         assert resp.status_code == 400
         assert "already in progress" in resp.json()["detail"].lower()
@@ -80,7 +81,7 @@ class TestStartGame:
         assert resp.status_code == 404
 
     async def test_start_non_host(self, client, mock_ai):
-        game_id, session, players = seed_game(GamePhase.LOBBY)
+        game_id, _session, _players = seed_game(GamePhase.LOBBY)
         resp = await client.post(
             f"/games/{game_id}/start",
             json={"player_id": "h2", "ai_count": 2},  # h2 is not host
@@ -89,7 +90,7 @@ class TestStartGame:
         assert "host" in resp.json()["detail"].lower()
 
     async def test_start_already_started(self, client, mock_ai):
-        game_id, session, players = seed_game(GamePhase.PROMPT)
+        game_id, _session, _players = seed_game(GamePhase.PROMPT)
         resp = await client.post(
             f"/games/{game_id}/start",
             json={"player_id": "h1", "ai_count": 2},
@@ -223,7 +224,7 @@ class TestSubmitQuestion:
         assert resp.status_code == 400
 
     async def test_hot_seated_cannot_ask(self, client, mock_ai):
-        game_id, session, _ = self._setup_question_phase()
+        game_id, _session, _ = self._setup_question_phase()
         resp = await client.post(
             f"/games/{game_id}/question",
             json={"player_id": "h2", "question": "Why?"},  # h2 is nominated
@@ -246,7 +247,7 @@ class TestSubmitQuestion:
         assert "already submitted" in resp.json()["detail"].lower()
 
     async def test_success(self, client, mock_ai):
-        game_id, session, _ = self._setup_question_phase()
+        game_id, _session, _ = self._setup_question_phase()
         resp = await client.post(
             f"/games/{game_id}/question",
             json={"player_id": "h1", "question": "Why did you say that?"},
@@ -420,3 +421,82 @@ class TestSubmitChainWord:
             json={"player_id": "h1", "word": "wave", "round_index": 0},
         )
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Discussion messages
+# ---------------------------------------------------------------------------
+
+
+class TestDiscussionMessage:
+    async def test_success(self, client, mock_ai):
+        game_id, _session, _players = seed_game(GamePhase.REVIEW)
+        with patch(
+            "backend.api.routes.actions.record_discussion_message",
+            create=True,
+        ):
+            resp = await client.post(
+                f"/games/{game_id}/discussion-message",
+                json={"player_id": "h1", "message": "I think a1 is human"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    async def test_rate_limit_fourth_message(self, client, mock_ai):
+        game_id, session, _players = seed_game(GamePhase.REVIEW)
+        # Pre-set discussion count to 3 (at limit)
+        session.state.current_round.discussion_counts["h1"] = 3
+        resp = await client.post(
+            f"/games/{game_id}/discussion-message",
+            json={"player_id": "h1", "message": "One more"},
+        )
+        assert resp.status_code == 400
+        assert "limit" in resp.json()["detail"].lower()
+
+    async def test_wrong_phase(self, client, mock_ai):
+        game_id, _session, _players = seed_game(GamePhase.PROMPT)
+        resp = await client.post(
+            f"/games/{game_id}/discussion-message",
+            json={"player_id": "h1", "message": "Hello"},
+        )
+        assert resp.status_code == 400
+        assert "review" in resp.json()["detail"].lower()
+
+    async def test_message_too_long(self, client, mock_ai):
+        game_id, _session, _players = seed_game(GamePhase.REVIEW)
+        resp = await client.post(
+            f"/games/{game_id}/discussion-message",
+            json={"player_id": "h1", "message": "x" * 121},
+        )
+        assert resp.status_code == 400
+        assert "too long" in resp.json()["detail"].lower()
+
+    async def test_dead_player_rejected(self, client, mock_ai):
+        game_id, session, _players = seed_game(GamePhase.REVIEW)
+        # Kill h1
+        for p in session.state.players:
+            if p.id == "h1":
+                p.is_alive = False
+                break
+        resp = await client.post(
+            f"/games/{game_id}/discussion-message",
+            json={"player_id": "h1", "message": "Ghost message"},
+        )
+        assert resp.status_code == 400
+        assert "eliminated" in resp.json()["detail"].lower()
+
+    async def test_empty_message(self, client, mock_ai):
+        game_id, _session, _players = seed_game(GamePhase.REVIEW)
+        resp = await client.post(
+            f"/games/{game_id}/discussion-message",
+            json={"player_id": "h1", "message": "   "},
+        )
+        assert resp.status_code == 400
+        assert "empty" in resp.json()["detail"].lower()
+
+    async def test_nonexistent_game(self, client, mock_ai):
+        resp = await client.post(
+            "/games/nonexistent/discussion-message",
+            json={"player_id": "h1", "message": "Hello"},
+        )
+        assert resp.status_code == 404

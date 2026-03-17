@@ -19,4 +19,8 @@ Common drift sources:
 - Word Chain: `CHAIN` is the `GamePhase` value; `WORD_CHAIN` is the `RoundType`. Brain Test: `BRAIN_TEST` is both `GamePhase` and `RoundType`.
 - Narrator fires in `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking, uses generate-then-lock pattern same as AI players.
 - Comedy Cup adds a second vote track: `comedy_votes` on `RoundState`, `ComedyWinnerEvent` SSE, `castComedyVote()` action, winner shown at Elimination step 5.
-- Brain Test evidence carries forward: `brain_test_evidence` on `TellGameState` persists from Brain Test into the following voting round. Not reset between rounds — only overwritten on the next Brain Test.
+- Brain Test results live on `RoundState.brain_challenges` (not a `TellGameState` field). They are not injected into AI prompts for subsequent rounds — only displayed to players via `BrainTestResultsEvent`.
+- Brain Test now scores challenges: `trick`/`pattern` → fuzzy match; `estimation`/`common_knowledge` → uniqueness. Winner earns PARTIAL SCAN or DOUBLE VOTE stored in `state.active_ability`. Cleared in `_start_next_round()`.
+- REVIEW has 3 server-driven sub-phases (REVEAL/DISCUSS/VOTE) — no new `GamePhase` values. Timestamps `discuss_starts_at` and `vote_starts_at` in `PhaseChangedEvent`. Frontend `useSubPhase()` drives local transitions.
+- Discussion messages: `POST /{game_id}/discussion-message`, 3 msgs/player/round, 120 chars. Rate-limited via `discussion_counts` on `RoundState`. AI uses `_ai_discussion_task()` + `generate_discussion_message()`.
+- PARTIAL SCAN triggered by `_trigger_ability_on_review()` in `transitions.py` at REVIEW start. DOUBLE VOTE applied in `resolve_votes()` in `game_logic.py`.

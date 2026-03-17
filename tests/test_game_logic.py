@@ -7,11 +7,15 @@ from types import SimpleNamespace
 import pytest
 
 from backend.services.game_logic import (
+    _fuzzy_match,
+    _score_by_uniqueness,
+    _score_with_answer,
     assign_question_targets,
     build_state_sync,
     check_game_over,
     count_expected_questions,
     count_responses,
+    determine_challenge_winner,
     fill_missing_answers,
     fill_missing_responses,
     get_next_round_type,
@@ -24,6 +28,7 @@ from backend.services.game_logic import (
     resolve_nominations,
     resolve_votes,
     sanitize_players_for_client,
+    score_brain_test,
     select_chain_next_word,
     select_round_types,
     transition_to_elimination,
@@ -38,6 +43,7 @@ from backend.services.game_logic import (
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
+    BrainTestChallenge,
     GamePhase,
     PlayerRole,
     QuestionEntry,
@@ -132,7 +138,7 @@ class TestResolveVotes:
     def test_clear_winner(self):
         state, _ = make_standard_game(phase=GamePhase.REVIEW)
         state.current_round.votes = {"h1": ["a1"], "h2": ["a1"], "a1": ["h1"], "a2": ["a1"]}
-        state, vote_results, elimination = resolve_votes(state, self._seq_fn())
+        state, _vote_results, elimination = resolve_votes(state, self._seq_fn())
 
         assert elimination.eliminated_id == "a1"
         assert elimination.was_human is False
@@ -145,7 +151,7 @@ class TestResolveVotes:
     def test_tie_eliminates_one_of_tied(self):
         state, _ = make_standard_game(phase=GamePhase.REVIEW)
         state.current_round.votes = {"h1": ["a1"], "h2": ["a2"]}
-        state, vote_results, elimination = resolve_votes(state, self._seq_fn())
+        state, _vote_results, elimination = resolve_votes(state, self._seq_fn())
 
         assert elimination.eliminated_id in ("a1", "a2")
         assert elimination.tie is True
@@ -154,7 +160,7 @@ class TestResolveVotes:
     def test_no_votes(self):
         state, _ = make_standard_game(phase=GamePhase.REVIEW)
         state.current_round.votes = {}
-        state, vote_results, elimination = resolve_votes(state, self._seq_fn())
+        state, _vote_results, elimination = resolve_votes(state, self._seq_fn())
 
         assert elimination.eliminated_id is None
         assert elimination.no_votes is True
@@ -162,7 +168,7 @@ class TestResolveVotes:
     def test_multi_vote_flattening(self):
         state, _ = make_standard_game(phase=GamePhase.REVIEW)
         state.current_round.votes = {"h1": ["a1", "a2", "h2"], "h2": ["a1", "a2"]}
-        state, vote_results, elimination = resolve_votes(state, self._seq_fn())
+        state, vote_results, _elimination = resolve_votes(state, self._seq_fn())
 
         assert vote_results.vote_tallies["a1"] == 2
         assert vote_results.vote_tallies["a2"] == 2
@@ -171,7 +177,7 @@ class TestResolveVotes:
     def test_elimination_marks_player(self):
         state, _ = make_standard_game(phase=GamePhase.REVIEW)
         state.current_round.votes = {"h1": ["a1"], "h2": ["a1"]}
-        state, _, elimination = resolve_votes(state, self._seq_fn())
+        state, _, _elimination = resolve_votes(state, self._seq_fn())
 
         player = next(p for p in state.players if p.id == "a1")
         assert player.is_alive is False
@@ -515,7 +521,7 @@ class TestSelectChainNextWord:
     def test_multiple_unique_words(self):
         responses = {"p1": "tide", "p2": "shore", "p3": "surf"}
         # All unique — should pick randomly among them
-        word, pid = select_chain_next_word(responses)
+        word, _pid = select_chain_next_word(responses)
         assert word in ("tide", "shore", "surf")
 
     def test_empty_responses(self):
@@ -525,7 +531,7 @@ class TestSelectChainNextWord:
 
     def test_case_insensitive(self):
         responses = {"p1": "Wave", "p2": "WAVE", "p3": "tide"}
-        word, pid = select_chain_next_word(responses)
+        word, _pid = select_chain_next_word(responses)
         # "wave" appears twice (case-insensitive), "tide" is unique
         assert word == "tide"
 
@@ -713,3 +719,248 @@ class TestBuildStateSyncEdgeCases:
         assert len(sync["chain_rounds"]) == 1
         assert sync["chain_rounds"][0]["seed"] == "ocean"
         assert sync["current_sub_round"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Brain Test scoring
+# ---------------------------------------------------------------------------
+
+
+class TestFuzzyMatch:
+    def test_exact_match(self):
+        assert _fuzzy_match("Paris", "Paris") is True
+
+    def test_case_insensitive(self):
+        assert _fuzzy_match("PARIS", "paris") is True
+
+    def test_numeric_match(self):
+        assert _fuzzy_match("42", "42") is True
+
+    def test_numeric_float_match(self):
+        assert _fuzzy_match("3.14", "3.14") is True
+
+    def test_cents_to_decimal(self):
+        assert _fuzzy_match("5 cents", "0.05") is True
+
+    def test_word_number_cents(self):
+        assert _fuzzy_match("five cents", "0.05") is True
+
+    def test_currency_symbol_stripped(self):
+        assert _fuzzy_match("$10", "10") is True
+
+    def test_leading_article_stripped(self):
+        assert _fuzzy_match("the moon", "moon") is True
+
+    def test_no_match(self):
+        assert _fuzzy_match("cat", "dog") is False
+
+    def test_whitespace_handling(self):
+        assert _fuzzy_match("  Paris  ", "paris") is True
+
+    def test_numeric_mismatch(self):
+        assert _fuzzy_match("5", "10") is False
+
+
+class TestScoreWithAnswer:
+    def test_correct_answers(self):
+        ch = BrainTestChallenge(
+            challenge_type="trivia",
+            question="Capital of France?",
+            correct_answer="Paris",
+            responses={"h1": "Paris", "h2": "paris", "a1": "London"},
+        )
+        scores = _score_with_answer(ch)
+        assert scores["h1"] == 1
+        assert scores["h2"] == 1
+        assert scores["a1"] == 0
+
+    def test_no_correct_answer(self):
+        ch = BrainTestChallenge(
+            challenge_type="uniqueness",
+            question="Name an animal",
+            correct_answer=None,
+            responses={"h1": "cat"},
+        )
+        scores = _score_with_answer(ch)
+        assert scores == {}
+
+    def test_empty_responses(self):
+        ch = BrainTestChallenge(
+            challenge_type="trivia",
+            question="What is 2+2?",
+            correct_answer="4",
+            responses={},
+        )
+        scores = _score_with_answer(ch)
+        assert scores == {}
+
+
+class TestScoreByUniqueness:
+    def test_all_unique(self):
+        ch = BrainTestChallenge(
+            challenge_type="uniqueness",
+            question="Name a color",
+            responses={"h1": "red", "h2": "blue", "a1": "green"},
+        )
+        scores = _score_by_uniqueness(ch)
+        assert scores == {"h1": 1, "h2": 1, "a1": 1}
+
+    def test_duplicates_score_zero(self):
+        ch = BrainTestChallenge(
+            challenge_type="uniqueness",
+            question="Name a color",
+            responses={"h1": "red", "h2": "red", "a1": "blue"},
+        )
+        scores = _score_by_uniqueness(ch)
+        assert scores["h1"] == 0
+        assert scores["h2"] == 0
+        assert scores["a1"] == 1
+
+    def test_case_insensitive_duplicates(self):
+        ch = BrainTestChallenge(
+            challenge_type="uniqueness",
+            question="Name a color",
+            responses={"h1": "Red", "h2": "red"},
+        )
+        scores = _score_by_uniqueness(ch)
+        assert scores["h1"] == 0
+        assert scores["h2"] == 0
+
+    def test_empty_responses(self):
+        ch = BrainTestChallenge(
+            challenge_type="uniqueness",
+            question="Name a color",
+            responses={},
+        )
+        scores = _score_by_uniqueness(ch)
+        assert scores == {}
+
+
+class TestScoreBrainTest:
+    def test_mixed_challenge_types(self):
+        trivia = BrainTestChallenge(
+            challenge_type="trivia",
+            question="2+2?",
+            correct_answer="4",
+            responses={"h1": "4", "h2": "5", "a1": "4"},
+        )
+        uniqueness = BrainTestChallenge(
+            challenge_type="uniqueness",
+            question="Name a fruit",
+            correct_answer=None,
+            responses={"h1": "apple", "h2": "apple", "a1": "kiwi"},
+        )
+        totals = score_brain_test([trivia, uniqueness])
+        # h1: 1 (trivia) + 0 (apple duplicate) = 1
+        assert totals["h1"] == 1
+        # h2: 0 (wrong) + 0 (apple duplicate) = 0
+        assert totals["h2"] == 0
+        # a1: 1 (trivia) + 1 (unique kiwi) = 2
+        assert totals["a1"] == 2
+
+    def test_empty_challenges(self):
+        totals = score_brain_test([])
+        assert totals == {}
+
+    def test_all_trivia(self):
+        ch1 = BrainTestChallenge(
+            challenge_type="trivia",
+            question="Q1",
+            correct_answer="yes",
+            responses={"h1": "yes", "h2": "no"},
+        )
+        ch2 = BrainTestChallenge(
+            challenge_type="trivia",
+            question="Q2",
+            correct_answer="blue",
+            responses={"h1": "blue", "h2": "blue"},
+        )
+        totals = score_brain_test([ch1, ch2])
+        assert totals["h1"] == 2
+        assert totals["h2"] == 1
+
+
+class TestDetermineChallengeWinner:
+    def test_clear_winner(self):
+        result = determine_challenge_winner({"h1": 3, "h2": 1, "a1": 2})
+        assert result is not None
+        assert result[0] == "h1"
+
+    def test_tie_returns_one(self):
+        scores = {"h1": 2, "h2": 2}
+        result = determine_challenge_winner(scores)
+        assert result is not None
+        assert result[0] in ("h1", "h2")
+
+    def test_all_zeros_returns_none(self):
+        result = determine_challenge_winner({"h1": 0, "h2": 0})
+        assert result is None
+
+    def test_empty_scores_returns_none(self):
+        result = determine_challenge_winner({})
+        assert result is None
+
+    def test_single_player(self):
+        result = determine_challenge_winner({"h1": 5})
+        assert result is not None
+        assert result[0] == "h1"
+
+
+# ---------------------------------------------------------------------------
+# Double-vote ability in resolve_votes
+# ---------------------------------------------------------------------------
+
+
+class TestResolveVotesDoubleVote:
+    def _seq_fn(self):
+        n = 0
+
+        def fn():
+            nonlocal n
+            n += 1
+            return n
+
+        return fn
+
+    def test_double_vote_doubles_holders_votes(self):
+        from schemas.game_state import ActiveAbility
+
+        state, _ = make_standard_game(phase=GamePhase.REVIEW)
+        state.active_ability = ActiveAbility(
+            holder_id="h1",
+            holder_alias="UNIT-01",
+            ability_type="double_vote",
+        )
+        # h1 votes for a1 (doubled to 2), h2 votes for a2 (1)
+        state.current_round.votes = {"h1": ["a1"], "h2": ["a2"]}
+        state, vote_results, elimination = resolve_votes(state, self._seq_fn())
+
+        assert vote_results.vote_tallies["a1"] == 2
+        assert vote_results.vote_tallies["a2"] == 1
+        assert elimination.eliminated_id == "a1"
+
+    def test_no_ability_normal_counting(self):
+        state, _ = make_standard_game(phase=GamePhase.REVIEW)
+        state.active_ability = None
+        state.current_round.votes = {"h1": ["a1"], "h2": ["a2"]}
+        state, vote_results, _elimination = resolve_votes(state, self._seq_fn())
+
+        # Tied at 1 each — both should have tally 1
+        assert vote_results.vote_tallies["a1"] == 1
+        assert vote_results.vote_tallies["a2"] == 1
+
+    def test_partial_scan_does_not_double_vote(self):
+        from schemas.game_state import ActiveAbility
+
+        state, _ = make_standard_game(phase=GamePhase.REVIEW)
+        state.active_ability = ActiveAbility(
+            holder_id="h1",
+            holder_alias="UNIT-01",
+            ability_type="partial_scan",
+        )
+        state.current_round.votes = {"h1": ["a1"], "h2": ["a2"]}
+        state, vote_results, _elimination = resolve_votes(state, self._seq_fn())
+
+        # partial_scan should NOT double — each target gets 1 vote
+        assert vote_results.vote_tallies["a1"] == 1
+        assert vote_results.vote_tallies["a2"] == 1

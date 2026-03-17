@@ -39,6 +39,7 @@ from schemas.api_models import (
     CastComedyVoteRequest,
     CastVoteRequest,
     ChainProgressEvent,
+    DiscussionMessageEvent,
     JoinGameRequest,
     JoinGameResponse,
     NominateRequest,
@@ -46,6 +47,7 @@ from schemas.api_models import (
     PlayerJoinedEvent,
     QuestionSubmittedEvent,
     ResponseSubmittedEvent,
+    SendDiscussionMessageRequest,
     StartGameRequest,
     StatusResponse,
     SubmitAnswerRequest,
@@ -174,11 +176,8 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
             raise HTTPException(status_code=400, detail="No active round")
 
         # Reject answers during reading period
-        if round_state.writing_begins_at:
-            if datetime.now(UTC) < round_state.writing_begins_at:
-                raise HTTPException(
-                    status_code=400, detail="Reading period — answers not accepted yet"
-                )
+        if round_state.writing_begins_at and datetime.now(UTC) < round_state.writing_begins_at:
+            raise HTTPException(status_code=400, detail="Reading period — answers not accepted yet")
 
         if req.player_id in round_state.answers:
             raise HTTPException(status_code=400, detail="Already answered")
@@ -616,6 +615,67 @@ async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerReque
             "brain_test_answer",
             player_id=req.player_id,
             challenge_index=req.challenge_index,
+        )
+
+    return {"status": "ok"}
+
+
+@router.post("/{game_id}/discussion-message", response_model=StatusResponse)
+async def send_discussion_message(game_id: str, req: SendDiscussionMessageRequest):
+    """Send a chat message during the DISCUSS sub-phase of REVIEW."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.REVIEW:
+            raise HTTPException(status_code=400, detail="Not in review phase")
+
+        result = validate_player_alive(state, req.player_id)
+        if isinstance(result, str):
+            raise HTTPException(status_code=400, detail=result)
+        player = result
+
+        message = req.message.strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        if len(message) > 120:
+            raise HTTPException(status_code=400, detail="Message too long (max 120 chars)")
+
+        round_state = state.current_round
+        if not round_state:
+            raise HTTPException(status_code=400, detail="No active round")
+
+        count = round_state.discussion_counts.get(req.player_id, 0)
+        if count >= 3:
+            raise HTTPException(status_code=400, detail="Message limit reached (max 3)")
+
+        round_state.discussion_counts[req.player_id] = count + 1
+
+        await cm.broadcast(
+            game_id,
+            DiscussionMessageEvent(
+                seq=session.next_seq(),
+                sender_id=req.player_id,
+                sender_alias=player.alias,
+                message=message,
+            ),
+        )
+
+        from backend.services.ai_scheduler import record_discussion_message
+
+        record_discussion_message(game_id, player.alias, message)
+        log.info(
+            "discussion_message",
+            player_id=req.player_id,
+            msg_count=count + 1,
         )
 
     return {"status": "ok"}

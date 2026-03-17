@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import random
 import uuid
 
 import structlog
@@ -16,8 +17,10 @@ from backend.api.deps import (
 )
 from backend.services.game_logic import (
     check_game_over,
+    determine_challenge_winner,
     fill_missing_answers,
     fill_missing_responses,
+    get_alive_players,
     get_interstitial_hold,
     get_next_round_type,
     get_phase_duration,
@@ -27,6 +30,7 @@ from backend.services.game_logic import (
     resolve_comedy_votes,
     resolve_nominations,
     resolve_votes,
+    score_brain_test,
     select_chain_next_word,
     select_round_types,
     transition_to_brain_test,
@@ -42,6 +46,7 @@ from backend.services.game_logic import (
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
+    AbilityAwardedEvent,
     BrainTestChallengeEvent,
     BrainTestResultsEvent,
     ChainSeedEvent,
@@ -49,11 +54,20 @@ from schemas.api_models import (
     NarrationEvent,
     NominatedEvent,
     PlayerJoinedEvent,
+    ScanResultEvent,
     SynthesisReadyEvent,
     VerdictEvent,
 )
 from schemas.constants import MISSING_ALIAS
-from schemas.game_state import ChainRound, GamePhase, NarratorEntry, Player, PlayerRole, RoundType
+from schemas.game_state import (
+    ActiveAbility,
+    ChainRound,
+    GamePhase,
+    NarratorEntry,
+    Player,
+    PlayerRole,
+    RoundType,
+)
 from schemas.word_chain import select_seed_word
 
 log = structlog.get_logger(__name__)
@@ -152,7 +166,10 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
         except Exception:
             log.exception("narration_failed", trigger=trigger, game_id=game_id)
 
-    asyncio.create_task(_do_narrate())
+    task = asyncio.create_task(_do_narrate())
+    task.add_done_callback(
+        lambda t: t.result() if not t.cancelled() and not t.exception() else None
+    )
 
 
 async def _notify_ai(game_id: str, phase: GamePhase) -> None:
@@ -170,6 +187,23 @@ def _make_event(state, session, settings, **extra):
     if rs and rs.writing_begins_at and "writing_begins_at" not in extra:
         extra["writing_begins_at"] = rs.writing_begins_at.isoformat()
     return make_phase_changed_event(state, session.next_seq(), phase_duration=pd, **extra)
+
+
+def _compute_review_timestamps(
+    state,
+    review_duration: int,
+) -> dict[str, str]:
+    """Compute discuss_starts_at and vote_starts_at for REVIEW sub-phases."""
+    if not state.phase_deadline:
+        return {}
+    # Interstitial eats ~2s, then reveal 0-8s, discuss 8-26s, vote 26-40s
+    action_start = state.phase_deadline - dt.timedelta(seconds=review_duration)
+    discuss_starts_at = action_start + dt.timedelta(seconds=8)
+    vote_starts_at = action_start + dt.timedelta(seconds=26)
+    return {
+        "discuss_starts_at": discuss_starts_at.isoformat(),
+        "vote_starts_at": vote_starts_at.isoformat(),
+    }
 
 
 async def start_phase_timer(
@@ -260,6 +294,7 @@ async def do_prompt_complete(game_id: str, session) -> None:
     if round_state and round_state.round_type == RoundType.TASK:
         # Task rounds skip question/respond — go straight to review
         transition_to_review(state, settings.review_duration)
+        review_ts = _compute_review_timestamps(state, settings.review_duration)
         await cm.broadcast(
             game_id,
             _make_event(
@@ -268,8 +303,10 @@ async def do_prompt_complete(game_id: str, session) -> None:
                 settings,
                 answers=round_state.answers,
                 round_type=round_state.round_type,
+                **review_ts,
             ),
         )
+        await _trigger_ability_on_review(game_id, session)
         next_phase = GamePhase.REVIEW
     else:
         # Interrogation — proceed to nomination
@@ -408,6 +445,7 @@ async def do_respond_complete(game_id: str, session) -> None:
     round_state = state.current_round
 
     transition_to_review(state, settings.review_duration)
+    review_ts = _compute_review_timestamps(state, settings.review_duration)
     await cm.broadcast(
         game_id,
         _make_event(
@@ -417,8 +455,10 @@ async def do_respond_complete(game_id: str, session) -> None:
             round_type=round_state.round_type if round_state else None,
             questions=[q.model_dump() for q in round_state.questions] if round_state else [],
             synthesis=round_state.synthesis if round_state else None,
+            **review_ts,
         ),
     )
+    await _trigger_ability_on_review(game_id, session)
 
     await start_phase_timer(game_id, GamePhase.REVIEW)
     await _notify_ai(game_id, GamePhase.REVIEW)
@@ -487,6 +527,57 @@ async def do_vote_resolution(game_id: str, session) -> None:
     await start_phase_timer(game_id, GamePhase.ELIMINATION)
 
 
+async def _trigger_ability_on_review(game_id: str, session) -> None:
+    """Fire passive ability when REVIEW starts. Currently: PARTIAL SCAN.
+
+    Assumes caller holds the game lock.
+    """
+    cm = get_connection_manager()
+    state = session.state
+
+    if not state.active_ability or state.active_ability.ability_type != "partial_scan":
+        return
+
+    holder_id = state.active_ability.holder_id
+    alive = get_alive_players(state)
+    candidates = [p for p in alive if p.id != holder_id]
+
+    if len(candidates) < 2:
+        return
+
+    picked = random.sample(candidates, 2)
+    # Player A: true role. Player B: random role (50/50 correct).
+    result_a = {
+        "player_id": picked[0].id,
+        "alias": picked[0].alias,
+        "claimed_role": picked[0].role.value,
+    }
+    if random.random() < 0.5:
+        result_b_role = picked[1].role.value
+    else:
+        result_b_role = "human" if picked[1].role.value == "ai" else "ai"
+    result_b = {
+        "player_id": picked[1].id,
+        "alias": picked[1].alias,
+        "claimed_role": result_b_role,
+    }
+
+    # Shuffle so nobody knows which is verified
+    scan_results = [result_a, result_b]
+    random.shuffle(scan_results)
+
+    # Send only to the ability holder — not broadcast to all players
+    await cm.send_to(
+        game_id,
+        holder_id,
+        ScanResultEvent(
+            seq=session.next_seq(),
+            results=scan_results,
+        ),
+    )
+    log.info("scan_triggered", game_id=game_id, holder=state.active_ability.holder_alias)
+
+
 async def _start_next_round(game_id: str, session) -> None:
     """Route to the next round type — shared by post-elimination and post-brain-test.
 
@@ -495,6 +586,10 @@ async def _start_next_round(game_id: str, session) -> None:
     cm = get_connection_manager()
     settings = get_settings()
     state = session.state
+
+    # Clear ability from previous round
+    state.active_ability = None
+
     next_round_type = get_next_round_type(state)
 
     if next_round_type == RoundType.TASK:
@@ -619,6 +714,7 @@ async def do_chain_complete(game_id: str, session) -> None:
 
     round_state = state.current_round
     transition_to_review(state, settings.review_duration)
+    review_ts = _compute_review_timestamps(state, settings.review_duration)
     await cm.broadcast(
         game_id,
         _make_event(
@@ -627,8 +723,10 @@ async def do_chain_complete(game_id: str, session) -> None:
             settings,
             round_type=RoundType.WORD_CHAIN,
             chain_rounds=[cr.model_dump() for cr in round_state.chain_rounds],
+            **review_ts,
         ),
     )
+    await _trigger_ability_on_review(game_id, session)
 
     await start_phase_timer(game_id, GamePhase.REVIEW)
     await _notify_ai(game_id, GamePhase.REVIEW)
@@ -751,7 +849,7 @@ async def _start_chain_loop(game_id: str, session) -> None:
 
 
 async def do_brain_test_complete(game_id: str, session) -> None:
-    """Brain test challenges done → show results."""
+    """Brain test challenges done → score, pick winner, assign ability, show results."""
     cm = get_connection_manager()
     settings = get_settings()
     state = session.state
@@ -775,13 +873,56 @@ async def do_brain_test_complete(game_id: str, session) -> None:
                 )
             results[p.id] = player_results
 
+    # Score brain test
+    scores = score_brain_test(rs.brain_challenges)
+    winner_result = determine_challenge_winner(scores)
+    winner_id = None
+    winner_alias = None
+    ability_awarded = None
+
+    if winner_result:
+        winner_id = winner_result[0]
+        winner_player = get_player_by_id(state, winner_id)
+        winner_alias = winner_player.alias if winner_player else None
+
+        # Assign random ability
+        ability_awarded = random.choice(["partial_scan", "double_vote"])
+        if winner_alias:
+            state.active_ability = ActiveAbility(
+                holder_id=winner_id,
+                holder_alias=winner_alias,
+                ability_type=ability_awarded,
+            )
+            log.info(
+                "ability_awarded",
+                game_id=game_id,
+                holder=winner_alias,
+                ability=ability_awarded,
+            )
+
     await cm.broadcast(
         game_id,
         BrainTestResultsEvent(
             seq=session.next_seq(),
             results=results,
+            scores=scores if scores else None,
+            winner_id=winner_id,
+            winner_alias=winner_alias,
+            ability_awarded=ability_awarded,
         ),
     )
+
+    # Broadcast ability awarded event
+    if winner_id and winner_alias and ability_awarded:
+        await cm.broadcast(
+            game_id,
+            AbilityAwardedEvent(
+                seq=session.next_seq(),
+                holder_id=winner_id,
+                holder_alias=winner_alias,
+                ability_type=ability_awarded,
+            ),
+        )
 
     transition_to_brain_test_results(state, settings.brain_test_results_duration)
     await cm.broadcast(

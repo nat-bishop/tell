@@ -8,7 +8,7 @@ import random
 from pydantic import BaseModel
 
 
-class PromptCategory(str, enum.Enum):
+class PromptCategory(enum.StrEnum):
     EMOTIONAL = "emotional"
     LOGICAL = "logical"
     CREATIVE = "creative"
@@ -16,7 +16,7 @@ class PromptCategory(str, enum.Enum):
     SOCIAL = "social"
 
 
-class TaskCategory(str, enum.Enum):
+class TaskCategory(enum.StrEnum):
     HAIKU = "haiku"
     CONCISE = "concise"
     HUMOR = "humor"
@@ -181,7 +181,7 @@ def select_prompt(
 # ---------------------------------------------------------------------------
 
 
-class BrainTestChallengeType(str, enum.Enum):
+class BrainTestChallengeType(enum.StrEnum):
     ESTIMATION = "estimation"
     COMMON_KNOWLEDGE = "common_knowledge"
     TRICK = "trick"

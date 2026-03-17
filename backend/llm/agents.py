@@ -1,15 +1,24 @@
 """AI player agent — generates answers, questions, responses,
-votes, nominations, synthesis, and verdicts."""
+votes, nominations, synthesis, and verdicts.
+
+Two agent tiers:
+  Character agents (ai_agent, narrator_agent) — personality-driven, maintain
+  message history across a game.
+  Utility agents (synthesis, verdict, association, brain_test) — stateless
+  one-shot calls with fixed purpose.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import random
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import ModelMessage
 
 from backend.api.deps import get_settings
@@ -59,6 +68,8 @@ class AIPlayerDeps:
 
 
 class NominationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     target_alias: str = Field(description="Alias of the player you nominate (e.g. UNIT-7)")
     reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
@@ -72,6 +83,8 @@ class NominationResponse(BaseModel):
 
 
 class VoteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     targets: list[str] = Field(description="Player aliases you suspect are human")
     reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
@@ -87,13 +100,14 @@ class VoteResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Module-level agent
+# Character agents — personality-driven, maintain message history
 # ---------------------------------------------------------------------------
 
 ai_agent: Agent[AIPlayerDeps, str] = Agent(
     output_type=str,
     deps_type=AIPlayerDeps,
     retries=2,
+    model_settings={"max_tokens": 200},
     validation_context=lambda ctx: [
         a for a in ctx.deps.alive_players if a != ctx.deps.player_alias
     ],
@@ -103,6 +117,7 @@ narrator_agent: Agent[None, str] = Agent(
     output_type=str,
     retries=1,
     instructions=NARRATOR_SYSTEM_PROMPT,
+    model_settings={"max_tokens": 200},
 )
 
 
@@ -113,7 +128,39 @@ def _build_instructions(ctx: RunContext[AIPlayerDeps]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Shared log fields
+# Utility agents — stateless one-shot calls
+# ---------------------------------------------------------------------------
+
+synthesis_agent: Agent[None, str] = Agent(
+    output_type=str,
+    retries=1,
+    instructions=SYNTHESIS_SYSTEM_PROMPT,
+    model_settings={"max_tokens": 300},
+)
+
+verdict_agent: Agent[None, str] = Agent(
+    output_type=str,
+    retries=1,
+    instructions=VERDICT_SYSTEM_PROMPT,
+    model_settings={"max_tokens": 100},
+)
+
+association_agent: Agent[None, str] = Agent(
+    output_type=str,
+    retries=1,
+    model_settings={"max_tokens": 20},
+)
+
+brain_test_agent: Agent[None, str] = Agent(
+    output_type=str,
+    retries=1,
+    instructions="Answer concisely.",
+    model_settings={"max_tokens": 50},
+)
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
 # ---------------------------------------------------------------------------
 
 
@@ -127,38 +174,69 @@ def _log_fields(deps: AIPlayerDeps) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# System agent (synthesis, verdict — no personality, no history)
-# ---------------------------------------------------------------------------
+async def _run_ai_agent(
+    deps: AIPlayerDeps,
+    action: str,
+    message_history: list[ModelMessage] | None = None,
+    *,
+    output_type: type = str,
+) -> tuple[Any, list[ModelMessage]]:
+    """Run ai_agent for a character action. Logs with tiered severity, re-raises on failure."""
+    settings = get_settings()
+    fields = _log_fields(deps)
+    log.info("llm_call_start", action=action, model=settings.ai_model, **fields)
+    try:
+        result = await ai_agent.run(
+            deps.action_prompt,
+            model=settings.ai_model,
+            deps=deps,
+            output_type=output_type,
+            message_history=message_history,
+        )
+        log.info("llm_call_done", action=action, output_len=len(str(result.output)), **fields)
+        return result.output, result.all_messages()
+    except TimeoutError:
+        log.info("ai_agent_timeout", action=action, **fields)
+        raise
+    except (ModelHTTPError, ModelAPIError) as exc:
+        log.warning("ai_agent_api_error", action=action, error=str(exc), **fields)
+        raise
+    except Exception:
+        log.exception("ai_agent_failed", action=action, **fields)
+        raise
 
 
-async def _run_system_agent(
-    system_prompt: str,
+async def _run_system_call(
+    agent: Agent[None, str],
     user_prompt: str,
     timeout: float = 5.0,
     *,
     game_id: str | None = None,
+    instructions: str | None = None,
 ) -> str | None:
-    """Run a system-level LLM call (not personality-based). Returns None on failure."""
+    """Run a stateless utility agent. Returns None on any failure."""
     settings = get_settings()
-    log.info("llm_system_call_start", model=settings.ai_model, game_id=game_id)
+    log.info("llm_system_call_start", game_id=game_id)
     try:
-        agent = Agent(
-            model=settings.ai_model,
-            retries=1,
-            output_type=str,
-            instructions=system_prompt,
+        result = await asyncio.wait_for(
+            agent.run(user_prompt, model=settings.ai_model, instructions=instructions),
+            timeout=timeout,
         )
-        result = await asyncio.wait_for(agent.run(user_prompt), timeout=timeout)
         log.info("llm_system_call_done", output_len=len(result.output), game_id=game_id)
         return result.output
+    except TimeoutError:
+        log.info("llm_system_timeout", game_id=game_id)
+        return None
+    except (ModelHTTPError, ModelAPIError) as exc:
+        log.warning("llm_system_api_error", error=str(exc), game_id=game_id)
+        return None
     except Exception:
-        log.exception("llm_system_call_failed", game_id=game_id)
+        log.exception("llm_system_failed", game_id=game_id)
         return None
 
 
 # ---------------------------------------------------------------------------
-# Generate functions — all accept/return message_history
+# Character-agent generate functions
 # ---------------------------------------------------------------------------
 
 
@@ -167,20 +245,9 @@ async def generate_answer(
     message_history: list[ModelMessage] | None = None,
 ) -> tuple[str, list[ModelMessage]]:
     """Generate an answer to a prompt in character."""
-    settings = get_settings()
-    fields = _log_fields(deps)
-    log.info("llm_call_start", action="answer", model=settings.ai_model, **fields)
     try:
-        result = await ai_agent.run(
-            deps.action_prompt,
-            model=settings.ai_model,
-            deps=deps,
-            message_history=message_history,
-        )
-        log.info("llm_call_done", action="answer", output_len=len(result.output), **fields)
-        return result.output, result.all_messages()
+        return await _run_ai_agent(deps, "answer", message_history)
     except Exception:
-        log.exception("ai_agent_failed", action="answer", **fields)
         return deps.personality.fallback_response, message_history or []
 
 
@@ -189,20 +256,9 @@ async def generate_question(
     message_history: list[ModelMessage] | None = None,
 ) -> tuple[str, list[ModelMessage]]:
     """Generate a follow-up question about another player's answer."""
-    settings = get_settings()
-    fields = _log_fields(deps)
-    log.info("llm_call_start", action="question", model=settings.ai_model, **fields)
     try:
-        result = await ai_agent.run(
-            deps.action_prompt,
-            model=settings.ai_model,
-            deps=deps,
-            message_history=message_history,
-        )
-        log.info("llm_call_done", action="question", output_len=len(result.output), **fields)
-        return result.output, result.all_messages()
+        return await _run_ai_agent(deps, "question", message_history)
     except Exception:
-        log.exception("ai_agent_failed", action="question", **fields)
         return deps.personality.fallback_response, message_history or []
 
 
@@ -212,20 +268,9 @@ async def generate_question_response(
     message_history: list[ModelMessage] | None = None,
 ) -> tuple[str, list[ModelMessage]]:
     """Respond to an anonymous question about your answer."""
-    settings = get_settings()
-    fields = _log_fields(deps)
-    log.info("llm_call_start", action="response", model=settings.ai_model, **fields)
     try:
-        result = await ai_agent.run(
-            deps.action_prompt,
-            model=settings.ai_model,
-            deps=deps,
-            message_history=message_history,
-        )
-        log.info("llm_call_done", action="response", output_len=len(result.output), **fields)
-        return result.output, result.all_messages()
+        return await _run_ai_agent(deps, "response", message_history)
     except Exception:
-        log.exception("ai_agent_failed", action="response", **fields)
         return deps.personality.fallback_response, message_history or []
 
 
@@ -238,27 +283,15 @@ async def generate_nomination(
     if not other_players:
         alias = deps.alive_players[0] if deps.alive_players else ""
         return alias, message_history or []
-
-    settings = get_settings()
-    fields = _log_fields(deps)
-    log.info("llm_call_start", action="nomination", model=settings.ai_model, **fields)
     try:
-        result = await ai_agent.run(
-            deps.action_prompt,
-            model=settings.ai_model,
-            deps=deps,
+        output, messages = await _run_ai_agent(
+            deps,
+            "nomination",
+            message_history,
             output_type=NominationResponse,
-            message_history=message_history,
         )
-        log.info(
-            "llm_call_done",
-            action="nomination",
-            target=result.output.target_alias,
-            **fields,
-        )
-        return result.output.target_alias, result.all_messages()
+        return output.target_alias, messages
     except Exception:
-        log.exception("ai_agent_failed", action="nomination", **fields)
         return random.choice(other_players), message_history or []
 
 
@@ -274,30 +307,33 @@ async def decide_vote(
     from backend.services.game_logic import max_votes_for_player
 
     max_v = max_votes_for_player(len(deps.alive_players))
-
-    settings = get_settings()
-    fields = _log_fields(deps)
-    log.info("llm_call_start", action="vote", model=settings.ai_model, **fields)
     try:
-        result = await ai_agent.run(
-            deps.action_prompt,
-            model=settings.ai_model,
-            deps=deps,
+        output, messages = await _run_ai_agent(
+            deps,
+            "vote",
+            message_history,
             output_type=VoteResponse,
-            message_history=message_history,
         )
-        targets = result.output.targets[:max_v]
-        log.info("llm_call_done", action="vote", targets=targets, **fields)
-        return targets, result.all_messages()
+        return output.targets[:max_v], messages
     except Exception:
-        log.exception("ai_agent_failed", action="vote", **fields)
-        # Fallback: random votes
         picks = random.sample(other_players, min(max_v, len(other_players)))
         return picks, message_history or []
 
 
+async def generate_discussion_message(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str, list[ModelMessage]]:
+    """Generate a discussion chat message in character."""
+    try:
+        output, messages = await _run_ai_agent(deps, "discussion", message_history)
+        return output[:100], messages
+    except Exception:
+        return "", message_history or []
+
+
 # ---------------------------------------------------------------------------
-# System-level generators (no personality, no history)
+# Utility-agent generators (no personality, no history)
 # ---------------------------------------------------------------------------
 
 
@@ -320,9 +356,7 @@ async def synthesize_questions(
         f"Questions from the group:\n{questions_formatted}"
     )
 
-    result = await _run_system_agent(
-        SYNTHESIS_SYSTEM_PROMPT, user_prompt, timeout=5.0, game_id=game_id
-    )
+    result = await _run_system_call(synthesis_agent, user_prompt, timeout=5.0, game_id=game_id)
     if result:
         return result
 
@@ -351,7 +385,7 @@ async def generate_verdict(
         f"They received {vote_count} votes in round {round_number} of {max_rounds}."
     )
 
-    return await _run_system_agent(VERDICT_SYSTEM_PROMPT, user_prompt, timeout=3.0, game_id=game_id)
+    return await _run_system_call(verdict_agent, user_prompt, timeout=3.0, game_id=game_id)
 
 
 async def generate_association(
@@ -362,15 +396,16 @@ async def generate_association(
     game_id: str | None = None,
 ) -> str:
     """Generate a single-word association for Word Chain. Personality-aware, lightweight."""
-    system_prompt = ASSOCIATION_SYSTEM_PROMPT_TEMPLATE.format(hint=personality.chain_style_hint)
-
-    history_text = ""
-    if chain_history:
-        history_text = f"\nChain so far: {' → '.join(chain_history)}"
-
+    history_text = f"\nChain so far: {' → '.join(chain_history)}" if chain_history else ""
     user_prompt = f"Word: {seed_word}{history_text}"
 
-    result = await _run_system_agent(system_prompt, user_prompt, timeout=3.0, game_id=game_id)
+    result = await _run_system_call(
+        association_agent,
+        user_prompt,
+        timeout=3.0,
+        game_id=game_id,
+        instructions=ASSOCIATION_SYSTEM_PROMPT_TEMPLATE.format(hint=personality.chain_style_hint),
+    )
     if result:
         # Clean up: take first word only
         word = result.strip().split()[0].strip(".,!?\"'").lower()
@@ -399,7 +434,7 @@ async def generate_brain_test_answer(
         f"Question: {question}\n"
         "Give a short answer (a few words). Just the answer, nothing else."
     )
-    return await _run_system_agent("Answer concisely.", prompt, timeout=3.0, game_id=game_id)
+    return await _run_system_call(brain_test_agent, prompt, timeout=3.0, game_id=game_id)
 
 
 async def generate_narration(
@@ -427,6 +462,12 @@ async def generate_narration(
         )
         log.info("llm_narrator_call_done", output_len=len(result.output), game_id=game_id)
         return result.output, result.all_messages()
+    except TimeoutError:
+        log.info("llm_narrator_timeout", trigger=trigger, game_id=game_id)
+        return None, message_history or []
+    except (ModelHTTPError, ModelAPIError) as exc:
+        log.warning("llm_narrator_api_error", error=str(exc), trigger=trigger, game_id=game_id)
+        return None, message_history or []
     except Exception:
-        log.exception("llm_narrator_call_failed", game_id=game_id)
+        log.exception("llm_narrator_failed", game_id=game_id)
         return None, message_history or []

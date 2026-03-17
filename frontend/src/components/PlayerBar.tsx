@@ -3,7 +3,7 @@
 import { useGameStore } from "@/hooks/useGameStore";
 
 export function PlayerBar() {
-  const { players, phase, myVotes, roundNumber } = useGameStore();
+  const { players, phase, myVotes, roundNumber, activeAbilityHolder, activeAbilityType } = useGameStore();
 
   if (phase === "lobby" || phase === "game_over" || phase === "elimination") return null;
 
@@ -38,6 +38,11 @@ export function PlayerBar() {
               className="inline-block w-1.5 h-1.5 rounded-full bg-warm"
               style={{ boxShadow: '0 0 6px var(--warm)' }}
             />
+          )}
+          {activeAbilityHolder === p.id && activeAbilityType === "double_vote" && (
+            <span className="font-system text-[0.5rem] text-cold tracking-wider" title="Double Vote">
+              2x
+            </span>
           )}
         </div>
       ))}

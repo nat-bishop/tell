@@ -230,6 +230,25 @@ NARRATOR_SYSTEM_PROMPT = (
     "Write ONLY the narration line. No labels, no quotes, no meta-commentary."
 )
 
+
+def build_discussion_prompt(deps: AIPlayerDeps, chat_so_far: list[dict] | None = None) -> str:
+    """User message for DISCUSS sub-phase of REVIEW. One short chat message."""
+    answers_text = "\n".join(f"  {alias}: {answer}" for alias, answer in deps.all_answers.items())
+    chat_text = ""
+    if chat_so_far:
+        chat_text = "\n\nDiscussion so far:\n" + "\n".join(
+            f"  {m['alias']}: {m['message']}" for m in chat_so_far
+        )
+
+    return (
+        f"Discussion phase. Answers this round:\n{answers_text}{chat_text}\n\n"
+        "Write ONE short message (1 sentence, max 100 chars) to the group. "
+        "You can accuse, defend, react, or point out evidence. "
+        "Stay in character. Be specific.\n\n"
+        "Respond with ONLY the message text."
+    )
+
+
 ASSOCIATION_SYSTEM_PROMPT_TEMPLATE = (
     "You are playing Word Chain in Tell, a social deduction game where players take turns "
     "associating words — unusual patterns may reveal who's human.\n\n"

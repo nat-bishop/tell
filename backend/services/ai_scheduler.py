@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Any, Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 import structlog
 from pydantic_ai.messages import ModelMessage
@@ -20,6 +21,7 @@ from backend.llm.agents import (
     decide_vote,
     generate_answer,
     generate_association,
+    generate_discussion_message,
     generate_nomination,
     generate_question,
     generate_question_response,
@@ -27,6 +29,7 @@ from backend.llm.agents import (
 from backend.llm.personalities import PERSONALITIES, Personality
 from backend.llm.prompts import (
     build_answer_prompt,
+    build_discussion_prompt,
     build_nomination_prompt,
     build_question_prompt,
     build_response_prompt,
@@ -75,6 +78,9 @@ _conversation_history: dict[str, dict[str, list[ModelMessage]]] = {}
 
 # Store narrator message history per game: game_id -> messages
 _narrator_history: dict[str, list[ModelMessage]] = {}
+
+# Track discussion messages per game for AI context: game_id -> [{alias, message}]
+_discussion_messages: dict[str, list[dict]] = {}
 
 
 def assign_personalities(game_id: str, ai_player_ids: list[str]) -> None:
@@ -208,9 +214,16 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
 # ---------------------------------------------------------------------------
 
 
+def record_discussion_message(game_id: str, alias: str, message: str) -> None:
+    """Record a discussion message for AI context (called from route handler too)."""
+    _discussion_messages.setdefault(game_id, []).append({"alias": alias, "message": message})
+
+
 async def on_phase_change(game_id: str, phase: GamePhase) -> None:
     """Called when a phase changes. Schedules AI actions for the new phase."""
     cancel_all(game_id)
+    # Clear discussion messages on any phase change
+    _discussion_messages.pop(game_id, None)
 
     repo = get_game_repository()
     session = repo.get(game_id)
@@ -248,8 +261,15 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
             tasks.append(asyncio.create_task(_ai_respond_task(game_id, player.id, delay)))
 
     elif phase == GamePhase.REVIEW:
+        # Discussion: AI sends 1-2 messages during DISCUSS window (8-26s into REVIEW)
         for player in ai_players:
-            delay = random.uniform(5, 15)
+            n_msgs = random.randint(1, 2)
+            for i in range(n_msgs):
+                delay = random.uniform(10, 22) + i * random.uniform(2, 5)
+                tasks.append(asyncio.create_task(_ai_discussion_task(game_id, player.id, delay)))
+        # Votes during VOTE window (26-40s into REVIEW)
+        for player in ai_players:
+            delay = random.uniform(28, 37)
             tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
 
     _ai_tasks[game_id] = tasks
@@ -576,6 +596,75 @@ async def _ai_respond_task(game_id: str, player_id: str, delay: float) -> None:
     )
 
 
+async def _ai_discussion_task(game_id: str, player_id: str, delay: float) -> None:
+    """AI player sends a discussion message after a delay."""
+
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session or session.state.phase != GamePhase.REVIEW:
+            return None
+        rs = session.state.current_round
+        if not rs:
+            return None
+        # Check rate limit
+        count = rs.discussion_counts.get(player_id, 0)
+        if count >= 3:
+            return None
+
+        # Build chat context from discussion_messages tracked in-memory
+        chat_so_far = _discussion_messages.get(game_id, [])
+
+        history = _get_history(game_id, player_id)
+        deps = _build_deps(game_id, player_id)
+        if not deps:
+            return None
+        deps.action_prompt = build_discussion_prompt(deps, chat_so_far or None)
+        return await generate_discussion_message(deps, history)
+
+    async def apply(cm, session, result) -> None:
+        message_text, updated_history = result
+        if not message_text:
+            return
+        state = session.state
+        rs = state.current_round
+        if not rs:
+            return
+        count = rs.discussion_counts.get(player_id, 0)
+        if count >= 3:
+            return
+
+        rs.discussion_counts[player_id] = count + 1
+        _set_history(game_id, player_id, updated_history)
+
+        player = get_player_by_id(state, player_id)
+        player_alias = player.alias if player else MISSING_ALIAS
+
+        from schemas.api_models import DiscussionMessageEvent
+
+        msg = message_text[:120]
+        await cm.broadcast(
+            game_id,
+            DiscussionMessageEvent(
+                seq=session.next_seq(),
+                sender_id=player_id,
+                sender_alias=player_alias,
+                message=msg,
+            ),
+        )
+        record_discussion_message(game_id, player_alias, msg)
+        log.info(
+            "ai_discussion_message",
+            game_id=game_id,
+            player_id=player_id,
+            personality=get_personality(game_id, player_id).name,
+        )
+
+    await _run_ai_task(
+        game_id, player_id, delay, GamePhase.REVIEW, generate, apply, "ai_discussion_task"
+    )
+
+
 async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player votes after a delay."""
 
@@ -828,3 +917,4 @@ def cleanup_game(game_id: str) -> None:
     _personality_map.pop(game_id, None)
     _conversation_history.pop(game_id, None)
     _narrator_history.pop(game_id, None)
+    _discussion_messages.pop(game_id, None)

@@ -19,6 +19,9 @@ import type {
   ComedyWinnerData,
   BrainTestChallengeData,
   BrainTestResultsData,
+  DiscussionMessageData,
+  AbilityAwardedData,
+  ScanResultData,
 } from "@/hooks/useGameStore";
 
 export interface GameEventCallbacks {
@@ -46,6 +49,9 @@ export interface GameEventCallbacks {
   onComedyWinner: (data: ComedyWinnerData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
   onBrainTestResults: (data: BrainTestResultsData) => void;
+  onDiscussionMessage: (data: DiscussionMessageData) => void;
+  onAbilityAwarded: (data: AbilityAwardedData) => void;
+  onScanResult: (data: ScanResultData) => void;
   onOpen: () => void;
   onError: () => void;
 }
@@ -85,6 +91,9 @@ export function connectGameEvents(
     comedy_winner: callbacks.onComedyWinner,
     brain_test_challenge: callbacks.onBrainTestChallenge,
     brain_test_results: callbacks.onBrainTestResults,
+    discussion_message: callbacks.onDiscussionMessage,
+    ability_awarded: callbacks.onAbilityAwarded,
+    scan_result: callbacks.onScanResult,
   };
 
   for (const [eventType, handler] of Object.entries(eventMap)) {

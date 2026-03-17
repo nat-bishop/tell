@@ -86,7 +86,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                         "event": event.event_type,
                         "data": event.model_dump_json(),
                     }
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield {"comment": "ping"}
         finally:
             log.info("sse_disconnected")

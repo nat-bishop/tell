@@ -138,6 +138,7 @@ function GameContent() {
     phase, phaseDeadline, phaseDuration, playerId, players,
     roundNumber, roundType, nominatedId, actionStartsAt,
     totalRounds, humansEliminated, aisEliminated, lastEliminationWasHuman,
+    activeAbilityHolderAlias, activeAbilityType,
   } = useGameStore();
   const remaining = useTimer(phaseDeadline);
 
@@ -233,6 +234,8 @@ function GameContent() {
             humansEliminated={humansEliminated}
             aisEliminated={aisEliminated}
             lastEliminationWasHuman={lastEliminationWasHuman}
+            abilityHolderAlias={activeAbilityHolderAlias}
+            abilityType={activeAbilityType}
           />
         ) : (
           <>

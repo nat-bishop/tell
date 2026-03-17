@@ -178,7 +178,7 @@ Speed. Instinct over deliberation. You can't overthink a word association in 8 s
 
 ### Brain Test — The Evidence Round
 
-No writing, no voting, no elimination. A rapid sequence of challenges — estimation, common knowledge, trick questions, pattern completion. Everyone competes. Results are shown immediately. Then the round ends and everyone moves on.
+No writing, no voting, no elimination. A rapid sequence of challenges — estimation, common knowledge, trick questions, pattern completion. Everyone competes. The winner earns an ability that affects the next REVIEW.
 
 ```
 BRAIN_TEST (5 challenges × 12s each, 75s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
@@ -190,8 +190,16 @@ BRAIN_TEST (5 challenges × 12s each, 75s safety timer) → BRAIN_TEST_RESULTS (
 
 1. Five challenges appear one at a time, 12 seconds each. A new `BrainTestChallengeEvent` fires for each.
 2. All players type a free-form answer. AI answers via personality-aware LLM calls.
-3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's answers side-by-side, including the correct answer where applicable.
-4. No vote. No elimination. Results are stored in `brain_test_evidence` on `TellGameState` and carried forward as context into the next voting round.
+3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's answers side-by-side with scores and the correct answer where applicable.
+4. The highest scorer wins a random ability (PARTIAL SCAN or DOUBLE VOTE) announced in the interstitial before the next round.
+5. No vote. No elimination. `do_after_brain_test()` starts the next round directly.
+
+#### Scoring
+
+| Challenge type | Scoring rule |
+|---|---|
+| **trick** / **pattern** | Fuzzy match against `correct_answer` → 1 point |
+| **estimation** / **common_knowledge** | Unique answer (only one player gave it) → 1 point |
 
 #### The 4 Challenge Types
 
@@ -206,9 +214,9 @@ BRAIN_TEST (5 challenges × 12s each, 75s safety timer) → BRAIN_TEST_RESULTS (
 
 #### The Design Tension
 
-Brain Test is a pressure valve. After an intense Interrogation or a chaotic Word Chain, a round with no voting feels like a reprieve. But it isn't — the answers become permanent record. "Why did UNIT-7 think water boils at 90°C?" is ammunition for the next REVIEW. The stakes are low in the moment and highest in retrospect.
+Brain Test is a pressure valve. After an intense Interrogation or a chaotic Word Chain, a round with no voting feels like a reprieve. But it isn't — the answers become permanent record, and the winner's ability changes the next round's dynamics. "Why did UNIT-7 think water boils at 90°C?" is ammunition for REVIEW. The stakes are low in the moment and highest in retrospect.
 
-The "no elimination" structure also resets paranoia. Players who were about to be targeted get a free round. Players who were safe get anxious watching the evidence pile up. The game breathes before it bites.
+The "no elimination" structure also resets paranoia. Players who were about to be targeted get a free round. The game breathes before it bites.
 
 **Skill tested**: Speed, general knowledge, reading questions carefully under time pressure.
 
@@ -302,11 +310,27 @@ Players join via URL, receive robot aliases (UNIT-7, BOT-42 — assigned, not ch
 
 ### Voting
 
-Players get `min(3, alive_count - 1)` votes during the REVIEW phase. Votes are changeable until the timer expires. No early completion — the full review window is always available.
+REVIEW runs 40 seconds split into three server-driven sub-phases:
 
-Multi-vote means a coordinated group can focus suspicion. A lone vote rarely eliminates. This rewards discussion — or the appearance of it.
+1. **REVEAL** (0-8s): All answers visible. Absorb the evidence.
+2. **DISCUSS** (8-26s): Live chat — players send short messages (120 chars, 3 max). Screenplay aesthetic: alias + message, no chat bubbles. AI players participate. If PARTIAL SCAN is active, scan results appear here.
+3. **VOTE** (26-40s): Multi-vote UI + Comedy Cup row.
 
-**Comedy Cup**: A secondary vote row in REVIEW lets players mark the funniest answer. One vote, changeable, can vote for yourself. The winner is announced during Elimination alongside the verdict — a dual reward track that acknowledges humor as a legitimate survival skill (or liability).
+Players get `min(3, alive_count - 1)` votes. Votes are changeable until the timer expires. No early completion — the full window is always available.
+
+Multi-vote means a coordinated group can focus suspicion. The discussion window gives that coordination a place to happen — or to be performed.
+
+**Comedy Cup**: A secondary vote row in REVIEW lets players mark the funniest answer. One vote, changeable, can vote for yourself. The winner is announced during Elimination alongside the verdict.
+
+### Abilities
+
+The Brain Test winner earns one of two abilities that activates in the next REVIEW:
+
+**PARTIAL SCAN**: At REVIEW start, the holder gets scan results on 2 players — one true role, one randomized (50/50 correct). Results are shuffled and broadcast to all players during DISCUSS. Nobody knows which result is verified — the uncertainty is the mechanic.
+
+**DOUBLE VOTE**: The holder's votes count 2× during resolution. Announced in the phase interstitial; badge shown in PlayerBar. Simple, transparent, high-stakes.
+
+Abilities clear after each round. Only one ability is active at a time.
 
 ### Elimination & Verdict
 

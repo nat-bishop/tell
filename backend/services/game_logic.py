@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import re
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ from schemas.api_models import (
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
+    BrainTestChallenge,
     ChainRound,
     GamePhase,
     Player,
@@ -384,14 +386,24 @@ def resolve_votes(
     state: TellGameState,
     seq_fn,
 ) -> tuple[TellGameState, VoteResultsEvent, EliminationEvent]:
-    """Tally votes (multi-vote) and eliminate the most-voted player."""
+    """Tally votes (multi-vote) and eliminate the most-voted player.
+
+    If active_ability is double_vote, the holder's votes count 2x.
+    """
     round_state = state.current_round
     votes = round_state.votes if round_state else {}
 
-    # Flatten all vote lists into a single counter
+    # Check for double vote ability
+    double_vote_holder = None
+    if state.active_ability and state.active_ability.ability_type == "double_vote":
+        double_vote_holder = state.active_ability.holder_id
+
+    # Flatten all vote lists into a single counter (double-count for ability holder)
     all_targets: list[str] = []
-    for target_list in votes.values():
-        all_targets.extend(target_list)
+    for voter_id, target_list in votes.items():
+        repeat = 2 if voter_id == double_vote_holder else 1
+        for _ in range(repeat):
+            all_targets.extend(target_list)
 
     tallies: dict[str, int] = dict(Counter(all_targets))
 
@@ -474,6 +486,122 @@ def resolve_comedy_votes(
     player = get_player_by_id(state, winner_id)
     winner_alias = player.alias if player else None
     return winner_id, winner_alias, max_count
+
+
+# ---------------------------------------------------------------------------
+# Brain Test scoring
+# ---------------------------------------------------------------------------
+
+_WORD_TO_NUM: dict[str, int] = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _normalize_answer(answer: str) -> str:
+    """Normalize an answer for fuzzy matching: lowercase, strip whitespace/articles/currency."""
+    s = answer.strip().lower()
+    # Strip leading articles
+    s = re.sub(r"^(the|a|an)\s+", "", s)
+    # Strip currency symbols
+    s = re.sub(r"^[$€£¥]", "", s)
+    return s.strip()
+
+
+def _parse_numeric(s: str) -> float | None:
+    """Try to parse a string as a number."""
+    s = re.sub(r"[,$€£¥%]", "", s.strip())
+    # Handle "X cents" patterns
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*cents?$", s, re.IGNORECASE)
+    if m:
+        return float(m.group(1)) / 100
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _fuzzy_match(response: str, correct: str) -> bool:
+    """Check if a response matches the correct answer (fuzzy)."""
+    norm_r = _normalize_answer(response)
+    norm_c = _normalize_answer(correct)
+    if norm_r == norm_c:
+        return True
+    # Numeric comparison
+    num_r = _parse_numeric(response)
+    num_c = _parse_numeric(correct)
+    if num_r is not None and num_c is not None:
+        return abs(num_r - num_c) < 0.001
+    # Handle "five cents" -> 0.05 style
+    words = norm_r.split()
+    if len(words) >= 1 and words[0] in _WORD_TO_NUM:
+        val = _WORD_TO_NUM[words[0]]
+        if len(words) >= 2 and "cent" in words[1]:
+            val = val / 100
+        if num_c is not None and abs(val - num_c) < 0.001:
+            return True
+    return False
+
+
+def _score_with_answer(challenge: BrainTestChallenge) -> dict[str, int]:
+    """1 point for matching correct_answer (fuzzy)."""
+    scores: dict[str, int] = {}
+    if not challenge.correct_answer:
+        return scores
+    for pid, response in challenge.responses.items():
+        scores[pid] = 1 if _fuzzy_match(response, challenge.correct_answer) else 0
+    return scores
+
+
+def _score_by_uniqueness(challenge: BrainTestChallenge) -> dict[str, int]:
+    """1 point if your answer is unique among all responses."""
+    scores: dict[str, int] = {}
+    if not challenge.responses:
+        return scores
+    # Count normalized occurrences
+    normalized = {pid: _normalize_answer(ans) for pid, ans in challenge.responses.items()}
+    counts: dict[str, int] = {}
+    for norm in normalized.values():
+        counts[norm] = counts.get(norm, 0) + 1
+    for pid, norm in normalized.items():
+        scores[pid] = 1 if counts[norm] == 1 else 0
+    return scores
+
+
+def score_brain_test(challenges: list[BrainTestChallenge]) -> dict[str, int]:
+    """Score all challenges. Returns player_id -> total points."""
+    totals: dict[str, int] = {}
+    for ch in challenges:
+        ch_scores = _score_with_answer(ch) if ch.correct_answer else _score_by_uniqueness(ch)
+        for pid, pts in ch_scores.items():
+            totals[pid] = totals.get(pid, 0) + pts
+    return totals
+
+
+def determine_challenge_winner(
+    scores: dict[str, int],
+) -> tuple[str, str] | None:
+    """Highest score wins. Random tiebreak. Returns (player_id, alias_placeholder) or None.
+
+    Note: caller must resolve alias from the game state.
+    """
+    if not scores:
+        return None
+    max_score = max(scores.values())
+    if max_score == 0:
+        return None
+    top = [pid for pid, s in scores.items() if s == max_score]
+    winner = random.choice(top) if len(top) > 1 else top[0]
+    return winner, ""  # alias resolved by caller
 
 
 def check_game_over(state: TellGameState) -> str | None:

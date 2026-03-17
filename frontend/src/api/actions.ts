@@ -134,6 +134,17 @@ export function submitChainWord(
   });
 }
 
+export function sendDiscussionMessage(
+  gameId: string,
+  playerId: string,
+  message: string,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/discussion-message`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId, message }),
+  });
+}
+
 // --- Matchmaking ---
 
 export interface MatchmakingJoinResponse {

@@ -28,7 +28,22 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = [
+    "E", "F", "I", "W",
+    "UP",
+    "B",
+    "SIM",
+    "RUF",
+    "PIE",
+    "C4",
+    "T20",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/llm/prompts.py" = ["E501"]
+"backend/services/connection_manager.py" = ["SIM102"]
+"scripts/*.py" = ["T201"]
+".claude/**/scripts/*.py" = ["T201", "SIM102"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

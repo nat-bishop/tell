@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from schemas.game_state import TellGameState
 
@@ -19,6 +19,8 @@ class GameEvent(BaseModel):
     Pyright flags these as reportIncompatibleVariableOverride — this is a known
     Pydantic v2 pattern that works correctly at runtime and for OpenAPI codegen.
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     event_type: str
     seq: int
@@ -90,6 +92,11 @@ class PhaseChangedEvent(GameEvent):
     synthesis: str | None = None
     writing_begins_at: str | None = None
     action_starts_at: str | None = None
+    # Word Chain
+    chain_rounds: list[dict] = Field(default_factory=list)
+    # Discussion sub-phase timestamps (REVIEW only)
+    discuss_starts_at: str | None = None
+    vote_starts_at: str | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):
@@ -218,12 +225,44 @@ class BrainTestResultsEvent(GameEvent):
     event_type: Literal["brain_test_results"] = "brain_test_results"
     # player_id -> list of {question, answer, correct_answer, challenge_type}
     results: dict[str, list[dict]]
+    scores: dict[str, int] | None = None
+    winner_id: str | None = None
+    winner_alias: str | None = None
+    ability_awarded: str | None = None
+
+
+class DiscussionMessageEvent(GameEvent):
+    event_type: Literal["discussion_message"] = "discussion_message"
+    sender_id: str
+    sender_alias: str
+    message: str
+
+
+class AbilityAwardedEvent(GameEvent):
+    event_type: Literal["ability_awarded"] = "ability_awarded"
+    holder_id: str
+    holder_alias: str
+    ability_type: str
+
+
+class ScanResultEvent(GameEvent):
+    event_type: Literal["scan_result"] = "scan_result"
+    results: list[dict]  # [{player_id, alias, claimed_role}]
 
 
 class SubmitBrainTestAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     answer: str
     challenge_index: int
+
+
+class SendDiscussionMessageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
+    message: str  # max 120 chars
 
 
 # --- Response models ---
@@ -248,6 +287,8 @@ class CreateGameResponse(BaseModel):
 
 
 class JoinGameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_name: str
 
 
@@ -258,36 +299,50 @@ class JoinGameResponse(BaseModel):
 
 
 class StartGameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     ai_count: int = 2
 
 
 class SubmitAnswerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     answer: str = ""
 
 
 class NominateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     target_id: str
 
 
 class SubmitQuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     question: str
 
 
 class SubmitResponseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     response: str
 
 
 class CastVoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     target_ids: list[str]
 
 
 class CastComedyVoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     target_id: str
 
@@ -300,6 +355,8 @@ class ComedyWinnerEvent(GameEvent):
 
 
 class SubmitChainWordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
     word: str
     round_index: int
@@ -316,6 +373,8 @@ class GameInfoResponse(BaseModel):
 
 
 class MatchmakingJoinRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_name: str
 
 
@@ -326,6 +385,8 @@ class MatchmakingJoinResponse(BaseModel):
 
 
 class MatchmakingLeaveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     player_id: str
 
 
@@ -345,6 +406,8 @@ class GameAssignedEvent(GameEvent):
 
 
 class SeedGameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     state: TellGameState
     start_timers: bool = True
     trigger_ai: bool = True

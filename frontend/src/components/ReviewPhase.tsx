@@ -6,7 +6,7 @@ import {
   type PlayerInfo,
   type ChainRoundData,
 } from "@/hooks/useGameStore";
-import { castVote, castComedyVote } from "@/api/actions";
+import { castVote, castComedyVote, sendDiscussionMessage } from "@/api/actions";
 import { AnswerCard } from "./AnswerCard";
 import { SystemText } from "./SystemText";
 
@@ -17,6 +17,41 @@ function shuffleArray<T>(arr: T[]): T[] {
     [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
   }
   return shuffled;
+}
+
+type SubPhase = "reveal" | "discuss" | "vote";
+
+function useSubPhase(): SubPhase {
+  const discussStartsAt = useGameStore((s) => s.discussStartsAt);
+  const voteStartsAt = useGameStore((s) => s.voteStartsAt);
+  const [subPhase, setSubPhase] = useState<SubPhase>("reveal");
+
+  useEffect(() => {
+    if (!discussStartsAt || !voteStartsAt) {
+      setSubPhase("reveal");
+      return;
+    }
+
+    const check = () => {
+      const now = Date.now();
+      const discussTime = new Date(discussStartsAt).getTime();
+      const voteTime = new Date(voteStartsAt).getTime();
+
+      if (now >= voteTime) {
+        setSubPhase("vote");
+      } else if (now >= discussTime) {
+        setSubPhase("discuss");
+      } else {
+        setSubPhase("reveal");
+      }
+    };
+
+    check();
+    const interval = setInterval(check, 500);
+    return () => clearInterval(interval);
+  }, [discussStartsAt, voteStartsAt]);
+
+  return subPhase;
 }
 
 function PlayerCard({
@@ -126,6 +161,127 @@ function WordChainCard({
   );
 }
 
+function DiscussionChat({ spectator = false, frozen = false }: { spectator?: boolean; frozen?: boolean }) {
+  const gameId = useGameStore((s) => s.gameId);
+  const playerId = useGameStore((s) => s.playerId);
+  const messages = useGameStore((s) => s.discussionMessages);
+  const myCount = useGameStore((s) => s.myDiscussionCount);
+  const [input, setInput] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages.length]);
+
+  const handleSend = useCallback(async () => {
+    if (!gameId || !playerId || !input.trim() || myCount >= 3) return;
+    const msg = input.trim().slice(0, 120);
+    setInput("");
+    try {
+      await sendDiscussionMessage(gameId, playerId, msg);
+    } catch {
+      // Silently handle
+    }
+  }, [gameId, playerId, input, myCount]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const canSend = !spectator && !frozen && myCount < 3;
+
+  return (
+    <div className="animate-fade-in flex flex-col gap-2">
+      <p className="font-system text-[0.65rem] text-cold tracking-[0.2em] uppercase text-center">
+        discuss
+      </p>
+
+      <div
+        ref={scrollRef}
+        className="flex flex-col gap-1.5 max-h-[180px] overflow-y-auto px-1"
+      >
+        {messages.length === 0 && (
+          <p className="font-system text-[0.65rem] text-dim text-center py-2">
+            ...
+          </p>
+        )}
+        {messages.map((m, i) => (
+          <div key={i} className="flex gap-2 items-baseline">
+            <span className="font-system text-[0.6rem] text-dim uppercase tracking-wider shrink-0">
+              {m.sender_alias}
+            </span>
+            <span className="font-literary text-[0.85rem] text-ink">
+              {m.message}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {canSend ? (
+        <div className="flex gap-2 items-center">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className="flex-1 border-b bg-transparent py-1.5 min-h-[36px] font-literary text-[0.85rem] text-ink outline-none border-rule"
+            placeholder={myCount >= 3 ? "" : "say something..."}
+            maxLength={120}
+            disabled={myCount >= 3}
+            autoFocus
+          />
+          <span className="font-system text-[0.55rem] text-dim">
+            {3 - myCount}
+          </span>
+        </div>
+      ) : spectator ? (
+        <SystemText>discussion in progress</SystemText>
+      ) : (
+        <p className="font-system text-[0.55rem] text-dim text-center">
+          message limit reached
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ScanResults() {
+  const scanResults = useGameStore((s) => s.scanResults);
+  const activeAbilityHolderAlias = useGameStore((s) => s.activeAbilityHolderAlias);
+  const activeAbilityType = useGameStore((s) => s.activeAbilityType);
+
+  if (!scanResults || activeAbilityType !== "partial_scan") return null;
+
+  return (
+    <div className="animate-fade-in card p-3 border-cold/30">
+      <p className="font-system text-[0.6rem] text-cold tracking-[0.15em] uppercase mb-2">
+        partial scan &mdash; {activeAbilityHolderAlias}
+      </p>
+      <div className="flex flex-col gap-1">
+        {scanResults.map((r, i) => (
+          <div key={i} className="flex gap-2 items-baseline">
+            <span className="font-system text-[0.6rem] text-dim uppercase tracking-wider">
+              {r.alias}
+            </span>
+            <span className={`font-literary text-[0.8rem] ${
+              r.claimed_role === "human" ? "text-warm" : "text-cold"
+            }`}>
+              {r.claimed_role}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="font-system text-[0.5rem] text-dim mt-1.5 italic">
+        one is verified. one is noise.
+      </p>
+    </div>
+  );
+}
+
 export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   const {
     gameId,
@@ -137,6 +293,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     promptText,
     chainRounds,
   } = useGameStore();
+  const subPhase = useSubPhase();
   const alivePlayers = players.filter((p) => p.is_alive);
   const aliveCount = alivePlayers.length;
   const maxVotes = Math.min(3, Math.max(1, aliveCount - 1));
@@ -179,6 +336,8 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   const [selected, setSelected] = useState<string[]>([]);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const isVotePhase = subPhase === "vote";
+
   const sendVotes = useCallback(
     (targets: string[]) => {
       if (!gameId || !playerId) return;
@@ -197,7 +356,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   }, []);
 
   const toggleVote = (pid: string) => {
-    if (!allRevealed) return;
+    if (!isVotePhase) return;
     const prev = selected;
     let next: string[];
     if (prev.includes(pid)) {
@@ -216,8 +375,8 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   const [comedyVote, setComedyVote] = useState<string | null>(null);
 
   const toggleComedyVote = (pid: string) => {
-    if (!allRevealed || !gameId || !playerId) return;
-    if (comedyVote === pid) return; // Already selected — no server "unvote"
+    if (!isVotePhase || !gameId || !playerId) return;
+    if (comedyVote === pid) return;
     setComedyVote(pid);
     castComedyVote(gameId, playerId, pid).catch(() => {});
     useGameStore.setState({ myComedyVote: pid });
@@ -260,24 +419,32 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
               player={p}
               chainRounds={chainRounds}
               voted={selected.includes(p.id)}
-              canVote={!spectator && p.id !== playerId}
+              canVote={isVotePhase && !spectator && p.id !== playerId}
               onToggle={() => toggleVote(p.id)}
-              disabled={!allRevealed}
+              disabled={!isVotePhase}
             />
           ) : (
             <PlayerCard
               key={p.id}
               player={p}
               voted={selected.includes(p.id)}
-              canVote={!spectator && p.id !== playerId}
+              canVote={isVotePhase && !spectator && p.id !== playerId}
               onToggle={() => toggleVote(p.id)}
-              disabled={!allRevealed}
+              disabled={!isVotePhase}
             />
           );
         })}
       </div>
 
-      {allRevealed && (
+      {/* DISCUSS / VOTE sub-phases — chat + scan shown for both, frozen during vote */}
+      {allRevealed && (subPhase === "discuss" || subPhase === "vote") && (
+        <div className={subPhase === "vote" ? "opacity-40 pointer-events-none" : "flex flex-col gap-4"}>
+          {subPhase === "discuss" && <ScanResults />}
+          <DiscussionChat spectator={spectator} frozen={subPhase === "vote"} />
+        </div>
+      )}
+
+      {allRevealed && subPhase === "vote" && (
         <>
           {!spectator ? (
             <div className="animate-fade-in flex flex-col gap-3">
