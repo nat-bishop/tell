@@ -1,6 +1,7 @@
 "use client";
 
 import { useGameStore, type RevealedPlayer } from "@/hooks/useGameStore";
+import { NarrationInline } from "@/components/Narration";
 import { createGame } from "@/api/actions";
 import { useRouter } from "next/navigation";
 
@@ -67,10 +68,17 @@ export function GameOver() {
         ))}
       </div>
 
+      <div
+        className="animate-fade-in"
+        style={{ animationDelay: `${(totalPlayers * 400) + 1500}ms` }}
+      >
+        <NarrationInline />
+      </div>
+
       <button
         onClick={handlePlayAgain}
         className="btn-action animate-fade-in"
-        style={{ animationDelay: `${(totalPlayers * 400) + 2000}ms` }}
+        style={{ animationDelay: `${(totalPlayers * 400) + 2500}ms` }}
       >
         play again &rarr;
       </button>

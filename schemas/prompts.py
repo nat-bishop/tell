@@ -176,6 +176,146 @@ def select_prompt(
     return idx, prompt
 
 
+# ---------------------------------------------------------------------------
+# Brain Test challenges — competitive minigame questions
+# ---------------------------------------------------------------------------
+
+
+class BrainTestChallengeType(str, enum.Enum):
+    ESTIMATION = "estimation"
+    COMMON_KNOWLEDGE = "common_knowledge"
+    TRICK = "trick"
+    PATTERN = "pattern"
+
+
+class BrainTestChallengeSpec(BaseModel):
+    challenge_type: BrainTestChallengeType
+    question: str
+    correct_answer: str | None = None
+
+
+BRAIN_TEST_CHALLENGES: list[BrainTestChallengeSpec] = [
+    # Estimation
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.ESTIMATION,
+        question="How many piano tuners are in London?",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.ESTIMATION,
+        question="How many golf balls fit in a school bus?",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.ESTIMATION,
+        question="How many words are in the average novel?",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.ESTIMATION,
+        question="How many flights take off worldwide each day?",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.ESTIMATION,
+        question="How many slices of pizza are eaten in the US per second?",
+    ),
+    # Common knowledge
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name a yellow fruit.",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name something you'd find in a junk drawer.",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name a famous person everyone would recognize.",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name something people are irrationally afraid of.",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name an animal that starts with the letter P.",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name a song everyone knows the words to.",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
+        question="Name something people argue about at dinner.",
+    ),
+    # Trick questions
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.TRICK,
+        question=(
+            "A bat and ball cost $1.10 together. "
+            "The bat costs $1 more than the ball. "
+            "How much is the ball?"
+        ),
+        correct_answer="$0.05",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.TRICK,
+        question=("If you have 3 apples and take away 2, how many do you have?"),
+        correct_answer="2 (you took them)",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.TRICK,
+        question=("What weighs more, a pound of feathers or a pound of steel?"),
+        correct_answer="They weigh the same",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.TRICK,
+        question=("A farmer has 17 sheep. All but 9 run away. How many are left?"),
+        correct_answer="9",
+    ),
+    # Pattern
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.PATTERN,
+        question="What comes next: 2, 6, 12, 20, ?",
+        correct_answer="30",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.PATTERN,
+        question="What comes next: O, T, T, F, F, S, S, ?",
+        correct_answer="E (Eight)",
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.PATTERN,
+        question="What comes next: 1, 1, 2, 3, 5, 8, ?",
+        correct_answer="13",
+    ),
+]
+
+
+def select_brain_test_challenges(
+    count: int = 5,
+) -> list[BrainTestChallengeSpec]:
+    """Select a mix of challenges for a brain test round."""
+    by_type: dict[str, list[BrainTestChallengeSpec]] = {}
+    for c in BRAIN_TEST_CHALLENGES:
+        by_type.setdefault(c.challenge_type, []).append(c)
+
+    selected: list[BrainTestChallengeSpec] = []
+    types = list(by_type.keys())
+    random.shuffle(types)
+
+    for t in types:
+        if len(selected) >= count:
+            break
+        selected.append(random.choice(by_type[t]))
+
+    remaining = [c for c in BRAIN_TEST_CHALLENGES if c not in selected]
+    while len(selected) < count and remaining:
+        pick = random.choice(remaining)
+        remaining.remove(pick)
+        selected.append(pick)
+
+    random.shuffle(selected)
+    return selected[:count]
+
+
 # --- Task prompts — constrained creative prompts for the Task round type ---
 
 TASK_PROMPTS: list[TaskPrompt] = [

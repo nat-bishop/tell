@@ -70,6 +70,27 @@ class Settings:
         self.chain_sub_rounds: int = int(
             os.environ.get("TELL_CHAIN_SUB_ROUNDS", game.get("chain_sub_rounds", 8))
         )
+        self.brain_test_duration: int = int(
+            os.environ.get("TELL_BRAIN_TEST_DURATION", game.get("brain_test_duration", 75))
+        )
+        self.brain_test_challenge_duration: int = int(
+            os.environ.get(
+                "TELL_BRAIN_TEST_CHALLENGE_DURATION",
+                game.get("brain_test_challenge_duration", 12),
+            )
+        )
+        self.brain_test_challenges: int = int(
+            os.environ.get(
+                "TELL_BRAIN_TEST_CHALLENGES",
+                game.get("brain_test_challenges", 5),
+            )
+        )
+        self.brain_test_results_duration: int = int(
+            os.environ.get(
+                "TELL_BRAIN_TEST_RESULTS_DURATION",
+                game.get("brain_test_results_duration", 15),
+            )
+        )
 
         # Player limits
         self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))

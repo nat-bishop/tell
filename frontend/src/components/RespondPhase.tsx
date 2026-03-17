@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitResponse } from "@/api/actions";
 import { SystemText } from "./SystemText";
+import { GameTextarea } from "./GameTextarea";
+import { LabeledCard } from "./LabeledCard";
 
 export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
   const {
@@ -45,13 +47,12 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
       <div className="flex flex-col items-center gap-6 pt-8">
         <SystemText>respond phase</SystemText>
         {roundType === "interrogation" && synthesis && (
-          <div className="w-full max-w-md card p-5">
-            <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
-              synthesis
-            </div>
-            <p className="font-literary text-[1.05rem] italic leading-[1.6] text-ink">
-              {synthesis}
-            </p>
+          <div className="w-full max-w-md">
+            <LabeledCard label="synthesis">
+              <p className="font-literary text-[1.05rem] italic leading-[1.6] text-ink">
+                {synthesis}
+              </p>
+            </LabeledCard>
           </div>
         )}
         <SystemText>
@@ -82,13 +83,12 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
     return (
       <div className="flex flex-col items-center gap-6 pt-8">
         {synthesis ? (
-          <div className="w-full max-w-md card p-5">
-            <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
-              synthesis
-            </div>
-            <p className="font-literary text-[1.05rem] italic leading-[1.6] text-ink">
-              {synthesis}
-            </p>
+          <div className="w-full max-w-md">
+            <LabeledCard label="synthesis">
+              <p className="font-literary text-[1.05rem] italic leading-[1.6] text-ink">
+                {synthesis}
+              </p>
+            </LabeledCard>
           </div>
         ) : (
           <div className="synthesizing-dots font-system text-[0.75rem] text-cold tracking-wide">
@@ -108,35 +108,19 @@ export function RespondPhase({ spectator = false }: { spectator?: boolean }) {
   return (
     <div className="flex flex-col gap-6 pt-4">
       {/* Show the question */}
-      <div className="card p-5">
-        <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
-          {roundType === "interrogation"
-            ? "the group asks"
-            : "anonymous question"}
-        </div>
+      <LabeledCard label={roundType === "interrogation" ? "the group asks" : "anonymous question"}>
         <p className="font-literary text-[1.1rem] italic leading-[1.6] text-ink">
           {questionText}
         </p>
-      </div>
+      </LabeledCard>
 
       {!hasSubmitted ? (
         <div className="w-full">
-          <textarea
+          <GameTextarea
             value={response}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-            onChange={(e) => {
-              setResponse(e.target.value);
-              e.target.style.height = "auto";
-              e.target.style.height = e.target.scrollHeight + "px";
-            }}
+            onChange={setResponse}
+            onSubmit={handleSubmit}
             maxLength={400}
-            rows={1}
-            className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
             placeholder="your response..."
           />
           <div className="mt-3 flex items-center justify-between">

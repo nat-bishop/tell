@@ -15,6 +15,10 @@ import type {
   VerdictData,
   ChainSeedData,
   ChainProgressData,
+  NarrationData,
+  ComedyWinnerData,
+  BrainTestChallengeData,
+  BrainTestResultsData,
 } from "@/hooks/useGameStore";
 
 export interface GameEventCallbacks {
@@ -38,6 +42,10 @@ export interface GameEventCallbacks {
   onVerdict: (data: VerdictData) => void;
   onChainSeed: (data: ChainSeedData) => void;
   onChainProgress: (data: ChainProgressData) => void;
+  onNarration: (data: NarrationData) => void;
+  onComedyWinner: (data: ComedyWinnerData) => void;
+  onBrainTestChallenge: (data: BrainTestChallengeData) => void;
+  onBrainTestResults: (data: BrainTestResultsData) => void;
   onOpen: () => void;
   onError: () => void;
 }
@@ -73,6 +81,10 @@ export function connectGameEvents(
     verdict: callbacks.onVerdict,
     chain_seed: callbacks.onChainSeed,
     chain_progress: callbacks.onChainProgress,
+    narration: callbacks.onNarration,
+    comedy_winner: callbacks.onComedyWinner,
+    brain_test_challenge: callbacks.onBrainTestChallenge,
+    brain_test_results: callbacks.onBrainTestResults,
   };
 
   for (const [eventType, handler] of Object.entries(eventMap)) {

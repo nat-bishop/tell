@@ -18,12 +18,15 @@ class GamePhase(str, enum.Enum):
     ELIMINATION = "elimination"
     GAME_OVER = "game_over"
     CHAIN = "chain"
+    BRAIN_TEST = "brain_test"
+    BRAIN_TEST_RESULTS = "brain_test_results"
 
 
 class RoundType(str, enum.Enum):
     INTERROGATION = "interrogation"
     TASK = "task"
     WORD_CHAIN = "word_chain"
+    BRAIN_TEST = "brain_test"
 
 
 class PlayerRole(str, enum.Enum):
@@ -56,6 +59,13 @@ class ChainRound(BaseModel):
     chosen_player_id: str | None = None
 
 
+class BrainTestChallenge(BaseModel):
+    challenge_type: str
+    question: str
+    correct_answer: str | None = None  # for scoring display
+    responses: dict[str, str] = Field(default_factory=dict)  # player_id -> answer
+
+
 class RoundState(BaseModel):
     round_number: int
     prompt_text: str
@@ -69,11 +79,20 @@ class RoundState(BaseModel):
     synthesis: str | None = None
     verdict: str | None = None
     votes: dict[str, list[str]] = Field(default_factory=dict)  # voter_id -> [target_ids]
+    comedy_votes: dict[str, str] = Field(default_factory=dict)  # voter_id -> target_id
     # Reading period — when set, answers are not accepted until this time
     writing_begins_at: datetime | None = None
     # Word Chain
     current_sub_round: int = 0
     chain_rounds: list[ChainRound] = Field(default_factory=list)
+    # Brain Test
+    brain_challenges: list[BrainTestChallenge] = Field(default_factory=list)
+
+
+class NarratorEntry(BaseModel):
+    trigger: str
+    text: str
+    round_number: int = 0
 
 
 class TellGameState(BaseModel):
@@ -90,3 +109,4 @@ class TellGameState(BaseModel):
     last_task_prompt_category: str | None = None
     winner: str | None = None
     phase_deadline: datetime | None = None
+    narrator_context: list[NarratorEntry] = Field(default_factory=list)

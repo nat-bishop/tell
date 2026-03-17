@@ -11,7 +11,9 @@ export type GamePhase =
   | "review"
   | "elimination"
   | "game_over"
-  | "chain";
+  | "chain"
+  | "brain_test"
+  | "brain_test_results";
 
 export interface PlayerInfo {
   id: string;
@@ -84,6 +86,7 @@ export interface StateSyncData {
   phase_deadline: string | null;
   phase_duration: number | null;
   writing_begins_at?: string | null;
+  action_starts_at?: string | null;
   chain_rounds: ChainRoundData[];
   current_sub_round: number;
 }
@@ -110,6 +113,7 @@ export interface PhaseChangedData {
   questions?: QuestionEntryClient[];
   synthesis?: string;
   writing_begins_at?: string;
+  action_starts_at?: string;
 }
 
 export interface CountData {
@@ -171,6 +175,38 @@ export interface ResponseSubmittedData {
   total: number;
 }
 
+export interface NarrationData {
+  seq: number;
+  text: string;
+  trigger: string;
+}
+
+export interface BrainTestChallengeData {
+  seq: number;
+  challenge_index: number;
+  challenge_type: string;
+  question: string;
+  sub_deadline: string | null;
+  phase_duration: number | null;
+}
+
+export interface BrainTestResultsData {
+  seq: number;
+  results: Record<string, Array<{
+    question: string;
+    answer: string;
+    correct_answer: string | null;
+    challenge_type: string;
+  }>>;
+}
+
+export interface ComedyWinnerData {
+  seq: number;
+  winner_id: string;
+  winner_alias: string;
+  vote_count: number;
+}
+
 export interface SeqData {
   seq: number;
 }
@@ -225,6 +261,9 @@ interface GameState {
   // Reading period
   writingBeginsAt: string | null;
 
+  // Interstitial
+  actionStartsAt: string | null;
+
   // Word Chain
   chainRounds: ChainRoundData[];
   currentSubRound: number;
@@ -246,8 +285,33 @@ interface GameState {
   voteResults: Record<string, string[]> | null;
   voteTallies: Record<string, number> | null;
 
+  // Cumulative context for narrative
+  totalRounds: number;
+  lastEliminationWasHuman: boolean | null;
+  humansEliminated: number;
+  aisEliminated: number;
+
   // Game over
   revealedPlayers: RevealedPlayer[] | null;
+
+  // Narration
+  narrationText: string | null;
+  narrationTrigger: string | null;
+
+  // Brain Test
+  brainTestQuestion: string | null;
+  brainTestChallengeIndex: number;
+  brainTestChallengeType: string | null;
+  brainTestResults: Record<string, Array<{
+    question: string;
+    answer: string;
+    correct_answer: string | null;
+    challenge_type: string;
+  }>> | null;
+  // Comedy
+  comedyWinnerAlias: string | null;
+  comedyWinnerVotes: number;
+  myComedyVote: string | null;
 
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
@@ -274,6 +338,10 @@ interface GameState {
   onVerdict: (data: VerdictData) => void;
   onChainSeed: (data: ChainSeedData) => void;
   onChainProgress: (data: ChainProgressData) => void;
+  onNarration: (data: NarrationData) => void;
+  onComedyWinner: (data: ComedyWinnerData) => void;
+  onBrainTestChallenge: (data: BrainTestChallengeData) => void;
+  onBrainTestResults: (data: BrainTestResultsData) => void;
   onOpen: () => void;
   onError: () => void;
   reset: () => void;
@@ -319,6 +387,7 @@ const initialState = {
   phaseDeadline: null as string | null,
   phaseDuration: null as number | null,
   writingBeginsAt: null as string | null,
+  actionStartsAt: null as string | null,
   chainRounds: [] as ChainRoundData[],
   currentSubRound: 0,
   currentSeedWord: null as string | null,
@@ -334,7 +403,22 @@ const initialState = {
   eliminationNoVotes: false,
   voteResults: null as Record<string, string[]> | null,
   voteTallies: null as Record<string, number> | null,
+  totalRounds: 0,
+  lastEliminationWasHuman: null as boolean | null,
+  humansEliminated: 0,
+  aisEliminated: 0,
   revealedPlayers: null as RevealedPlayer[] | null,
+  narrationText: null as string | null,
+  narrationTrigger: null as string | null,
+  brainTestQuestion: null as string | null,
+  brainTestChallengeIndex: 0,
+  brainTestChallengeType: null as string | null,
+  brainTestResults: null as Record<string, Array<{
+    question: string; answer: string; correct_answer: string | null; challenge_type: string;
+  }>> | null,
+  comedyWinnerAlias: null as string | null,
+  comedyWinnerVotes: 0,
+  myComedyVote: null as string | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -364,6 +448,7 @@ export const useGameStore = create<GameState>((set) => ({
       phaseDeadline: data.phase_deadline,
       phaseDuration: data.phase_duration ?? null,
       writingBeginsAt: data.writing_begins_at ?? null,
+      actionStartsAt: data.action_starts_at ?? null,
       lastSeq: data.seq,
       connectionStatus: "connected",
       myVotes: data.my_votes || [],
@@ -421,6 +506,7 @@ export const useGameStore = create<GameState>((set) => ({
       phaseDeadline: data.phase_deadline || null,
       phaseDuration: data.phase_duration ?? null,
       writingBeginsAt: data.writing_begins_at ?? null,
+      actionStartsAt: data.action_starts_at ?? null,
       answers: data.answers || {},
       roundType: data.round_type || null,
       assignments: data.assignments || {},
@@ -452,6 +538,11 @@ export const useGameStore = create<GameState>((set) => ({
       voteResults: null,
       voteTallies: null,
       verdict: null,
+      narrationText: null,
+      narrationTrigger: null,
+      comedyWinnerAlias: null,
+      comedyWinnerVotes: 0,
+      myComedyVote: null,
       chainRounds: EMPTY_CHAIN_ROUNDS,
       currentSubRound: 0,
       currentSeedWord: null,
@@ -528,6 +619,36 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     }),
 
+  onNarration: (data) =>
+    set({
+      narrationText: data.text,
+      narrationTrigger: data.trigger,
+      lastSeq: data.seq,
+    }),
+
+  onComedyWinner: (data) =>
+    set({
+      comedyWinnerAlias: data.winner_alias,
+      comedyWinnerVotes: data.vote_count,
+      lastSeq: data.seq,
+    }),
+
+  onBrainTestChallenge: (data) =>
+    set({
+      brainTestQuestion: data.question,
+      brainTestChallengeIndex: data.challenge_index,
+      brainTestChallengeType: data.challenge_type,
+      phaseDeadline: data.sub_deadline,
+      phaseDuration: data.phase_duration ?? 12,
+      lastSeq: data.seq,
+    }),
+
+  onBrainTestResults: (data) =>
+    set({
+      brainTestResults: data.results,
+      lastSeq: data.seq,
+    }),
+
   onVoteCast: (data) =>
     set({
       voteCount: data.count,
@@ -552,6 +673,10 @@ export const useGameStore = create<GameState>((set) => ({
       eliminationTieMessage: data.tie_message,
       eliminationNoVotes: data.no_votes,
       lastSeq: data.seq,
+      lastEliminationWasHuman: data.was_human,
+      humansEliminated: s.humansEliminated + (data.was_human === true ? 1 : 0),
+      aisEliminated: s.aisEliminated + (data.was_human === false && data.eliminated_id ? 1 : 0),
+      totalRounds: Math.max(s.totalRounds, s.roundNumber),
       players: s.players.map((p) =>
         p.id === data.eliminated_id
           ? { ...p, is_alive: false, eliminated_round: s.roundNumber }

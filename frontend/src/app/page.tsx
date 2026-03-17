@@ -35,7 +35,7 @@ export default function Home() {
             tell
           </h1>
           <p className="mt-4 font-system text-[0.8rem] text-dim tracking-[0.15em]">
-            a game of words and suspicion
+            a reverse turing test
           </p>
         </div>
 
@@ -44,20 +44,20 @@ export default function Home() {
             onClick={handlePlay}
             className="btn-action text-[0.9rem]"
           >
-            play &rarr;
+            enter test &rarr;
           </button>
           <button
             onClick={handlePrivateGame}
             disabled={loading}
             className="font-system text-[0.75rem] text-dim tracking-wide transition-all hover:text-cold disabled:opacity-50"
           >
-            {loading ? "creating..." : "private game"}
+            {loading ? "creating..." : "isolated examination"}
           </button>
         </div>
 
         <SystemText>
-          play finds a game automatically &mdash; private game creates a link to
-          share
+          enter test finds a game automatically &mdash; isolated examination
+          creates a link to share
         </SystemText>
       </div>
     </Stage>

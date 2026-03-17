@@ -4,15 +4,19 @@ description: Documentation drift patterns, sync conventions, and common stale sp
 type: project
 ---
 
-Round type history: Probe was the original first round type (round-robin anonymous Q&A). It was replaced by Task/Interrogation/Word Chain cycling. Any reference to "Probe" as an active round type is stale — Probe is still defined in the enum but not in the rotation.
+Round type history: Probe → Task/Interrogation/Word Chain (3-type) → Task/Word Chain/Brain Test/Interrogation (4-type, current). Always check `game_logic.py::select_round_types()` for the authoritative cycle order — docs lag the code.
 
-**Why:** Major architecture addition (matchmaking, Word Chain, Task rounds) in the commit after 47153f9. Probe dropped from `select_round_types()` cycle.
+**Why:** Each major feature push has changed the cycle. The order and count are load-bearing for timing tables in CLAUDE.md and GAME_DESIGN.md.
 
-**How to apply:** When syncing docs, check `game_logic.py::select_round_types()` for the authoritative cycle order. Don't assume it matches what docs say.
+**How to apply:** When syncing docs, start with `select_round_types()` in `game_logic.py`. If the cycle doesn't match docs, update all timing tables and "round types" prose in CLAUDE.md, ARCHITECTURE.md, and GAME_DESIGN.md together.
 
 Common drift sources:
-- `schemas/constants.py` is minimal — just three constants. CLAUDE.md previously said "timer durations, player limits" which was wrong; those are in `config.toml`.
-- `docs/GAME_DESIGN.md` "Explicitly Cut" section had "Matchmaking" listed — remove when matchmaking ships.
-- AI scheduler conversation history feature: added silently, not mentioned in old docs. Check `_conversation_history` dict in `ai_scheduler.py`.
-- `initialize_and_start_game` is in `transitions.py` (not `actions.py`) and is shared by both host-start and matchmaking flows.
-- Word Chain uses `CHAIN` as the `GamePhase` value (not `WORD_CHAIN`). `WORD_CHAIN` is the `RoundType`.
+- Phase durations: `config.toml` is authoritative. `config.py` default fallbacks may lag (e.g. `elimination_duration` was 8 in Python fallback, 12 in `config.toml`). When docs say a timer value, verify in `config.toml`.
+- `schemas/constants.py` is minimal — just three constants. Not where durations or limits live.
+- New round types always require: schema models (`game_state.py`), `game_logic.py` (phases, transitions), `transitions.py` (sub-round loop + do_* helpers), `ai_scheduler.py` (on_* handler), frontend component, SSE events, `config.py`/`config.toml` settings. All must be documented.
+- AI scheduler conversation history feature: `_conversation_history` dict in `ai_scheduler.py`. Easy to miss.
+- `initialize_and_start_game` is in `transitions.py` (not `actions.py`) — shared by host-start and matchmaking.
+- Word Chain: `CHAIN` is the `GamePhase` value; `WORD_CHAIN` is the `RoundType`. Brain Test: `BRAIN_TEST` is both `GamePhase` and `RoundType`.
+- Narrator fires in `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking, uses generate-then-lock pattern same as AI players.
+- Comedy Cup adds a second vote track: `comedy_votes` on `RoundState`, `ComedyWinnerEvent` SSE, `castComedyVote()` action, winner shown at Elimination step 5.
+- Brain Test evidence carries forward: `brain_test_evidence` on `TellGameState` persists from Brain Test into the following voting round. Not reset between rounds — only overwritten on the next Brain Test.

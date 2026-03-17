@@ -27,6 +27,12 @@ The reverse framing is the key insight: everyone pretends to be a robot. This cr
 
 **The memorable thing**: It doesn't look like a game. It looks like literature happening to you.
 
+### Diegetic Text
+
+Phase transitions are voiced by a robot narrator persona — not a game UI label. `PhaseInterstitial` rotates through 5 robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that shift per round. Each archetype issues directives for the incoming phase ("SUBMIT YOUR RESPONSE WITHIN THE ALLOTTED WINDOW.") rather than describing it neutrally. Spectators get distinct variants. Situation lines reference cumulative game state ("3 units remain. the machines grow confident.").
+
+The cold open ("N UNITS ASSEMBLED / some are not what they seem") fires once when the game starts, before round 1. The landing page copy uses the same register: "a reverse turing test", "enter test →", "isolated examination".
+
 ## Typography
 
 Two typefaces, each with a purpose:
@@ -50,11 +56,11 @@ The contrast between serif dialogue and monospace system text reinforces the the
 
 ---
 
-## The Three Games
+## The Four Games
 
-Rounds cycle: **Task → Interrogation → Word Chain → Task → ...**
+Rounds cycle: **Task → Word Chain → Brain Test → Interrogation → Task → ...**
 
-Each creates different pressure. Task exposes format fluency. Interrogation concentrates pressure on one player. Word Chain distributes tension across everyone simultaneously. No single strategy is optimal across all three.
+Each creates different pressure. Task exposes format fluency. Word Chain is instinctive and distributed. Brain Test is competitive — no one gets eliminated, but your answers become evidence. Interrogation concentrates pressure on one player for the longest, highest-stakes round. No single strategy is optimal across all four.
 
 ---
 
@@ -63,10 +69,10 @@ Each creates different pressure. Task exposes format fluency. Interrogation conc
 A constrained creative prompt. Write a haiku, a one-liner, a corporate memo. Everyone answers simultaneously. No questions, no interrogation. Straight to voting.
 
 ```
-PROMPT (25s) → REVIEW (40s) → ELIMINATION (8s)
+PROMPT (25s) → REVIEW (40s) → ELIMINATION (12s)
 ```
 
-~73 seconds per round. The fastest game. Short answers leave nowhere to hide — every word is evidence.
+~77 seconds per round. The fastest game. Short answers leave nowhere to hide — every word is evidence.
 
 #### The 7 Prompt Categories
 
@@ -97,10 +103,10 @@ The constraint is the detector. When you only get 5 words or 17 syllables, there
 The group answers a prompt, then nominates one player for cross-examination. Everyone writes questions. An LLM narrator synthesizes all questions into one pointed paragraph. The nominated player responds. Then everyone votes.
 
 ```
-PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s)
+PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (12s)
 ```
 
-~163 seconds per round. The longest game. The pressure builds across five distinct phases.
+~167 seconds per round. The longest game. The pressure builds across five distinct phases.
 
 #### How It Works
 
@@ -140,10 +146,10 @@ Concentrated pressure. One person in the spotlight. The synthesis makes every qu
 No writing prompt. A seed word appears. Everyone submits one word association. The server picks the most unique submission as the next seed. Repeat 8 times. Review shows everyone's full chain side-by-side.
 
 ```
-CHAIN (8 sub-rounds x 8s each, 64s safety timer) → REVIEW (40s) → ELIMINATION (8s)
+CHAIN (8 sub-rounds x 8s each, 64s safety timer) → REVIEW (40s) → ELIMINATION (12s)
 ```
 
-~112 seconds per round. The most instinctive game. No time to deliberate.
+~116 seconds per round. The most instinctive game. No time to deliberate.
 
 #### How It Works
 
@@ -170,6 +176,44 @@ Speed. Instinct over deliberation. You can't overthink a word association in 8 s
 
 ---
 
+### Brain Test — The Evidence Round
+
+No writing, no voting, no elimination. A rapid sequence of challenges — estimation, common knowledge, trick questions, pattern completion. Everyone competes. Results are shown immediately. Then the round ends and everyone moves on.
+
+```
+BRAIN_TEST (5 challenges × 12s each, 75s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
+```
+
+~90 seconds per round. The only round with a right answer.
+
+#### How It Works
+
+1. Five challenges appear one at a time, 12 seconds each. A new `BrainTestChallengeEvent` fires for each.
+2. All players type a free-form answer. AI answers via personality-aware LLM calls.
+3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's answers side-by-side, including the correct answer where applicable.
+4. No vote. No elimination. Results are stored in `brain_test_evidence` on `TellGameState` and carried forward as context into the next voting round.
+
+#### The 4 Challenge Types
+
+| Type | Example | What it exposes |
+|---|---|---|
+| **estimation** | "How many piano tuners are in Chicago?" | Humans have calibrated intuitions; AI has memorized reference class answers. An unusually precise AI answer is a tell. |
+| **common_knowledge** | "What is the boiling point of water at sea level?" | AI gets these trivially right. A human who's nervous might blank. |
+| **trick** | "A rooster lays an egg on a roof — which side does it roll down?" | Tests whether players are actually reading vs. pattern-matching. AI can be tripped by surface framing. |
+| **pattern** | "What comes next: 2, 4, 8, 16, ___?" | Humans show their work in how they phrase the answer. AI states the answer cleanly. |
+
+20 challenges total (5 per type). `select_brain_test_challenges()` picks a balanced mix each round.
+
+#### The Design Tension
+
+Brain Test is a pressure valve. After an intense Interrogation or a chaotic Word Chain, a round with no voting feels like a reprieve. But it isn't — the answers become permanent record. "Why did UNIT-7 think water boils at 90°C?" is ammunition for the next REVIEW. The stakes are low in the moment and highest in retrospect.
+
+The "no elimination" structure also resets paranoia. Players who were about to be targeted get a free round. Players who were safe get anxious watching the evidence pile up. The game breathes before it bites.
+
+**Skill tested**: Speed, general knowledge, reading questions carefully under time pressure.
+
+---
+
 ## Pacing
 
 ### The Tension Curve
@@ -181,15 +225,18 @@ Two forces drive every social deduction game (Marc LeBlanc's Dramatic Game Dynam
 
 The climax occurs at their intersection: enough evidence to suspect, not enough to be sure. Every round should deliver this arc in miniature, and the full game should deliver it across all rounds.
 
-### Why Three Round Types Matter
+### Why Four Round Types Matter
 
-Contrast-based intensity — never sustain maximum tension. The three round types oscillate:
+Contrast-based intensity — never sustain maximum tension. The four round types oscillate:
 
 | Round | Duration | Pressure type | Agency |
 |-------|----------|---------------|--------|
-| Task | ~73s | Low — fast, everyone equal | High (writing) then low (voting) |
-| Interrogation | ~163s | High — one player in the spotlight | Mixed (writing, questioning, defending) |
-| Word Chain | ~112s | Medium — distributed, instinctive | High (rapid-fire association) |
+| Task | ~77s | Low — fast, everyone equal | High (writing) then low (voting) |
+| Word Chain | ~116s | Medium — distributed, instinctive | High (rapid-fire association) |
+| Brain Test | ~90s | Low — competitive, no elimination | Pure performance (answering) |
+| Interrogation | ~167s | High — one player in the spotlight | Mixed (writing, questioning, defending) |
+
+Brain Test sits between Word Chain and Interrogation as a deliberate release valve. It accumulates evidence without demanding a verdict — the pressure deferred makes the following Interrogation hit harder.
 
 This maps to the Among Us insight: alternate between high-agency/low-communication phases (writing answers) and low-agency/high-communication phases (reviewing + voting). Monotonous round lengths kill pacing; varied lengths keep attention.
 
@@ -259,13 +306,17 @@ Players get `min(3, alive_count - 1)` votes during the REVIEW phase. Votes are c
 
 Multi-vote means a coordinated group can focus suspicion. A lone vote rarely eliminates. This rewards discussion — or the appearance of it.
 
+**Comedy Cup**: A secondary vote row in REVIEW lets players mark the funniest answer. One vote, changeable, can vote for yourself. The winner is announced during Elimination alongside the verdict — a dual reward track that acknowledges humor as a legitimate survival skill (or liability).
+
 ### Elimination & Verdict
 
-The elimination reveal is the guaranteed spectacle moment — where all accumulated tension resolves at once. It's a stepped sequence designed to build anticipation:
+The elimination reveal is 12 seconds — long enough for a 5-step sequence with a dramatic beat before the role reveal. The stepped reveal:
 
-1. **Vote tallies** — who voted for whom. The social map becomes visible.
+1. **Vote map** — who voted for whom, voter aliases linking to target alias. The social graph becomes visible. Eliminated target highlighted in warm.
 2. **Identity reveal** — "`NODE-3` was human." The moment of truth.
-3. **LLM verdict** — one sentence of literary commentary. Dry wit, referencing the eliminated player's actual answer. The verdict reframes the entire round — it's the punchline.
+3. **Role context** — "N units remain."
+4. **LLM verdict** — one sentence of literary commentary. Dry wit, referencing the eliminated player's actual answer. The verdict reframes the entire round — it's the punchline.
+5. **Comedy Cup winner** — "funniest unit: UNIT-7" shown alongside the verdict.
 
 3-second timeout on the verdict; fallback: no verdict. Maximum restraint for maximum tension.
 
@@ -293,6 +344,14 @@ The #1 design flaw in social deduction is eliminated players with nothing to do.
 
 Each personality shapes answer generation, question writing, nomination strategy, vote behavior, and word chain associations.
 
+### The Narrator
+
+A persistent LLM show host fires at four transition points: game start, after all answers are submitted, between rounds, and at game over. The narrator is the robot running the test — dry, literary, increasingly invested. Its voice is `NARRATOR_SYSTEM_PROMPT` in `backend/llm/prompts.py`.
+
+Narration arrives as a floating overlay (`Narration` component), auto-dismissing after 6 seconds. Game-over narration persists inline on the game over screen. The narrator never blocks game flow — `_fire_narration()` fires as `asyncio.create_task()`. It retains memory of its last 5 lines for continuity within a game.
+
+The narrator is the only character in the game who knows everyone's role. It never reveals that directly — but the wording shifts as the game progresses.
+
 ## Edge Cases
 
 - **Player disconnect**: Auto-skip during timed phases. Reconnect replays missed events.
@@ -305,6 +364,7 @@ Each personality shapes answer generation, question writing, nomination strategy
 - **All AI eliminated**: Humans win immediately.
 - **<=2 players left**: Game ends.
 - **Word Chain: no responses in a sub-round**: Server picks a random fallback association.
+- **Brain Test: no responses to a challenge**: Shown as blank in results grid.
 - **Matchmaking queue drop**: Player disconnecting from SSE auto-removes them from the queue.
 
 ## Explicitly Cut

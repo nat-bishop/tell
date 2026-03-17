@@ -36,6 +36,7 @@ from backend.services.transitions import (
 from schemas.aliases import generate_aliases, generate_player_id
 from schemas.api_models import (
     AnswerSubmittedEvent,
+    CastComedyVoteRequest,
     CastVoteRequest,
     ChainProgressEvent,
     JoinGameRequest,
@@ -48,6 +49,7 @@ from schemas.api_models import (
     StartGameRequest,
     StatusResponse,
     SubmitAnswerRequest,
+    SubmitBrainTestAnswerRequest,
     SubmitChainWordRequest,
     SubmitQuestionRequest,
     SubmitResponseRequest,
@@ -473,6 +475,48 @@ async def cast_vote(game_id: str, req: CastVoteRequest):
     return {"status": "ok"}
 
 
+@router.post("/{game_id}/comedy-vote", response_model=StatusResponse)
+async def cast_comedy_vote(game_id: str, req: CastComedyVoteRequest):
+    """Cast a comedy vote for the funniest answer (one vote, changeable)."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.REVIEW:
+            raise HTTPException(status_code=400, detail="Not in review phase")
+
+        result = validate_player_alive(state, req.player_id)
+        if isinstance(result, str):
+            raise HTTPException(status_code=400, detail=result)
+
+        round_state = state.current_round
+        if not round_state:
+            raise HTTPException(status_code=400, detail="No active round")
+
+        # Validate target is alive
+        alive_ids = {p.id for p in state.players if p.is_alive}
+        if req.target_id not in alive_ids:
+            raise HTTPException(status_code=400, detail="Invalid comedy vote target")
+
+        # Allow voting for self (comedy is comedy)
+        round_state.comedy_votes[req.player_id] = req.target_id
+        log.info(
+            "comedy_vote_cast",
+            player_id=req.player_id,
+            target_id=req.target_id,
+        )
+
+    return {"status": "ok"}
+
+
 @router.post("/{game_id}/chain-word", response_model=StatusResponse)
 async def submit_chain_word(game_id: str, req: SubmitChainWordRequest):
     """Submit a word during a Word Chain sub-round."""
@@ -529,6 +573,49 @@ async def submit_chain_word(game_id: str, req: SubmitChainWordRequest):
             player_id=req.player_id,
             round_index=req.round_index,
             count=len(current_cr.responses),
+        )
+
+    return {"status": "ok"}
+
+
+@router.post("/{game_id}/brain-test-answer", response_model=StatusResponse)
+async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerRequest):
+    """Submit an answer to a brain test challenge."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.BRAIN_TEST:
+            raise HTTPException(status_code=400, detail="Not in brain test phase")
+
+        result = validate_player_alive(state, req.player_id)
+        if isinstance(result, str):
+            raise HTTPException(status_code=400, detail=result)
+
+        round_state = state.current_round
+        if not round_state:
+            raise HTTPException(status_code=400, detail="No active round")
+
+        if req.challenge_index >= len(round_state.brain_challenges):
+            raise HTTPException(status_code=400, detail="Invalid challenge index")
+
+        ch = round_state.brain_challenges[req.challenge_index]
+        if req.player_id in ch.responses:
+            raise HTTPException(status_code=400, detail="Already answered")
+
+        ch.responses[req.player_id] = req.answer.strip()
+        log.info(
+            "brain_test_answer",
+            player_id=req.player_id,
+            challenge_index=req.challenge_index,
         )
 
     return {"status": "ok"}

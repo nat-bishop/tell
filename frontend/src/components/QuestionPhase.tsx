@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitQuestion } from "@/api/actions";
 import { SystemText } from "./SystemText";
+import { GameTextarea } from "./GameTextarea";
+import { LabeledCard } from "./LabeledCard";
 
 export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   const {
@@ -66,10 +68,7 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
   return (
     <div className="flex flex-col gap-6 pt-4">
       {/* Target's answer */}
-      <div className="card p-5">
-        <div className="font-system text-[0.65rem] text-cold tracking-wider uppercase mb-2">
-          {targetPlayer?.alias || "UNKNOWN"}&apos;s answer
-        </div>
+      <LabeledCard label={`${targetPlayer?.alias || "UNKNOWN"}'s answer`}>
         {targetAnswer ? (
           <p className="font-literary text-[1.1rem] italic leading-[1.6] text-ink">
             {targetAnswer}
@@ -79,7 +78,7 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
             NO ANSWER SUBMITTED
           </p>
         )}
-      </div>
+      </LabeledCard>
 
       {!spectator && (
         <>
@@ -87,22 +86,11 @@ export function QuestionPhase({ spectator = false }: { spectator?: boolean }) {
 
           {!hasSubmitted ? (
             <div className="w-full">
-              <textarea
+              <GameTextarea
                 value={question}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-                onChange={(e) => {
-                  setQuestion(e.target.value);
-                  e.target.style.height = "auto";
-                  e.target.style.height = e.target.scrollHeight + "px";
-                }}
+                onChange={setQuestion}
+                onSubmit={handleSubmit}
                 maxLength={200}
-                rows={1}
-                className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.05rem] leading-[1.6] text-ink outline-none border-rule"
                 placeholder={
                   roundType === "interrogation"
                     ? "your question for the nominee..."

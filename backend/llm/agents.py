@@ -16,6 +16,7 @@ from backend.api.deps import get_settings
 from backend.llm.personalities import Personality
 from backend.llm.prompts import (
     ASSOCIATION_SYSTEM_PROMPT_TEMPLATE,
+    NARRATOR_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
     VERDICT_SYSTEM_PROMPT,
     build_system_prompt,
@@ -374,3 +375,38 @@ async def generate_association(
     from schemas.word_chain import get_fallback_association
 
     return get_fallback_association(seed_word)
+
+
+async def generate_brain_test_answer(
+    question: str,
+    personality_name: str,
+    *,
+    game_id: str | None = None,
+) -> str | None:
+    """Generate a short answer to a brain test challenge.
+
+    Returns None on timeout/failure.
+    """
+    prompt = (
+        f"You are playing a brain test game. "
+        f"Your personality: {personality_name}. "
+        f"Question: {question}\n"
+        "Give a short answer (a few words). Just the answer, nothing else."
+    )
+    return await _run_system_agent("Answer concisely.", prompt, timeout=3.0, game_id=game_id)
+
+
+async def generate_narration(
+    trigger: str,
+    context: str,
+    *,
+    game_id: str | None = None,
+) -> str | None:
+    """Generate a narrator line for a specific game moment.
+
+    Returns None on timeout/failure — narration is always optional.
+    """
+    timeout = 5.0 if trigger in ("game_over", "verdict") else 3.0
+    return await _run_system_agent(
+        NARRATOR_SYSTEM_PROMPT, context, timeout=timeout, game_id=game_id
+    )

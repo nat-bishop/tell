@@ -6,7 +6,7 @@ import {
   type PlayerInfo,
   type ChainRoundData,
 } from "@/hooks/useGameStore";
-import { castVote } from "@/api/actions";
+import { castVote, castComedyVote } from "@/api/actions";
 import { AnswerCard } from "./AnswerCard";
 import { SystemText } from "./SystemText";
 
@@ -212,6 +212,17 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     useGameStore.setState({ myVotes: next });
   };
 
+  // Comedy vote
+  const [comedyVote, setComedyVote] = useState<string | null>(null);
+
+  const toggleComedyVote = (pid: string) => {
+    if (!allRevealed || !gameId || !playerId) return;
+    if (comedyVote === pid) return; // Already selected — no server "unvote"
+    setComedyVote(pid);
+    castComedyVote(gameId, playerId, pid);
+    useGameStore.setState({ myComedyVote: pid });
+  };
+
   const isWordChain = roundType === "word_chain";
   const isTask = roundType === "task";
 
@@ -294,6 +305,28 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
                 <SystemText>
                   {voteCount} of {voteTotalCount} voted
                 </SystemText>
+              </div>
+
+              {/* Comedy vote */}
+              <div className="flex items-center gap-3 mt-2">
+                <span className="font-system text-[0.65rem] text-dim tracking-wider uppercase shrink-0">
+                  funniest
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {alivePlayers.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => toggleComedyVote(p.id)}
+                      className={`font-system text-[0.6rem] tracking-wider uppercase px-2 py-0.5 rounded transition-all ${
+                        comedyVote === p.id
+                          ? "bg-raised text-ink border border-dim"
+                          : "text-dim border border-rule hover:border-dim"
+                      }`}
+                    >
+                      {p.alias}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           ) : (

@@ -5,6 +5,10 @@ from __future__ import annotations
 import random
 from collections import Counter
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from schemas.prompts import BrainTestChallengeSpec
 
 from schemas.api_models import (
     EliminationEvent,
@@ -88,9 +92,39 @@ def select_chain_next_word(responses: dict[str, str]) -> tuple[str, str | None]:
 
 
 def select_round_types(num_rounds: int) -> list[RoundType]:
-    """Cycle: Task → Interrogation → Word Chain → Task → ..."""
-    cycle = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
+    """Cycle: Task → Word Chain → Brain Test → Interrogation → ...
+
+    Brain Test is evidence-only (no voting). It appears every 3rd round
+    starting from round 3.
+    """
+    cycle = [
+        RoundType.TASK,
+        RoundType.WORD_CHAIN,
+        RoundType.BRAIN_TEST,
+        RoundType.INTERROGATION,
+    ]
     return [cycle[i % len(cycle)] for i in range(num_rounds)]
+
+
+# Interstitial hold times (seconds) added to phase deadlines so
+# clients can display a phase-transition overlay without eating action time.
+# The frontend derives its dismiss timing from the action_starts_at timestamp.
+_INTERSTITIAL_HOLD: dict[GamePhase, int] = {
+    GamePhase.PROMPT: 5,  # round start — staggered visual beats
+    GamePhase.CHAIN: 5,  # round start
+    GamePhase.BRAIN_TEST: 5,  # round start
+    GamePhase.BRAIN_TEST_RESULTS: 2,
+    GamePhase.NOMINATE: 2,  # mid-round (~1.5s on client, 2s gives buffer)
+    GamePhase.QUESTION: 2,
+    GamePhase.RESPOND: 2,
+    GamePhase.REVIEW: 2,
+    GamePhase.ELIMINATION: 2,
+}
+
+
+def get_interstitial_hold(phase: GamePhase) -> int:
+    """Extra seconds added to phase deadline for client interstitial overlay."""
+    return _INTERSTITIAL_HOLD.get(phase, 0)
 
 
 def get_phase_duration(
@@ -104,6 +138,10 @@ def get_phase_duration(
         return settings.prompt_duration + reading
     if phase == GamePhase.CHAIN:
         return settings.chain_duration
+    if phase == GamePhase.BRAIN_TEST:
+        return settings.brain_test_duration
+    if phase == GamePhase.BRAIN_TEST_RESULTS:
+        return settings.brain_test_results_duration
     durations = {
         GamePhase.QUESTION: settings.question_duration,
         GamePhase.RESPOND: settings.respond_duration,
@@ -223,7 +261,8 @@ def transition_to_prompt(
         ),
     )
     state.phase = GamePhase.PROMPT
-    state.phase_deadline = now + timedelta(seconds=duration)
+    hold = get_interstitial_hold(GamePhase.PROMPT)
+    state.phase_deadline = now + timedelta(seconds=duration + hold)
     return state
 
 
@@ -252,7 +291,8 @@ def transition_to_task_prompt(
         ),
     )
     state.phase = GamePhase.PROMPT
-    state.phase_deadline = now + timedelta(seconds=duration)
+    hold = get_interstitial_hold(GamePhase.PROMPT)
+    state.phase_deadline = now + timedelta(seconds=duration + hold)
     return state
 
 
@@ -270,15 +310,54 @@ def transition_to_word_chain(state: TellGameState, seed_word: str, duration: int
         chain_rounds=[ChainRound(seed=seed_word)],
     )
     state.phase = GamePhase.CHAIN
-    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
+    state.phase_deadline = datetime.now(UTC) + timedelta(
+        seconds=duration + get_interstitial_hold(GamePhase.CHAIN)
+    )
     return state
 
 
 def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) -> TellGameState:
-    """Move to a phase with a deadline."""
+    """Move to a phase with a deadline (includes interstitial hold)."""
     state.phase = phase
-    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=duration)
+    state.phase_deadline = datetime.now(UTC) + timedelta(
+        seconds=duration + get_interstitial_hold(phase)
+    )
     return state
+
+
+def transition_to_brain_test(
+    state: TellGameState,
+    challenges: list[BrainTestChallengeSpec],
+    duration: int,
+) -> TellGameState:
+    """Start a new Brain Test round."""
+    from schemas.game_state import BrainTestChallenge
+
+    state.round_number += 1
+    state.current_round = RoundState(
+        round_number=state.round_number,
+        prompt_text="brain test",
+        prompt_category="brain_test",
+        round_type=RoundType.BRAIN_TEST,
+        current_sub_round=0,
+        brain_challenges=[
+            BrainTestChallenge(
+                challenge_type=c.challenge_type,
+                question=c.question,
+                correct_answer=c.correct_answer,
+            )
+            for c in challenges
+        ],
+    )
+    state.phase = GamePhase.BRAIN_TEST
+    state.phase_deadline = datetime.now(UTC) + timedelta(
+        seconds=duration + get_interstitial_hold(GamePhase.BRAIN_TEST)
+    )
+    return state
+
+
+def transition_to_brain_test_results(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.BRAIN_TEST_RESULTS, duration)
 
 
 def transition_to_question(state: TellGameState, duration: int) -> TellGameState:
@@ -376,6 +455,27 @@ def resolve_votes(
     return state, vote_results, elimination
 
 
+def resolve_comedy_votes(
+    state: TellGameState,
+) -> tuple[str | None, str | None, int]:
+    """Tally comedy votes. Returns (winner_id, winner_alias, vote_count)."""
+    round_state = state.current_round
+    if not round_state or not round_state.comedy_votes:
+        return None, None, 0
+
+    tallies: dict[str, int] = dict(Counter(round_state.comedy_votes.values()))
+    if not tallies:
+        return None, None, 0
+
+    max_count = max(tallies.values())
+    top = [pid for pid, c in tallies.items() if c == max_count]
+    winner_id = top[0] if len(top) == 1 else random.choice(top)
+
+    player = get_player_by_id(state, winner_id)
+    winner_alias = player.alias if player else None
+    return winner_id, winner_alias, max_count
+
+
 def check_game_over(state: TellGameState) -> str | None:
     """Check if the game should end. Returns 'humans', 'ai', or None."""
     alive_humans = get_alive_humans(state)
@@ -414,12 +514,19 @@ def make_game_over_event(state: TellGameState, winner: str, seq_fn) -> GameOverE
     )
 
 
-def make_phase_changed_event(state: TellGameState, seq: int, **extra) -> PhaseChangedEvent:
+def make_phase_changed_event(
+    state: TellGameState, seq: int, phase_duration: int | None = None, **extra
+) -> PhaseChangedEvent:
+    action_starts_at = None
+    if state.phase_deadline and phase_duration:
+        action_starts_at = (state.phase_deadline - timedelta(seconds=phase_duration)).isoformat()
     return PhaseChangedEvent(
         seq=seq,
         phase=state.phase.value,
         round_number=state.round_number,
         phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
+        phase_duration=phase_duration,
+        action_starts_at=action_starts_at,
         **extra,
     )
 
@@ -547,4 +654,9 @@ def build_state_sync(
         ),
         "chain_rounds": chain_rounds,
         "current_sub_round": current_sub_round,
+        "action_starts_at": (
+            (state.phase_deadline - timedelta(seconds=phase_duration)).isoformat()
+            if state.phase_deadline and phase_duration
+            else None
+        ),
     }

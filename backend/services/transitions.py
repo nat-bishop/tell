@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import uuid
 
@@ -17,15 +18,19 @@ from backend.services.game_logic import (
     check_game_over,
     fill_missing_answers,
     fill_missing_responses,
+    get_interstitial_hold,
     get_next_round_type,
     get_phase_duration,
     get_player_by_id,
     make_game_over_event,
     make_phase_changed_event,
+    resolve_comedy_votes,
     resolve_nominations,
     resolve_votes,
     select_chain_next_word,
     select_round_types,
+    transition_to_brain_test,
+    transition_to_brain_test_results,
     transition_to_elimination,
     transition_to_nominate,
     transition_to_prompt,
@@ -37,17 +42,118 @@ from backend.services.game_logic import (
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
+    BrainTestChallengeEvent,
+    BrainTestResultsEvent,
     ChainSeedEvent,
+    ComedyWinnerEvent,
+    NarrationEvent,
     NominatedEvent,
     PlayerJoinedEvent,
     SynthesisReadyEvent,
     VerdictEvent,
 )
 from schemas.constants import MISSING_ALIAS
-from schemas.game_state import ChainRound, GamePhase, Player, PlayerRole, RoundType
+from schemas.game_state import ChainRound, GamePhase, NarratorEntry, Player, PlayerRole, RoundType
 from schemas.word_chain import select_seed_word
 
 log = structlog.get_logger(__name__)
+
+
+def _build_narrator_context(state) -> str:
+    """Build a context string for the narrator from game state."""
+    parts: list[str] = []
+    n_players = len(state.players)
+    rnd, mx = state.round_number, state.max_rounds
+    parts.append(f"Game: {n_players} players, round {rnd} of {mx}.")
+
+    alive = [p for p in state.players if p.is_alive]
+    eliminated = [p for p in state.players if not p.is_alive]
+    parts.append(f"Alive: {', '.join(p.alias for p in alive)} ({len(alive)} total).")
+
+    if eliminated:
+        for p in eliminated:
+            role = p.role.value
+            parts.append(f"Eliminated R{p.eliminated_round}: {p.alias} ({role}).")
+
+    rs = state.current_round
+    if rs:
+        parts.append(f"Round type: {rs.round_type}.")
+        if rs.prompt_text:
+            parts.append(f'Prompt: "{rs.prompt_text}"')
+        if rs.answers:
+            alias_map = {p.id: p.alias for p in state.players}
+            for pid, ans in rs.answers.items():
+                alias = alias_map.get(pid, pid)
+                parts.append(f'  {alias} answered: "{ans}"')
+        if rs.chain_rounds:
+            chain_words = [cr.seed for cr in rs.chain_rounds]
+            parts.append(f"Chain: {' -> '.join(chain_words)}")
+
+    # Previous narrator lines for continuity
+    if state.narrator_context:
+        parts.append("\nYour previous lines this game:")
+        for entry in state.narrator_context[-5:]:
+            parts.append(f'  [{entry.trigger}] "{entry.text}"')
+
+    return "\n".join(parts)
+
+
+async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -> None:
+    """Fire a narration call as a background task. Non-blocking, never fails the game flow."""
+
+    async def _do_narrate():
+        try:
+            from backend.llm.agents import generate_narration
+
+            cm = get_connection_manager()
+            repo = get_game_repository()
+            lock = cm.get_lock(game_id)
+
+            # Build context from current state
+            async with lock:
+                session = repo.get(game_id)
+                if not session:
+                    return
+                context = _build_narrator_context(session.state)
+                if extra_context:
+                    context += f"\n\nTrigger: {trigger}. {extra_context}"
+                else:
+                    context += f"\n\nTrigger: {trigger}."
+
+            # LLM call outside the lock
+            text = await generate_narration(trigger, context, game_id=game_id)
+            if not text:
+                return
+
+            # Write result under lock
+            async with lock:
+                session = repo.get(game_id)
+                if not session:
+                    return
+                ctx = session.state.narrator_context
+                ctx.append(
+                    NarratorEntry(
+                        trigger=trigger,
+                        text=text,
+                        round_number=session.state.round_number,
+                    )
+                )
+                # Keep only the last 5 entries (that's all _build_narrator_context uses)
+                if len(ctx) > 5:
+                    session.state.narrator_context = ctx[-5:]
+                await cm.broadcast(
+                    game_id,
+                    NarrationEvent(
+                        seq=session.next_seq(),
+                        text=text,
+                        trigger=trigger,
+                    ),
+                )
+                log.info("narration_sent", trigger=trigger, text_len=len(text), game_id=game_id)
+        except Exception:
+            log.exception("narration_failed", trigger=trigger, game_id=game_id)
+
+    asyncio.create_task(_do_narrate())
 
 
 async def _notify_ai(game_id: str, phase: GamePhase) -> None:
@@ -77,6 +183,9 @@ async def start_phase_timer(
     duration = get_phase_duration(settings, phase, round_type)
     if not duration:
         return
+    # Interstitial hold is already baked into phase_deadline by transition functions,
+    # so the timer must include it too to stay in sync with the deadline.
+    duration += get_interstitial_hold(phase)
 
     async def on_timer_expire():
         await handle_phase_expiry(game_id, phase)
@@ -121,6 +230,14 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             # Safety timer expired — transition to review
             await do_chain_complete(game_id, session)
 
+        elif expired_phase == GamePhase.BRAIN_TEST:
+            # Safety timer — transition to results
+            await do_brain_test_complete(game_id, session)
+
+        elif expired_phase == GamePhase.BRAIN_TEST_RESULTS:
+            # Results done — next round (no elimination)
+            await do_after_brain_test(game_id, session)
+
 
 async def do_prompt_complete(game_id: str, session) -> None:
     """PROMPT complete → depends on round type:
@@ -133,6 +250,13 @@ async def do_prompt_complete(game_id: str, session) -> None:
     settings = get_settings()
     state = session.state
     round_state = state.current_round
+
+    # Fire narrator: post-submissions
+    await _fire_narration(
+        game_id,
+        "post_submissions",
+        "All answers are in. Comment briefly on what you notice.",
+    )
 
     if round_state and round_state.round_type == RoundType.TASK:
         # Task rounds skip question/respond — go straight to review
@@ -346,9 +470,92 @@ async def do_vote_resolution(game_id: str, session) -> None:
         except Exception:
             log.exception("verdict_generation_failed", game_id=game_id)
 
+    # Resolve comedy votes
+    comedy_id, comedy_alias, comedy_count = resolve_comedy_votes(state)
+    if comedy_id and comedy_alias:
+        await cm.broadcast(
+            game_id,
+            ComedyWinnerEvent(
+                seq=session.next_seq(),
+                winner_id=comedy_id,
+                winner_alias=comedy_alias,
+                vote_count=comedy_count,
+            ),
+        )
+
     transition_to_elimination(state, settings.elimination_duration)
     await cm.broadcast(game_id, elimination)
     await start_phase_timer(game_id, GamePhase.ELIMINATION)
+
+
+async def _start_next_round(game_id: str, session) -> None:
+    """Route to the next round type — shared by post-elimination and post-brain-test.
+
+    Assumes caller holds the game lock.
+    """
+    cm = get_connection_manager()
+    settings = get_settings()
+    state = session.state
+    next_round_type = get_next_round_type(state)
+
+    if next_round_type == RoundType.TASK:
+        total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
+        transition_to_task_prompt(state, total, settings.prompt_reading_duration)
+        round_state = state.current_round
+        await cm.broadcast(
+            game_id,
+            _make_event(
+                state,
+                session,
+                settings,
+                prompt_text=round_state.prompt_text if round_state else None,
+                prompt_category=round_state.prompt_category if round_state else None,
+                round_type=round_state.round_type if round_state else RoundType.TASK,
+            ),
+        )
+        await start_phase_timer(game_id, GamePhase.PROMPT, RoundType.TASK)
+        await _notify_ai(game_id, GamePhase.PROMPT)
+
+    elif next_round_type == RoundType.BRAIN_TEST:
+        from schemas.prompts import select_brain_test_challenges
+
+        challenges = select_brain_test_challenges(settings.brain_test_challenges)
+        transition_to_brain_test(state, challenges, settings.brain_test_duration)
+        await cm.broadcast(
+            game_id,
+            _make_event(state, session, settings, round_type=RoundType.BRAIN_TEST),
+        )
+        await start_phase_timer(game_id, GamePhase.BRAIN_TEST)
+        await _start_brain_test_loop(game_id, session)
+
+    elif next_round_type == RoundType.WORD_CHAIN:
+        seed = select_seed_word()
+        transition_to_word_chain(state, seed, settings.chain_duration)
+        await cm.broadcast(
+            game_id,
+            _make_event(state, session, settings, round_type=RoundType.WORD_CHAIN),
+        )
+        await start_phase_timer(game_id, GamePhase.CHAIN)
+        await _start_chain_loop(game_id, session)
+
+    else:
+        # INTERROGATION (default)
+        total = get_phase_duration(settings, GamePhase.PROMPT) or 55
+        transition_to_prompt(state, total, settings.prompt_reading_duration)
+        round_state = state.current_round
+        await cm.broadcast(
+            game_id,
+            _make_event(
+                state,
+                session,
+                settings,
+                prompt_text=round_state.prompt_text if round_state else None,
+                prompt_category=round_state.prompt_category if round_state else None,
+                round_type=round_state.round_type if round_state else None,
+            ),
+        )
+        await start_phase_timer(game_id, GamePhase.PROMPT)
+        await _notify_ai(game_id, GamePhase.PROMPT)
 
 
 async def do_after_elimination(game_id: str, session) -> None:
@@ -373,6 +580,15 @@ async def do_after_elimination(game_id: str, session) -> None:
         state.phase_deadline = None
         event = make_game_over_event(state, winner, session.next_seq)
         await cm.broadcast(game_id, event)
+
+        # Fire narrator: game over wrap-up
+        await _fire_narration(
+            game_id,
+            "game_over",
+            f"The game is over. {winner.upper()} wins. Write a knockout wrap-up — "
+            "the story of this game in 1-2 sentences. Reference specific moments.",
+        )
+
         if settings.record_games:
             from backend.services.recorder import save_recording
 
@@ -383,62 +599,14 @@ async def do_after_elimination(game_id: str, session) -> None:
         cm.cleanup_game(game_id)
         return
 
-    next_round_type = get_next_round_type(state)
+    # Fire narrator: between rounds
+    await _fire_narration(
+        game_id,
+        "between_rounds",
+        "A round just ended. Comment on the state of play — who's left, what happened.",
+    )
 
-    if next_round_type == RoundType.TASK:
-        total_duration = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
-        transition_to_task_prompt(state, total_duration, settings.prompt_reading_duration)
-        round_state = state.current_round
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                prompt_text=round_state.prompt_text if round_state else None,
-                prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else RoundType.TASK,
-            ),
-        )
-        await start_phase_timer(game_id, GamePhase.PROMPT, RoundType.TASK)
-        await _notify_ai(game_id, GamePhase.PROMPT)
-
-    elif next_round_type == RoundType.WORD_CHAIN:
-        seed = select_seed_word()
-        transition_to_word_chain(state, seed, settings.chain_duration)
-        round_state = state.current_round
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                round_type=RoundType.WORD_CHAIN,
-            ),
-        )
-        # Start safety timer for the full chain duration
-        await start_phase_timer(game_id, GamePhase.CHAIN)
-        # Start the sub-round loop
-        await _start_chain_loop(game_id, session)
-
-    else:
-        # INTERROGATION
-        total_duration = get_phase_duration(settings, GamePhase.PROMPT) or 55
-        transition_to_prompt(state, total_duration, settings.prompt_reading_duration)
-        round_state = state.current_round
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                prompt_text=round_state.prompt_text if round_state else None,
-                prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else None,
-            ),
-        )
-        await start_phase_timer(game_id, GamePhase.PROMPT)
-        await _notify_ai(game_id, GamePhase.PROMPT)
+    await _start_next_round(game_id, session)
 
 
 async def do_chain_complete(game_id: str, session) -> None:
@@ -467,10 +635,12 @@ async def do_chain_complete(game_id: str, session) -> None:
 
 async def _start_chain_loop(game_id: str, session) -> None:
     """Launch the async sub-round loop for Word Chain. Runs as a background task."""
-    import asyncio
 
     async def _chain_loop():
         try:
+            # Wait for client interstitial to finish before starting sub-rounds
+            await asyncio.sleep(get_interstitial_hold(GamePhase.CHAIN))
+
             cm = get_connection_manager()
             settings = get_settings()
             repo = get_game_repository()
@@ -579,6 +749,129 @@ async def _start_chain_loop(game_id: str, session) -> None:
     register_task(game_id, task)
 
 
+async def do_brain_test_complete(game_id: str, session) -> None:
+    """Brain test challenges done → show results."""
+    cm = get_connection_manager()
+    settings = get_settings()
+    state = session.state
+    rs = state.current_round
+    if not rs:
+        return
+
+    # Build results: player_id -> list of {question, answer, ...}
+    results: dict[str, list[dict]] = {}
+    for p in state.players:
+        if p.is_alive:
+            player_results = []
+            for ch in rs.brain_challenges:
+                player_results.append(
+                    {
+                        "question": ch.question,
+                        "answer": ch.responses.get(p.id, ""),
+                        "correct_answer": ch.correct_answer,
+                        "challenge_type": ch.challenge_type,
+                    }
+                )
+            results[p.id] = player_results
+
+    await cm.broadcast(
+        game_id,
+        BrainTestResultsEvent(
+            seq=session.next_seq(),
+            results=results,
+        ),
+    )
+
+    transition_to_brain_test_results(state, settings.brain_test_results_duration)
+    await cm.broadcast(
+        game_id,
+        _make_event(state, session, settings, round_type=RoundType.BRAIN_TEST),
+    )
+    await start_phase_timer(game_id, GamePhase.BRAIN_TEST_RESULTS)
+
+    # Fire narrator
+    await _fire_narration(
+        game_id,
+        "post_submissions",
+        "Brain test results are in. Comment on notable performances.",
+    )
+
+
+async def do_after_brain_test(game_id: str, session) -> None:
+    """Brain test results done → next round (no elimination)."""
+    await _start_next_round(game_id, session)
+
+
+async def _start_brain_test_loop(game_id: str, session) -> None:
+    """Launch the async sub-round loop for Brain Test challenges."""
+
+    async def _brain_loop():
+        try:
+            cm = get_connection_manager()
+            settings = get_settings()
+            repo = get_game_repository()
+            sub_duration = settings.brain_test_challenge_duration
+            num_challenges = settings.brain_test_challenges
+            lock = cm.get_lock(game_id)
+
+            for i in range(num_challenges):
+                async with lock:
+                    session = repo.get(game_id)
+                    if not session:
+                        return
+                    state = session.state
+                    if state.phase != GamePhase.BRAIN_TEST:
+                        return
+                    rs = state.current_round
+                    if not rs or i >= len(rs.brain_challenges):
+                        return
+
+                    rs.current_sub_round = i
+                    ch = rs.brain_challenges[i]
+
+                    sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
+                    state.phase_deadline = sub_deadline
+
+                    await cm.broadcast(
+                        game_id,
+                        BrainTestChallengeEvent(
+                            seq=session.next_seq(),
+                            challenge_index=i,
+                            challenge_type=ch.challenge_type,
+                            question=ch.question,
+                            sub_deadline=sub_deadline.isoformat(),
+                            phase_duration=sub_duration,
+                        ),
+                    )
+
+                # Schedule AI for this challenge
+                from backend.services.ai_scheduler import on_brain_test_challenge
+
+                await on_brain_test_challenge(game_id, i)
+
+                await asyncio.sleep(sub_duration)
+
+            # All challenges done — transition to results
+            async with lock:
+                session = repo.get(game_id)
+                if not session:
+                    return
+                if session.state.phase != GamePhase.BRAIN_TEST:
+                    return
+                get_timer_manager().cancel_timer(game_id)
+                await do_brain_test_complete(game_id, session)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception("brain_test_loop_error", game_id=game_id)
+
+    task = asyncio.create_task(_brain_loop())
+    from backend.services.ai_scheduler import register_task
+
+    register_task(game_id, task)
+
+
 async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     """Start a game — spawn AI, assign personalities, transition to first round.
 
@@ -675,4 +968,12 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
         player_count=player_count,
         ai_count=ai_count,
         max_rounds=max_rounds,
+    )
+
+    # Fire narrator: game start
+    await _fire_narration(
+        game_id,
+        "game_start",
+        f"{player_count} units assembled. {ai_count} are AI. "
+        "The rest are human, pretending to be robots.",
     )

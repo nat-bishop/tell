@@ -725,6 +725,89 @@ async def _ai_chain_task(game_id: str, player_id: str, sub_round: int, delay: fl
         log.exception("ai_chain_task_error", game_id=game_id, player_id=player_id)
 
 
+async def on_brain_test_challenge(game_id: str, challenge_index: int) -> None:
+    """Schedule AI answers for a brain test challenge."""
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        return
+
+    state = session.state
+    ai_players = [p for p in state.players if p.role == PlayerRole.AI and p.is_alive]
+    if not ai_players:
+        return
+
+    tasks: list[asyncio.Task] = []
+    for player in ai_players:
+        delay = random.uniform(1.5, 6)
+        tasks.append(
+            asyncio.create_task(_ai_brain_test_task(game_id, player.id, challenge_index, delay))
+        )
+
+    _ai_tasks.setdefault(game_id, []).extend(tasks)
+
+
+async def _ai_brain_test_task(
+    game_id: str, player_id: str, challenge_index: int, delay: float
+) -> None:
+    """AI player submits a brain test answer after a delay."""
+    try:
+        await asyncio.sleep(delay)
+
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session or session.state.phase != GamePhase.BRAIN_TEST:
+            return
+
+        state = session.state
+        rs = state.current_round
+        if not rs or challenge_index >= len(rs.brain_challenges):
+            return
+
+        ch = rs.brain_challenges[challenge_index]
+        if player_id in ch.responses:
+            return
+
+        personality = get_personality(game_id, player_id)
+
+        from backend.llm.agents import generate_brain_test_answer
+
+        answer = await generate_brain_test_answer(ch.question, personality.name, game_id=game_id)
+        if not answer:
+            answer = "I don't know"
+
+        cm = get_connection_manager()
+        lock = cm.get_lock(game_id)
+
+        async with lock:
+            session = repo.get(game_id)
+            if not session or session.state.phase != GamePhase.BRAIN_TEST:
+                return
+            rs = session.state.current_round
+            if not rs or challenge_index >= len(rs.brain_challenges):
+                return
+            ch = rs.brain_challenges[challenge_index]
+            if player_id in ch.responses:
+                return
+            ch.responses[player_id] = answer.strip()
+
+            log.info(
+                "ai_brain_test_answer",
+                game_id=game_id,
+                player_id=player_id,
+                challenge_index=challenge_index,
+            )
+
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        log.exception(
+            "ai_brain_test_error",
+            game_id=game_id,
+            player_id=player_id,
+        )
+
+
 def cleanup_game(game_id: str) -> None:
     """Clean up all AI state for a game."""
     cancel_all(game_id)

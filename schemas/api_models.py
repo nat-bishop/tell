@@ -89,6 +89,7 @@ class PhaseChangedEvent(GameEvent):
     questions: list[dict] = Field(default_factory=list)
     synthesis: str | None = None
     writing_begins_at: str | None = None
+    action_starts_at: str | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):
@@ -198,6 +199,33 @@ class ChainProgressEvent(GameEvent):
     total: int
 
 
+class NarrationEvent(GameEvent):
+    event_type: Literal["narration"] = "narration"
+    text: str
+    trigger: str
+
+
+class BrainTestChallengeEvent(GameEvent):
+    event_type: Literal["brain_test_challenge"] = "brain_test_challenge"
+    challenge_index: int
+    challenge_type: str
+    question: str
+    sub_deadline: str | None = None
+    phase_duration: int | None = None
+
+
+class BrainTestResultsEvent(GameEvent):
+    event_type: Literal["brain_test_results"] = "brain_test_results"
+    # player_id -> list of {question, answer, correct_answer, challenge_type}
+    results: dict[str, list[dict]]
+
+
+class SubmitBrainTestAnswerRequest(BaseModel):
+    player_id: str
+    answer: str
+    challenge_index: int
+
+
 # --- Response models ---
 
 
@@ -257,6 +285,18 @@ class SubmitResponseRequest(BaseModel):
 class CastVoteRequest(BaseModel):
     player_id: str
     target_ids: list[str]
+
+
+class CastComedyVoteRequest(BaseModel):
+    player_id: str
+    target_id: str
+
+
+class ComedyWinnerEvent(GameEvent):
+    event_type: Literal["comedy_winner"] = "comedy_winner"
+    winner_id: str
+    winner_alias: str
+    vote_count: int
 
 
 class SubmitChainWordRequest(BaseModel):

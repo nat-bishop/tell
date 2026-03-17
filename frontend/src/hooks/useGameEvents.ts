@@ -34,6 +34,10 @@ export function useGameEvents(gameId: string, playerId: string) {
       onVerdict: useGameStore.getState().onVerdict,
       onChainSeed: useGameStore.getState().onChainSeed,
       onChainProgress: useGameStore.getState().onChainProgress,
+      onNarration: useGameStore.getState().onNarration,
+      onComedyWinner: useGameStore.getState().onComedyWinner,
+      onBrainTestChallenge: useGameStore.getState().onBrainTestChallenge,
+      onBrainTestResults: useGameStore.getState().onBrainTestResults,
       onOpen: useGameStore.getState().onOpen,
       onError: useGameStore.getState().onError,
     }, lastSeq);

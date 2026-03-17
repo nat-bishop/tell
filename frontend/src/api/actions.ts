@@ -91,6 +91,33 @@ export function castVote(
   });
 }
 
+export function castComedyVote(
+  gameId: string,
+  playerId: string,
+  targetId: string,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/comedy-vote`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId, target_id: targetId }),
+  });
+}
+
+export function submitBrainTestAnswer(
+  gameId: string,
+  playerId: string,
+  answer: string,
+  challengeIndex: number,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/brain-test-answer`, {
+    method: "POST",
+    body: JSON.stringify({
+      player_id: playerId,
+      answer,
+      challenge_index: challengeIndex,
+    }),
+  });
+}
+
 export function submitChainWord(
   gameId: string,
   playerId: string,

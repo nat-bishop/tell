@@ -11,7 +11,9 @@ Human Client B  ◄── SSE: phase_changed ───────────�
 AI Player       ── internal asyncio task ──────────┘  all queues
 
 GET /games/{id}/events     →  persistent EventSource per client
-POST /games/{id}/*         →  actions (join, start, answer, question, respond, nominate, vote, chain-word)
+POST /games/{id}/*         →  actions (join, start, answer, question, respond,
+                               nominate, vote, chain-word, comedy-vote,
+                               brain-test-answer)
 POST /matchmaking/join|leave  →  matchmaking queue
 GET /matchmaking/events    →  matchmaking SSE (lobby_status, game_assigned)
 GET /matchmaking/status    →  current lobby state
@@ -39,23 +41,29 @@ Each connected client gets an `asyncio.Queue[GameEvent | None]`. The `Connection
 
 ## State Machine
 
-Three round types cycle: **Task → Interrogation → Word Chain → Task → ...**. Pre-generated at game start via `select_round_types()` into `state.round_types`.
+Four round types cycle: **Task → Word Chain → Brain Test → Interrogation → Task → ...**. Pre-generated at game start via `select_round_types()` into `state.round_types`.
 
 **Task** (constrained creative prompt, no Q&A):
 ```
-PROMPT (25s) → REVIEW (40s) → ELIMINATION (8s) → next round
-```
-
-**Interrogation** (hot seat with LLM question synthesis):
-```
-PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (8s) → next round
+PROMPT (25s) → REVIEW (40s) → ELIMINATION (12s) → next round
 ```
 
 **Word Chain** (word association, no written prompt):
 ```
-CHAIN (64s safety timer) → REVIEW (40s) → ELIMINATION (8s) → next round
+CHAIN (64s safety timer) → REVIEW (40s) → ELIMINATION (12s) → next round
 ```
 CHAIN is subdivided into 8 sub-rounds of 8s each, driven by `_start_chain_loop` background task.
+
+**Brain Test** (competitive challenges, no voting or elimination):
+```
+BRAIN_TEST (75s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
+```
+BRAIN_TEST runs 5 challenges at 12s each via `_start_brain_test_loop`. Results stored in `state.brain_test_evidence` and carried to the next voting round. `do_after_brain_test()` starts the next round directly — no ELIMINATION.
+
+**Interrogation** (hot seat with LLM question synthesis):
+```
+PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (12s) → next round
+```
 
 ### Phase Transitions
 
@@ -69,9 +77,11 @@ All transitions funnel through helper functions in `transitions.py` (shared by `
 | `handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to `do_*_complete` |
 | `do_prompt_complete` | All answers in | TASK → REVIEW; INTERROGATION → NOMINATE |
 | `do_question_complete` | All questions in | Interrogation: calls LLM synthesis, broadcasts `synthesis_ready`, → RESPOND |
-| `do_vote_resolution` | REVIEW timer expires | Tallies multi-votes, generates LLM verdict, → ELIMINATION |
+| `do_vote_resolution` | REVIEW timer expires | Tallies multi-votes + comedy votes, generates LLM verdict, → ELIMINATION |
 | `do_after_elimination` | ELIMINATION timer | Checks game-over; branches on next round type |
 | `do_chain_complete` | CHAIN safety timer or sub-rounds done | → REVIEW |
+| `do_brain_test_complete` | BRAIN_TEST safety timer or challenges done | Builds results, stores evidence, → BRAIN_TEST_RESULTS |
+| `do_after_brain_test` | BRAIN_TEST_RESULTS timer | No elimination — starts next round directly |
 | `initialize_and_start_game` | Host start or matchmaking fire | Spawns AI, assigns personalities, transitions to first round |
 
 **Early completion**: When all players submit (answers, nominations, questions, responses), the timer is cancelled and the transition happens immediately. Exceptions: **REVIEW never early-completes**; **CHAIN** uses its own sub-round loop, not early-complete.
@@ -81,6 +91,8 @@ All transitions funnel through helper functions in `transitions.py` (shared by `
 **Interrogation QUESTION → synthesis**: when all non-nominated players submit questions, `synthesize_questions()` (LLM, 5s timeout) weaves them into one cross-examination paragraph. Fallback: numbered list.
 
 **Word Chain sub-round loop**: `_start_chain_loop` runs as a background `asyncio.Task`. Each iteration sleeps `chain_sub_round_duration` (8s), picks the next seed via `select_chain_next_word()` (prefers unique/single-submitter words), broadcasts `ChainSeedEvent`, then calls `on_chain_sub_round()` to schedule AI associations. After all sub-rounds, cancels safety timer and calls `do_chain_complete`.
+
+**Brain Test sub-round loop**: `_start_brain_test_loop` mirrors Word Chain architecture. Each iteration broadcasts `BrainTestChallengeEvent` with the current challenge, then calls `on_brain_test_challenge()` to schedule AI answers (via `_ai_brain_test_task()`, generate-then-lock pattern). After all challenges, cancels safety timer and calls `do_brain_test_complete`.
 
 ### Game-Over Conditions
 
@@ -126,8 +138,9 @@ The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game
 | RESPOND | AI targets respond to their question | 2-8s |
 | REVIEW | Each AI casts votes | 5-15s |
 | CHAIN (each sub-round) | Each AI submits a word association | 1-4s |
+| BRAIN_TEST (each challenge) | Each AI submits an answer | 1-4s |
 
-CHAIN sub-rounds are scheduled via `on_chain_sub_round(game_id, sub_round)` called by `_start_chain_loop` at the start of each sub-round. AI chain tasks use the same generate-then-lock pattern but are registered via `register_task()` rather than replacing the task list (so they don't cancel phase tasks).
+CHAIN sub-rounds scheduled via `on_chain_sub_round()` called by `_start_chain_loop`. Brain test challenges scheduled via `on_brain_test_challenge()` called by `_start_brain_test_loop`. Both use the same generate-then-lock pattern and register via `register_task()` rather than replacing the phase task list.
 
 All tasks stored in `_ai_tasks[game_id]` and cancelled on phase change via `cancel_all()`.
 
@@ -151,8 +164,9 @@ Single module-level `ai_agent: Agent[AIPlayerDeps, str]` in `agents.py`. System 
 | `synthesize_questions` | QUESTION→RESPOND | System-level call; weaves N questions into one paragraph. 5s timeout |
 | `generate_verdict` | Elimination | System-level call; one-line dramatic sentence. 3s timeout |
 | `generate_association` | CHAIN sub-round | System-level call; single word, personality-aware style hints. 3s timeout |
+| `generate_narration` | Transition hooks | System-level call; dry literary narrator voice. 3s timeout (5s for game_over) |
 
-`synthesize_questions`, `generate_verdict`, and `generate_association` use `_run_system_agent()` — a separate ephemeral `Agent` with no personality context and short timeouts.
+`synthesize_questions`, `generate_verdict`, `generate_association`, and `generate_narration` use `_run_system_agent()` — a separate ephemeral `Agent` with no personality context and short timeouts.
 
 5 personalities: paranoid, chill, overachiever, glitchy, philosopher. Each has `answer_system_prompt`, `vote_strategy`, `question_style`, and `fallback_response`.
 
@@ -170,7 +184,9 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 **Timer**: Server sends `phase_deadline` (ISO timestamp). Client counts down locally via `useTimer` hook (1s interval).
 
-**Phase interstitials**: `PhaseInterstitial` component briefly displays the incoming phase name and round type label between transitions, with CSS `animate-interstitial-in/out` animations.
+**Phase interstitials**: `PhaseInterstitial` has 5 rotating robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that cycle per round. Each phase gets directive subtitle text. Spectator-specific variants and situation lines ("N units remain") derived from cumulative context fields in the store (`totalRounds`, `lastEliminationWasHuman`, `humansEliminated`, `aisEliminated`). On first game start, `game/[id]/page.tsx` shows a cold open sequence ("N UNITS ASSEMBLED / some are not what they seem") before round 1.
+
+**Narrator**: `Narration` component receives `narrationText`/`narrationTrigger` from the store. Fades in, holds, then auto-dismisses after 6s. `game_over` trigger persists. `NarrationInline` used on the game over screen.
 
 **Matchmaking**: `/queue` page uses `connectMatchmakingEvents()` (separate SSE client from game events) to receive `lobby_status` and `game_assigned` events. On `game_assigned`, stores `{playerId, alias}` in `sessionStorage` keyed by game ID, then redirects to `/game/{id}`.
 
@@ -181,12 +197,14 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 | `AnswerCard` | Shared | Answer-first card; alias + role label pinned to bottom; renders as `button` or `div` |
 | `PlayerBar` | All gameplay phases | Persistent strip showing alive players and connection status |
 | `VoteOverlay` | REVIEW | Multi-select vote UI (up to 3, changeable) |
-| `PhaseInterstitial` | Phase transitions | Overlay showing phase name + round type, fades in/out |
+| `PhaseInterstitial` | Phase transitions | Robot voice archetype overlay with directive subtitles and situation lines |
+| `Narration` | Async narrator events | Floating overlay, auto-dismiss 6s; `NarrationInline` for game over |
+| `BrainTestPhase` | BRAIN_TEST / BRAIN_TEST_RESULTS | Challenge input + per-player results grid |
 | `WordChainPhase` | CHAIN | Seed word display, growing chain thread, single-word input per sub-round |
 | `QuestionPhase` | QUESTION | Shows target's answer, write anonymous follow-up question |
 | `RespondPhase` | RESPOND | Answer received question (or synthesis in Interrogation) |
 | `NominatePhase` | NOMINATE | Pick player for hot seat |
-| `ReviewPhase` | REVIEW | `AnswerCard` grid with inline Q&A + voting |
+| `ReviewPhase` | REVIEW | `AnswerCard` grid with inline Q&A + voting + comedy vote row |
 
 ## Prompt Selection
 
@@ -195,3 +213,5 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 **Task prompts**: 42 prompts across 7 categories (haiku, concise, humor, corporate, casual, style, emotional_task). Used in Task rounds. Separate `used_task_prompt_indices` + `last_task_prompt_category` tracked in `TellGameState`. Same no-repeat, no-same-category rules via `select_task_prompt()`.
 
 **Word Chain seeds**: 100+ seed words in `schemas/word_chain.py`. `select_seed_word()` avoids recently used seeds.
+
+**Brain test challenges**: 20 challenges across 4 types (estimation, common_knowledge, trick, pattern) in `schemas/prompts.py`. `select_brain_test_challenges(n)` picks a balanced mix of `n` (default 5). Challenges have a `correct_answer` field used for display in results.

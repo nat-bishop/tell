@@ -26,21 +26,21 @@ export function connectMatchmakingEvents(
   const url = `${API_URL}/matchmaking/events?player_id=${playerId}`;
   const es = new EventSource(url);
 
-  es.addEventListener("lobby_status", (e: MessageEvent) => {
-    try {
-      callbacks.onLobbyStatus(JSON.parse(e.data));
-    } catch {
-      console.error("Failed to parse lobby_status event", e.data);
-    }
-  });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const eventMap: Record<string, (data: any) => void> = {
+    lobby_status: callbacks.onLobbyStatus,
+    game_assigned: callbacks.onGameAssigned,
+  };
 
-  es.addEventListener("game_assigned", (e: MessageEvent) => {
-    try {
-      callbacks.onGameAssigned(JSON.parse(e.data));
-    } catch {
-      console.error("Failed to parse game_assigned event", e.data);
-    }
-  });
+  for (const [eventType, handler] of Object.entries(eventMap)) {
+    es.addEventListener(eventType, (e: MessageEvent) => {
+      try {
+        handler(JSON.parse(e.data));
+      } catch {
+        console.error(`Failed to parse ${eventType} event`, e.data);
+      }
+    });
+  }
 
   es.onerror = () => {
     console.warn("Matchmaking SSE error, will auto-reconnect");

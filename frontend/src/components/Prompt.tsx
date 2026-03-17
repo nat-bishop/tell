@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitAnswer } from "@/api/actions";
 import { SystemText } from "./SystemText";
+import { GameTextarea } from "./GameTextarea";
 
 const robotJustification: Record<string, string> = {
   haiku: "5-7-5 syllable structure. trivially optimizable.",
@@ -98,22 +99,11 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
         null
       ) : !hasSubmitted ? (
         <div className="w-full max-w-md animate-fade-in">
-          <textarea
+          <GameTextarea
             value={answer}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                handleSubmit();
-              }
-            }}
-            onChange={(e) => {
-              setAnswer(e.target.value);
-              e.target.style.height = "auto";
-              e.target.style.height = e.target.scrollHeight + "px";
-            }}
+            onChange={setAnswer}
+            onSubmit={handleSubmit}
             maxLength={280}
-            rows={1}
-            className="w-full resize-none border-b bg-transparent px-0 py-2 min-h-[44px] font-literary text-[1.1rem] leading-[1.6] text-ink outline-none border-rule"
             placeholder="your answer..."
             autoFocus
           />

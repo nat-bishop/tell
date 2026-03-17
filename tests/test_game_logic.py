@@ -309,14 +309,16 @@ class TestPhaseTransitions:
         assert result.phase_deadline is not None
 
     def test_select_round_types(self):
-        types = select_round_types(6)
+        types = select_round_types(8)
         assert types == [
             RoundType.TASK,
-            RoundType.INTERROGATION,
             RoundType.WORD_CHAIN,
+            RoundType.BRAIN_TEST,
+            RoundType.INTERROGATION,
             RoundType.TASK,
-            RoundType.INTERROGATION,
             RoundType.WORD_CHAIN,
+            RoundType.BRAIN_TEST,
+            RoundType.INTERROGATION,
         ]
 
     def test_transition_to_task_prompt(self):
