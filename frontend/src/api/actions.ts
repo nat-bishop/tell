@@ -118,6 +118,22 @@ export function submitBrainTestAnswer(
   });
 }
 
+export function submitMatchupVote(
+  gameId: string,
+  playerId: string,
+  matchupIndex: number,
+  choice: number,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/matchup-vote`, {
+    method: "POST",
+    body: JSON.stringify({
+      player_id: playerId,
+      matchup_index: matchupIndex,
+      choice,
+    }),
+  });
+}
+
 export function sendDiscussionMessage(
   gameId: string,
   playerId: string,

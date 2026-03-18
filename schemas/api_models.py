@@ -93,6 +93,8 @@ class PhaseChangedEvent(GameEvent):
     # Discussion sub-phase timestamps (REVIEW only)
     discuss_starts_at: str | None = None
     vote_starts_at: str | None = None
+    # Matchup data (Task rounds)
+    matchups: list[dict] | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):
@@ -230,6 +232,37 @@ class AbilityAwardedEvent(GameEvent):
 class ScanResultEvent(GameEvent):
     event_type: Literal["scan_result"] = "scan_result"
     results: list[dict]  # [{player_id, alias, claimed_role}]
+
+
+class MatchupChallengeEvent(GameEvent):
+    event_type: Literal["matchup_challenge"] = "matchup_challenge"
+    matchup_index: int
+    left_player_id: str
+    left_alias: str
+    left_answer: str
+    right_player_id: str
+    right_alias: str
+    right_answer: str
+    prompt_text: str
+    sub_deadline: str | None = None
+    phase_duration: int | None = None
+
+
+class MatchupResultsEvent(GameEvent):
+    event_type: Literal["matchup_results"] = "matchup_results"
+    matchup_results: list[dict]  # per-matchup vote tallies
+    eliminated_id: str | None
+    eliminated_alias: str | None
+    was_human: bool | None
+    margins: dict[str, int] = Field(default_factory=dict)  # player_id -> margin
+
+
+class SubmitMatchupVoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
+    matchup_index: int
+    choice: int  # 0=left, 1=right
 
 
 class SubmitBrainTestAnswerRequest(BaseModel):

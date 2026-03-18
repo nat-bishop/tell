@@ -139,6 +139,13 @@ function getDirective(
           ? `${nominatedAlias} faces the group`
           : "the suspect responds",
       };
+    case "matchup":
+      return {
+        text: "MATCHUP",
+        subtitle: "who sounds more human?",
+        spectatorText: "MATCHUP",
+        spectatorSubtitle: "the group compares answers",
+      };
     case "review":
       return {
         text: "IDENTIFY HUMAN",

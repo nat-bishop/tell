@@ -28,6 +28,8 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
     myAnswer,
     roundType,
     writingBeginsAt,
+    myMatchupPrompt,
+    byePlayerId,
   } = useGameStore();
   const [answer, setAnswer] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -64,6 +66,8 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   const isReading = !writingOpen;
+  const isBye = roundType === "task" && byePlayerId === playerId;
+  const displayPrompt = myMatchupPrompt ?? promptText;
   const justification = roundType === "task" && promptCategory
     ? robotJustification[promptCategory] || "task loaded."
     : null;
@@ -77,9 +81,18 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
         )}
       </div>
 
-      <p className="max-w-md text-center font-literary text-[1.3rem] italic leading-[1.6] text-ink">
-        {promptText}
-      </p>
+      {isBye ? (
+        <div className="flex flex-col items-center gap-4">
+          <p className="max-w-md text-center font-literary text-[1.2rem] italic leading-[1.6] text-dim">
+            you have a bye this round
+          </p>
+          <SystemText>you&apos;ll vote on matchups next</SystemText>
+        </div>
+      ) : (
+        <p className="max-w-md text-center font-literary text-[1.3rem] italic leading-[1.6] text-ink">
+          {displayPrompt}
+        </p>
+      )}
 
       {justification && (
         <div

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 from schemas.api_models import (
     EliminationEvent,
     GameOverEvent,
+    MatchupResultsEvent,
     PhaseChangedEvent,
     VoteResultsEvent,
 )
@@ -20,6 +21,7 @@ from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
     BrainTestChallenge,
     GamePhase,
+    Matchup,
     Player,
     PlayerRole,
     RoundState,
@@ -46,11 +48,16 @@ def get_player_by_id(state: TellGameState, player_id: str) -> Player | None:
 
 
 def fill_missing_answers(state: TellGameState) -> None:
-    """Fill NO_RESPONSE for alive players who haven't answered."""
+    """Fill NO_RESPONSE for alive players who haven't answered.
+
+    For matchup Task rounds, only paired players need answers (bye player excluded).
+    """
     rs = state.current_round
     if not rs:
         return
     for p in get_alive_players(state):
+        if p.id == rs.bye_player_id:
+            continue
         if p.id not in rs.answers:
             rs.answers[p.id] = NO_RESPONSE
 
@@ -125,6 +132,7 @@ _INTERSTITIAL_HOLD: dict[GamePhase, int] = {
     GamePhase.RESPOND: 2,
     GamePhase.REVIEW: 2,
     GamePhase.ELIMINATION: 2,
+    GamePhase.MATCHUP: 3,
 }
 
 
@@ -146,6 +154,8 @@ def get_phase_duration(
         return settings.brain_test_duration
     if phase == GamePhase.BRAIN_TEST_RESULTS:
         return settings.brain_test_results_duration
+    if phase == GamePhase.MATCHUP:
+        return settings.matchup_duration
     durations = {
         GamePhase.QUESTION: settings.question_duration,
         GamePhase.RESPOND: settings.respond_duration,
@@ -358,6 +368,179 @@ def transition_to_nominate(state: TellGameState, duration: int) -> TellGameState
 
 def transition_to_elimination(state: TellGameState, duration: int) -> TellGameState:
     return _transition_to_phase(state, GamePhase.ELIMINATION, duration)
+
+
+def transition_to_matchup(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.MATCHUP, duration)
+
+
+def generate_matchup_pairs(
+    state: TellGameState,
+) -> tuple[list[tuple[str, str]], str | None]:
+    """Shuffle alive players into pairs. Odd count → one bye player.
+
+    Returns (pairs, bye_player_id).
+    """
+    alive = [p for p in state.players if p.is_alive]
+    ids = [p.id for p in alive]
+    random.shuffle(ids)
+
+    bye_id: str | None = None
+    if len(ids) % 2 == 1:
+        bye_id = ids.pop()
+
+    pairs: list[tuple[str, str]] = []
+    for i in range(0, len(ids), 2):
+        pairs.append((ids[i], ids[i + 1]))
+
+    return pairs, bye_id
+
+
+def transition_to_task_matchup_prompt(
+    state: TellGameState, duration: int, reading_duration: int = 0
+) -> TellGameState:
+    """Start a new Task round with per-pair matchup prompts."""
+    from schemas.prompts import select_task_prompt
+
+    state.round_number += 1
+
+    pairs, bye_id = generate_matchup_pairs(state)
+
+    matchups: list[Matchup] = []
+    for left_id, right_id in pairs:
+        idx, prompt = select_task_prompt(
+            state.used_task_prompt_indices,
+            state.last_task_prompt_category,
+        )
+        state.used_task_prompt_indices.append(idx)
+        state.last_task_prompt_category = prompt.category.value
+        matchups.append(
+            Matchup(
+                pair=[left_id, right_id],
+                prompt_text=prompt.text,
+                prompt_category=prompt.category.value,
+            )
+        )
+
+    # Use the first pair's prompt as the round-level prompt_text (for narrator context)
+    first_prompt = matchups[0].prompt_text if matchups else "matchup"
+    first_category = matchups[0].prompt_category if matchups else "task"
+
+    now = datetime.now(UTC)
+    state.current_round = RoundState(
+        round_number=state.round_number,
+        prompt_text=first_prompt,
+        prompt_category=first_category,
+        round_type=RoundType.TASK,
+        matchups=matchups,
+        current_matchup=0,
+        bye_player_id=bye_id,
+        writing_begins_at=(
+            now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
+        ),
+    )
+    state.phase = GamePhase.PROMPT
+    hold = get_interstitial_hold(GamePhase.PROMPT)
+    state.phase_deadline = now + timedelta(seconds=duration + hold)
+    return state
+
+
+def resolve_matchup_votes(
+    state: TellGameState, seq_fn
+) -> tuple[
+    TellGameState,
+    MatchupResultsEvent,
+    EliminationEvent,
+]:
+    """Tally per-matchup LEFT/RIGHT votes, compute margins, eliminate widest-margin loser."""
+    rs = state.current_round
+    matchups = rs.matchups if rs else []
+
+    # Check for double vote ability
+    double_vote_holder = None
+    if state.active_ability and state.active_ability.ability_type == "double_vote":
+        double_vote_holder = state.active_ability.holder_id
+
+    # Per-matchup results and player margin tracking
+    matchup_results_list: list[dict] = []
+    # margin = opponent_votes - my_votes (positive means I lost by that many)
+    player_margins: dict[str, int] = {}
+    player_map = {p.id: p for p in state.players}
+
+    for i, m in enumerate(matchups):
+        left_id, right_id = m.pair[0], m.pair[1]
+        left_votes = 0
+        right_votes = 0
+
+        for voter_id, choice in m.votes.items():
+            weight = 2 if voter_id == double_vote_holder else 1
+            if choice == 0:
+                left_votes += weight
+            else:
+                right_votes += weight
+
+        left_player = player_map.get(left_id)
+        right_player = player_map.get(right_id)
+
+        matchup_results_list.append({
+            "matchup_index": i,
+            "left_player_id": left_id,
+            "left_alias": left_player.alias if left_player else left_id,
+            "left_votes": left_votes,
+            "right_player_id": right_id,
+            "right_alias": right_player.alias if right_player else right_id,
+            "right_votes": right_votes,
+            "prompt_text": m.prompt_text,
+        })
+
+        # Each player is in exactly one matchup
+        player_margins[left_id] = right_votes - left_votes
+        player_margins[right_id] = left_votes - right_votes
+
+    # Find widest-margin loser (highest positive margin)
+    eliminated_id = None
+    eliminated_alias = None
+    was_human = None
+    vote_count = 0
+
+    if player_margins:
+        max_margin = max(player_margins.values())
+        if max_margin > 0:
+            # Only eliminate if someone actually lost
+            losers = [pid for pid, m in player_margins.items() if m == max_margin]
+            eliminated_id = random.choice(losers) if len(losers) > 1 else losers[0]
+        elif max_margin == 0:
+            # All ties — random elimination among all paired players
+            eliminated_id = random.choice(list(player_margins.keys()))
+
+        if eliminated_id:
+            for p in state.players:
+                if p.id == eliminated_id:
+                    p.is_alive = False
+                    p.eliminated_round = state.round_number
+                    eliminated_alias = p.alias
+                    was_human = p.role == PlayerRole.HUMAN
+                    vote_count = player_margins.get(eliminated_id, 0)
+                    break
+
+    results_event = MatchupResultsEvent(
+        seq=seq_fn(),
+        matchup_results=matchup_results_list,
+        eliminated_id=eliminated_id,
+        eliminated_alias=eliminated_alias,
+        was_human=was_human,
+        margins=player_margins,
+    )
+
+    elimination = EliminationEvent(
+        seq=seq_fn(),
+        eliminated_id=eliminated_id,
+        eliminated_alias=eliminated_alias,
+        was_human=was_human,
+        vote_count=abs(vote_count),
+    )
+
+    return state, results_event, elimination
 
 
 def resolve_votes(
@@ -605,7 +788,22 @@ def build_state_sync(
         prompt_category = round_state.prompt_category
         round_type = round_state.round_type
 
-        # Answers visible during question, respond, review, elimination, game_over
+        # For matchup Task rounds, show the player's specific prompt during PROMPT
+        if (
+            round_state.matchups
+            and state.phase == GamePhase.PROMPT
+        ):
+            for m in round_state.matchups:
+                if player_id in m.pair:
+                    prompt_text = m.prompt_text
+                    prompt_category = m.prompt_category
+                    break
+            else:
+                # Bye player
+                prompt_text = None
+                prompt_category = None
+
+        # Answers visible during question, respond, review, elimination, game_over, matchup
         visible_phases = (
             GamePhase.QUESTION,
             GamePhase.RESPOND,
@@ -613,6 +811,7 @@ def build_state_sync(
             GamePhase.ELIMINATION,
             GamePhase.GAME_OVER,
             GamePhase.NOMINATE,
+            GamePhase.MATCHUP,
         )
         if state.phase in visible_phases:
             answers = round_state.answers

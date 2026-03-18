@@ -19,6 +19,7 @@ class GamePhase(enum.StrEnum):
     GAME_OVER = "game_over"
     BRAIN_TEST = "brain_test"
     BRAIN_TEST_RESULTS = "brain_test_results"
+    MATCHUP = "matchup"
 
 
 class RoundType(enum.StrEnum):
@@ -64,6 +65,15 @@ class BrainTestChallenge(BaseModel):
     responses: dict[str, int] = Field(default_factory=dict)  # player_id -> selected index
 
 
+class Matchup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pair: list[str]  # [left_player_id, right_player_id]
+    prompt_text: str
+    prompt_category: str
+    votes: dict[str, int] = Field(default_factory=dict)  # voter_id -> 0=left/1=right
+
+
 class RoundState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -87,6 +97,10 @@ class RoundState(BaseModel):
     brain_challenges: list[BrainTestChallenge] = Field(default_factory=list)
     # Discussion — rate limiting per player during REVIEW
     discussion_counts: dict[str, int] = Field(default_factory=dict)
+    # Matchup (Task 1v1)
+    matchups: list[Matchup] = Field(default_factory=list)
+    current_matchup: int = 0
+    bye_player_id: str | None = None
 
 
 class NarratorEntry(BaseModel):

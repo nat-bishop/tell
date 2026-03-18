@@ -15,6 +15,8 @@ export function Elimination() {
     players,
     comedyWinnerAlias,
     eliminatedId,
+    roundType,
+    matchupResults,
   } = useGameStore();
   const [step, setStep] = useState(0);
 
@@ -73,10 +75,31 @@ export function Elimination() {
 
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-8">
-      {/* Step 1: Vote map — who voted for whom */}
+      {/* Step 1: Vote map / Matchup results */}
       {step >= 1 && (
         <div className="animate-fade-in flex flex-col items-center gap-2">
-          {eliminationTieMessage ? (
+          {roundType === "task" && matchupResults ? (
+            /* Matchup results — per-pair vote tallies */
+            <div className="flex flex-col items-center gap-2">
+              {matchupResults.matchup_results.map((mr) => {
+                const leftIsElim = mr.left_player_id === eliminatedId;
+                const rightIsElim = mr.right_player_id === eliminatedId;
+                return (
+                  <div key={mr.matchup_index} className="flex items-center gap-3 font-system text-[0.75rem] tracking-wide">
+                    <span className={`uppercase ${leftIsElim ? "text-warm" : "text-ink"}`}>
+                      {mr.left_alias}
+                    </span>
+                    <span className="text-cold">{mr.left_votes}</span>
+                    <span className="text-dim">&mdash;</span>
+                    <span className="text-cold">{mr.right_votes}</span>
+                    <span className={`uppercase ${rightIsElim ? "text-warm" : "text-ink"}`}>
+                      {mr.right_alias}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : eliminationTieMessage ? (
             <p className="font-system text-[1rem] text-ink tracking-wide">
               {eliminationTieMessage}
             </p>

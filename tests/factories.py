@@ -6,6 +6,7 @@ import uuid
 
 from schemas.game_state import (
     GamePhase,
+    Matchup,
     Player,
     PlayerRole,
     QuestionEntry,
@@ -51,6 +52,8 @@ def make_round_state(
     synthesis: str | None = None,
     verdict: str | None = None,
     votes: dict[str, list[str]] | None = None,
+    matchups: list[Matchup] | None = None,
+    bye_player_id: str | None = None,
 ) -> RoundState:
     return RoundState(
         round_number=round_number,
@@ -65,6 +68,8 @@ def make_round_state(
         synthesis=synthesis,
         verdict=verdict,
         votes=votes or {},
+        matchups=matchups or [],
+        bye_player_id=bye_player_id,
     )
 
 

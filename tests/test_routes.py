@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from schemas.game_state import (
     GamePhase,
+    Matchup,
     QuestionEntry,
     RoundType,
 )
@@ -442,3 +443,70 @@ class TestDiscussionMessage:
             json={"player_id": "h1", "message": "Hello"},
         )
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Matchup vote
+# ---------------------------------------------------------------------------
+
+
+class TestMatchupVote:
+    def _seed_matchup_game(self):
+        game_id, session, players = seed_game(GamePhase.MATCHUP, round_type=RoundType.TASK)
+        session.state.current_round.matchups = [
+            Matchup(
+                pair=["h1", "h2"],
+                prompt_text="test prompt",
+                prompt_category="test",
+            ),
+            Matchup(
+                pair=["a1", "a2"],
+                prompt_text="test prompt 2",
+                prompt_category="test",
+            ),
+        ]
+        return game_id, session, players
+
+    async def test_success(self, client, mock_ai):
+        game_id, session, _ = self._seed_matchup_game()
+        resp = await client.post(
+            f"/games/{game_id}/matchup-vote",
+            json={"player_id": "a1", "matchup_index": 0, "choice": 0},
+        )
+        assert resp.status_code == 200
+        assert session.state.current_round.matchups[0].votes["a1"] == 0
+
+    async def test_wrong_phase(self, client, mock_ai):
+        game_id, _, _ = seed_game(GamePhase.PROMPT)
+        resp = await client.post(
+            f"/games/{game_id}/matchup-vote",
+            json={"player_id": "h1", "matchup_index": 0, "choice": 0},
+        )
+        assert resp.status_code == 400
+        assert "matchup" in resp.json()["detail"].lower()
+
+    async def test_own_matchup_rejected(self, client, mock_ai):
+        game_id, _, _ = self._seed_matchup_game()
+        # h1 is in matchup 0, can't vote on it
+        resp = await client.post(
+            f"/games/{game_id}/matchup-vote",
+            json={"player_id": "h1", "matchup_index": 0, "choice": 0},
+        )
+        assert resp.status_code == 400
+        assert "own matchup" in resp.json()["detail"].lower()
+
+    async def test_invalid_choice(self, client, mock_ai):
+        game_id, _, _ = self._seed_matchup_game()
+        resp = await client.post(
+            f"/games/{game_id}/matchup-vote",
+            json={"player_id": "a1", "matchup_index": 0, "choice": 2},
+        )
+        assert resp.status_code == 400
+
+    async def test_invalid_matchup_index(self, client, mock_ai):
+        game_id, _, _ = self._seed_matchup_game()
+        resp = await client.post(
+            f"/games/{game_id}/matchup-vote",
+            json={"player_id": "a1", "matchup_index": 99, "choice": 0},
+        )
+        assert resp.status_code == 400

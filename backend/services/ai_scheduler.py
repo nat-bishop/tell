@@ -158,6 +158,13 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
         current_prompt = rs.prompt_text
         round_type = rs.round_type
 
+        # For matchup Task rounds, use the player's specific matchup prompt
+        if rs.matchups:
+            for m in rs.matchups:
+                if player_id in m.pair:
+                    current_prompt = m.prompt_text
+                    break
+
         player_map = {p.id: p for p in state.players}
         for pid, answer in rs.answers.items():
             p = player_map.get(pid)
@@ -353,6 +360,12 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player answers a prompt after a delay."""
 
     async def generate() -> tuple[str, list[ModelMessage]] | None:
+        # Skip bye players — they don't answer in matchup rounds
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if session and session.state.current_round:
+            if session.state.current_round.bye_player_id == player_id:
+                return None
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
@@ -372,6 +385,9 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         alive = get_alive_players(state)
         answer_count = len(state.current_round.answers)
         total_count = len(alive)
+        # Exclude bye player from total count in matchup rounds
+        if state.current_round.bye_player_id:
+            total_count -= 1
 
         await cm.broadcast(
             game_id,
@@ -807,6 +823,85 @@ async def _ai_brain_test_task(
     except Exception:
         log.exception(
             "ai_brain_test_error",
+            game_id=game_id,
+            player_id=player_id,
+        )
+
+
+async def on_matchup_challenge(game_id: str, matchup_index: int) -> None:
+    """Schedule AI votes for a matchup challenge (non-pair AI players vote randomly)."""
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        return
+
+    state = session.state
+    rs = state.current_round
+    if not rs or matchup_index >= len(rs.matchups):
+        return
+
+    matchup = rs.matchups[matchup_index]
+    pair_ids = set(matchup.pair)
+
+    # AI players not in the pair can vote
+    ai_voters = [
+        p for p in state.players
+        if p.role == PlayerRole.AI and p.is_alive and p.id not in pair_ids
+    ]
+    if not ai_voters:
+        return
+
+    tasks: list[asyncio.Task] = []
+    for player in ai_voters:
+        delay = random.uniform(2, 8)
+        tasks.append(
+            asyncio.create_task(
+                _ai_matchup_vote_task(game_id, player.id, matchup_index, delay)
+            )
+        )
+
+    _ai_tasks.setdefault(game_id, []).extend(tasks)
+
+
+async def _ai_matchup_vote_task(
+    game_id: str, player_id: str, matchup_index: int, delay: float
+) -> None:
+    """AI player votes on a matchup after a delay."""
+    try:
+        await asyncio.sleep(delay)
+
+        cm = get_connection_manager()
+        lock = cm.get_lock(game_id)
+
+        async with lock:
+            repo = get_game_repository()
+            session = repo.get(game_id)
+            if not session or session.state.phase != GamePhase.MATCHUP:
+                return
+            rs = session.state.current_round
+            if not rs or matchup_index >= len(rs.matchups):
+                return
+            matchup = rs.matchups[matchup_index]
+            if player_id in matchup.votes:
+                return
+
+            # Random choice: 0=left, 1=right
+            choice = random.randint(0, 1)
+            matchup.votes[player_id] = choice
+
+            log.info(
+                "ai_matchup_vote",
+                game_id=game_id,
+                player_id=player_id,
+                matchup_index=matchup_index,
+                choice=choice,
+            )
+
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        log.exception(
+            "ai_matchup_vote_error",
             game_id=game_id,
             player_id=player_id,
         )

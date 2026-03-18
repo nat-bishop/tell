@@ -82,6 +82,18 @@ class Settings:
                 game.get("brain_test_results_duration", 15),
             )
         )
+        self.matchup_duration: int = int(
+            os.environ.get(
+                "TELL_MATCHUP_DURATION",
+                game.get("matchup_duration", 120),
+            )
+        )
+        self.matchup_challenge_duration: int = int(
+            os.environ.get(
+                "TELL_MATCHUP_CHALLENGE_DURATION",
+                game.get("matchup_challenge_duration", 12),
+            )
+        )
 
         # Player limits
         self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))

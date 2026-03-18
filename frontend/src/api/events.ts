@@ -20,6 +20,8 @@ import type {
   DiscussionMessageData,
   AbilityAwardedData,
   ScanResultData,
+  MatchupChallengeData,
+  MatchupResultsData,
 } from "@/hooks/useGameStore";
 
 export interface GameEventCallbacks {
@@ -48,6 +50,8 @@ export interface GameEventCallbacks {
   onDiscussionMessage: (data: DiscussionMessageData) => void;
   onAbilityAwarded: (data: AbilityAwardedData) => void;
   onScanResult: (data: ScanResultData) => void;
+  onMatchupChallenge: (data: MatchupChallengeData) => void;
+  onMatchupResults: (data: MatchupResultsData) => void;
   onOpen: () => void;
   onError: () => void;
 }
@@ -88,6 +92,8 @@ export function connectGameEvents(
     discussion_message: callbacks.onDiscussionMessage,
     ability_awarded: callbacks.onAbilityAwarded,
     scan_result: callbacks.onScanResult,
+    matchup_challenge: callbacks.onMatchupChallenge,
+    matchup_results: callbacks.onMatchupResults,
   };
 
   for (const [eventType, handler] of Object.entries(eventMap)) {

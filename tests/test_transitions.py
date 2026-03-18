@@ -44,7 +44,7 @@ def _get_broadcast_events(game_id):
 
 
 class TestDoPromptComplete:
-    async def test_task_round_goes_to_review(self, fresh_deps, mock_ai, mock_llm):
+    async def test_task_round_goes_to_matchup(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_prompt_complete
 
         _state, session, _ = _make_session(
@@ -55,7 +55,7 @@ class TestDoPromptComplete:
         game_id = _store_session(session)
         await do_prompt_complete(game_id, session)
 
-        assert session.state.phase == GamePhase.REVIEW
+        assert session.state.phase == GamePhase.MATCHUP
 
     async def test_interrogation_round_goes_to_nominate(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_prompt_complete

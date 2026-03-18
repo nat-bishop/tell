@@ -39,6 +39,8 @@ export function useGameEvents(gameId: string, playerId: string) {
       onDiscussionMessage: useGameStore.getState().onDiscussionMessage,
       onAbilityAwarded: useGameStore.getState().onAbilityAwarded,
       onScanResult: useGameStore.getState().onScanResult,
+      onMatchupChallenge: useGameStore.getState().onMatchupChallenge,
+      onMatchupResults: useGameStore.getState().onMatchupResults,
       onOpen: useGameStore.getState().onOpen,
       onError: useGameStore.getState().onError,
     }, lastSeq);

@@ -51,6 +51,7 @@ from schemas.api_models import (
     StatusResponse,
     SubmitAnswerRequest,
     SubmitBrainTestAnswerRequest,
+    SubmitMatchupVoteRequest,
     SubmitQuestionRequest,
     SubmitResponseRequest,
     VoteCastEvent,
@@ -177,6 +178,10 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
         if round_state.writing_begins_at and datetime.now(UTC) < round_state.writing_begins_at:
             raise HTTPException(status_code=400, detail="Reading period — answers not accepted yet")
 
+        # Bye players can't submit answers
+        if round_state.bye_player_id == req.player_id:
+            raise HTTPException(status_code=400, detail="Bye player does not answer")
+
         if req.player_id in round_state.answers:
             raise HTTPException(status_code=400, detail="Already answered")
 
@@ -186,6 +191,9 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
         alive = get_alive_players(state)
         answer_count = len(round_state.answers)
         total_count = len(alive)
+        # Exclude bye player from total in matchup rounds
+        if round_state.bye_player_id:
+            total_count -= 1
 
         event = AnswerSubmittedEvent(
             seq=session.next_seq(),
@@ -555,6 +563,56 @@ async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerReque
             "brain_test_answer",
             player_id=req.player_id,
             challenge_index=req.challenge_index,
+        )
+
+    return {"status": "ok"}
+
+
+@router.post("/{game_id}/matchup-vote", response_model=StatusResponse)
+async def submit_matchup_vote(game_id: str, req: SubmitMatchupVoteRequest):
+    """Cast a vote in a matchup sub-round (LEFT=0 or RIGHT=1)."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.MATCHUP:
+            raise HTTPException(status_code=400, detail="Not in matchup phase")
+
+        result = validate_player_alive(state, req.player_id)
+        if isinstance(result, str):
+            raise HTTPException(status_code=400, detail=result)
+
+        round_state = state.current_round
+        if not round_state:
+            raise HTTPException(status_code=400, detail="No active round")
+
+        if req.matchup_index >= len(round_state.matchups):
+            raise HTTPException(status_code=400, detail="Invalid matchup index")
+
+        if req.choice not in (0, 1):
+            raise HTTPException(status_code=400, detail="Choice must be 0 (left) or 1 (right)")
+
+        matchup = round_state.matchups[req.matchup_index]
+
+        # Players in the pair can't vote on their own matchup
+        if req.player_id in matchup.pair:
+            raise HTTPException(status_code=400, detail="Cannot vote on your own matchup")
+
+        # Overwrite previous vote (changeable)
+        matchup.votes[req.player_id] = req.choice
+        log.info(
+            "matchup_vote_cast",
+            player_id=req.player_id,
+            matchup_index=req.matchup_index,
+            choice=req.choice,
         )
 
     return {"status": "ok"}

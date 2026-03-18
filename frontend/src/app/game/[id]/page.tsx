@@ -12,6 +12,7 @@ import { RespondPhase } from "@/components/RespondPhase";
 import { NominatePhase } from "@/components/NominatePhase";
 import { ReviewPhase } from "@/components/ReviewPhase";
 import { BrainTestPhase } from "@/components/BrainTestPhase";
+import { MatchupPhase } from "@/components/MatchupPhase";
 import { Elimination } from "@/components/Elimination";
 import { GameOver } from "@/components/GameOver";
 import { Narration } from "@/components/Narration";
@@ -86,7 +87,7 @@ function EliminatedBanner() {
 
 const INTERSTITIAL_PHASES = new Set<GamePhase>([
   "prompt", "nominate", "question", "respond", "review", "elimination",
-  "brain_test", "brain_test_results",
+  "brain_test", "brain_test_results", "matchup",
 ]);
 
 const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
@@ -100,6 +101,7 @@ const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   elimination: 12,
   brain_test: 12,
   brain_test_results: 15,
+  matchup: 12,
 };
 
 function ColdOpen({ playerCount }: { playerCount: number }) {
@@ -248,6 +250,7 @@ function GameContent() {
             {(phase === "brain_test" || phase === "brain_test_results") && (
               <BrainTestPhase spectator={!isAlive} />
             )}
+            {phase === "matchup" && <MatchupPhase spectator={!isAlive} />}
             {phase === "review" && <ReviewPhase spectator={!isAlive} />}
             {phase === "elimination" && <Elimination />}
             {phase === "game_over" && <GameOver />}

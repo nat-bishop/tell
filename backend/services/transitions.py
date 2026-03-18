@@ -28,18 +28,20 @@ from backend.services.game_logic import (
     make_game_over_event,
     make_phase_changed_event,
     resolve_comedy_votes,
+    resolve_matchup_votes,
     resolve_nominations,
     resolve_votes,
     score_brain_test,
     transition_to_brain_test,
     transition_to_brain_test_results,
     transition_to_elimination,
+    transition_to_matchup,
     transition_to_nominate,
     transition_to_prompt,
     transition_to_question,
     transition_to_respond,
     transition_to_review,
-    transition_to_task_prompt,
+    transition_to_task_matchup_prompt,
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
@@ -47,6 +49,7 @@ from schemas.api_models import (
     BrainTestChallengeEvent,
     BrainTestResultsEvent,
     ComedyWinnerEvent,
+    MatchupChallengeEvent,
     NarrationEvent,
     NominatedEvent,
     PlayerJoinedEvent,
@@ -249,6 +252,10 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
         elif expired_phase == GamePhase.ELIMINATION:
             await do_after_elimination(game_id, session)
 
+        elif expired_phase == GamePhase.MATCHUP:
+            # Safety timer — resolve matchup votes
+            await do_matchup_complete(game_id, session)
+
         elif expired_phase == GamePhase.BRAIN_TEST:
             # Safety timer — transition to results
             await do_brain_test_complete(game_id, session)
@@ -278,9 +285,8 @@ async def do_prompt_complete(game_id: str, session) -> None:
     )
 
     if round_state and round_state.round_type == RoundType.TASK:
-        # Task rounds skip question/respond — go straight to review
-        transition_to_review(state, settings.review_duration)
-        review_ts = _compute_review_timestamps(state, settings.review_duration)
+        # Task rounds → MATCHUP (1v1 pair voting)
+        transition_to_matchup(state, settings.matchup_duration)
         await cm.broadcast(
             game_id,
             _make_event(
@@ -289,11 +295,12 @@ async def do_prompt_complete(game_id: str, session) -> None:
                 settings,
                 answers=round_state.answers,
                 round_type=round_state.round_type,
-                **review_ts,
             ),
         )
         await _trigger_ability_on_review(game_id, session)
-        next_phase = GamePhase.REVIEW
+        next_phase = GamePhase.MATCHUP
+        # Start the matchup sub-round loop
+        await _start_matchup_loop(game_id, session)
     else:
         # Interrogation — proceed to nomination
         assert round_state, "No active round in PROMPT phase"
@@ -513,7 +520,7 @@ async def do_vote_resolution(game_id: str, session) -> None:
 
 
 async def _trigger_ability_on_review(game_id: str, session) -> None:
-    """Fire passive ability when REVIEW starts. Currently: PARTIAL SCAN.
+    """Fire passive ability when REVIEW or MATCHUP starts. Currently: PARTIAL SCAN.
 
     Assumes caller holds the game lock.
     """
@@ -580,8 +587,22 @@ async def _start_next_round(game_id: str, session) -> None:
 
     if next_round_type == RoundType.TASK:
         total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
-        transition_to_task_prompt(state, total, settings.prompt_reading_duration)
+        transition_to_task_matchup_prompt(state, total, settings.prompt_reading_duration)
         round_state = state.current_round
+        # Build matchup data for PhaseChangedEvent so clients can look up their prompt
+        matchup_data = None
+        if round_state and round_state.matchups:
+            player_map = {p.id: p for p in state.players}
+            matchup_data = [
+                {
+                    "pair": m.pair,
+                    "prompt_text": m.prompt_text,
+                    "prompt_category": m.prompt_category,
+                    "left_alias": player_map[m.pair[0]].alias if m.pair[0] in player_map else "",
+                    "right_alias": player_map[m.pair[1]].alias if m.pair[1] in player_map else "",
+                }
+                for m in round_state.matchups
+            ]
         await cm.broadcast(
             game_id,
             _make_event(
@@ -591,6 +612,7 @@ async def _start_next_round(game_id: str, session) -> None:
                 prompt_text=round_state.prompt_text if round_state else None,
                 prompt_category=round_state.prompt_category if round_state else None,
                 round_type=round_state.round_type if round_state else RoundType.TASK,
+                matchups=matchup_data,
             ),
         )
         await start_phase_timer(game_id, GamePhase.PROMPT, RoundType.TASK)
@@ -778,6 +800,149 @@ async def do_brain_test_complete(game_id: str, session) -> None:
 async def do_after_brain_test(game_id: str, session) -> None:
     """Brain test results done → next round (no elimination)."""
     await _start_next_round(game_id, session)
+
+
+async def do_matchup_complete(game_id: str, session) -> None:
+    """All matchup sub-rounds done → resolve votes → verdict → ELIMINATION.
+
+    Assumes caller holds the game lock.
+    """
+    cm = get_connection_manager()
+    settings = get_settings()
+    state = session.state
+
+    state, matchup_results, elimination = resolve_matchup_votes(state, session.next_seq)
+    await cm.broadcast(game_id, matchup_results)
+    log.info(
+        "matchup_resolved",
+        eliminated_alias=elimination.eliminated_alias,
+        was_human=elimination.was_human,
+    )
+
+    # Generate verdict
+    if elimination.eliminated_id and state.current_round:
+        try:
+            from backend.llm.agents import generate_verdict
+
+            round_state = state.current_round
+            # Find the prompt the eliminated player had
+            elim_prompt = round_state.prompt_text
+            elim_answer = round_state.answers.get(elimination.eliminated_id, "")
+            for m in round_state.matchups:
+                if elimination.eliminated_id in m.pair:
+                    elim_prompt = m.prompt_text
+                    break
+
+            verdict = await generate_verdict(
+                alias=elimination.eliminated_alias or "",
+                was_human=elimination.was_human or False,
+                prompt_text=elim_prompt,
+                answer=elim_answer,
+                vote_count=elimination.vote_count,
+                round_number=round_state.round_number,
+                game_id=game_id,
+            )
+            if verdict:
+                round_state.verdict = verdict
+                await cm.broadcast(
+                    game_id,
+                    VerdictEvent(seq=session.next_seq(), verdict=verdict),
+                )
+        except Exception:
+            log.exception("verdict_generation_failed", game_id=game_id)
+
+    transition_to_elimination(state, settings.elimination_duration)
+    await cm.broadcast(game_id, elimination)
+    await start_phase_timer(game_id, GamePhase.ELIMINATION)
+
+
+async def _start_matchup_loop(game_id: str, session) -> None:
+    """Launch the async sub-round loop for matchup challenges."""
+
+    async def _matchup_loop():
+        try:
+            cm = get_connection_manager()
+            settings = get_settings()
+            repo = get_game_repository()
+            sub_duration = settings.matchup_challenge_duration
+            lock = cm.get_lock(game_id)
+
+            async with lock:
+                session = repo.get(game_id)
+                if not session:
+                    return
+                rs = session.state.current_round
+                if not rs:
+                    return
+                num_matchups = len(rs.matchups)
+
+            for i in range(num_matchups):
+                async with lock:
+                    session = repo.get(game_id)
+                    if not session:
+                        return
+                    state = session.state
+                    if state.phase != GamePhase.MATCHUP:
+                        return
+                    rs = state.current_round
+                    if not rs or i >= len(rs.matchups):
+                        return
+
+                    rs.current_matchup = i
+                    m = rs.matchups[i]
+                    left_id, right_id = m.pair[0], m.pair[1]
+
+                    left_player = get_player_by_id(state, left_id)
+                    right_player = get_player_by_id(state, right_id)
+                    left_answer = rs.answers.get(left_id, "[no response]")
+                    right_answer = rs.answers.get(right_id, "[no response]")
+
+                    sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
+                    state.phase_deadline = sub_deadline
+
+                    await cm.broadcast(
+                        game_id,
+                        MatchupChallengeEvent(
+                            seq=session.next_seq(),
+                            matchup_index=i,
+                            left_player_id=left_id,
+                            left_alias=left_player.alias if left_player else left_id,
+                            left_answer=left_answer,
+                            right_player_id=right_id,
+                            right_alias=right_player.alias if right_player else right_id,
+                            right_answer=right_answer,
+                            prompt_text=m.prompt_text,
+                            sub_deadline=sub_deadline.isoformat(),
+                            phase_duration=sub_duration,
+                        ),
+                    )
+
+                # Schedule AI votes for this matchup
+                from backend.services.ai_scheduler import on_matchup_challenge
+
+                await on_matchup_challenge(game_id, i)
+
+                await asyncio.sleep(sub_duration)
+
+            # All matchups done — transition to results
+            async with lock:
+                session = repo.get(game_id)
+                if not session:
+                    return
+                if session.state.phase != GamePhase.MATCHUP:
+                    return
+                get_timer_manager().cancel_timer(game_id)
+                await do_matchup_complete(game_id, session)
+
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            log.exception("matchup_loop_error", game_id=game_id)
+
+    task = asyncio.create_task(_matchup_loop())
+    from backend.services.ai_scheduler import register_task
+
+    register_task(game_id, task)
 
 
 async def _start_brain_test_loop(game_id: str, session) -> None:

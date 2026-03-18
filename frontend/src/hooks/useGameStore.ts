@@ -12,7 +12,8 @@ export type GamePhase =
   | "elimination"
   | "game_over"
   | "brain_test"
-  | "brain_test_results";
+  | "brain_test_results"
+  | "matchup";
 
 export interface PlayerInfo {
   id: string;
@@ -91,6 +92,7 @@ export interface PhaseChangedData {
   action_starts_at?: string;
   discuss_starts_at?: string;
   vote_starts_at?: string;
+  matchups?: MatchupInfo[];
 }
 
 export interface CountData {
@@ -214,6 +216,46 @@ export interface ScanResultData {
   }>;
 }
 
+export interface MatchupChallengeData {
+  seq: number;
+  matchup_index: number;
+  left_player_id: string;
+  left_alias: string;
+  left_answer: string;
+  right_player_id: string;
+  right_alias: string;
+  right_answer: string;
+  prompt_text: string;
+  sub_deadline: string | null;
+  phase_duration: number | null;
+}
+
+export interface MatchupResultsData {
+  seq: number;
+  matchup_results: Array<{
+    matchup_index: number;
+    left_player_id: string;
+    left_alias: string;
+    left_votes: number;
+    right_player_id: string;
+    right_alias: string;
+    right_votes: number;
+    prompt_text: string;
+  }>;
+  eliminated_id: string | null;
+  eliminated_alias: string | null;
+  was_human: boolean | null;
+  margins: Record<string, number>;
+}
+
+export interface MatchupInfo {
+  pair: string[];
+  prompt_text: string;
+  prompt_category: string;
+  left_alias: string;
+  right_alias: string;
+}
+
 export interface SeqData {
   seq: number;
 }
@@ -333,6 +375,21 @@ interface GameState {
   brainTestWinnerAlias: string | null;
   brainTestAbilityAwarded: string | null;
 
+  // Matchup
+  matchups: MatchupInfo[] | null;
+  myMatchupPrompt: string | null;
+  byePlayerId: string | null;
+  matchupIndex: number;
+  matchupLeftId: string | null;
+  matchupLeftAlias: string | null;
+  matchupLeftAnswer: string | null;
+  matchupRightId: string | null;
+  matchupRightAlias: string | null;
+  matchupRightAnswer: string | null;
+  matchupPromptText: string | null;
+  matchupMyVote: number | null;  // 0=left, 1=right
+  matchupResults: MatchupResultsData | null;
+
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
 
@@ -363,6 +420,8 @@ interface GameState {
   onDiscussionMessage: (data: DiscussionMessageData) => void;
   onAbilityAwarded: (data: AbilityAwardedData) => void;
   onScanResult: (data: ScanResultData) => void;
+  onMatchupChallenge: (data: MatchupChallengeData) => void;
+  onMatchupResults: (data: MatchupResultsData) => void;
   onOpen: () => void;
   onError: () => void;
   reset: () => void;
@@ -444,6 +503,19 @@ const initialState = {
   brainTestWinnerId: null as string | null,
   brainTestWinnerAlias: null as string | null,
   brainTestAbilityAwarded: null as string | null,
+  matchups: null as MatchupInfo[] | null,
+  myMatchupPrompt: null as string | null,
+  byePlayerId: null as string | null,
+  matchupIndex: 0,
+  matchupLeftId: null as string | null,
+  matchupLeftAlias: null as string | null,
+  matchupLeftAnswer: null as string | null,
+  matchupRightId: null as string | null,
+  matchupRightAlias: null as string | null,
+  matchupRightAnswer: null as string | null,
+  matchupPromptText: null as string | null,
+  matchupMyVote: null as number | null,
+  matchupResults: null as MatchupResultsData | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -539,7 +611,16 @@ export const useGameStore = create<GameState>((set) => ({
       myResponseSubmitted: false,
       answerCount: 0,
       totalCount: data.phase === "prompt"
-        ? s.players.filter((p) => p.is_alive).length
+        ? (() => {
+            const alive = s.players.filter((p) => p.is_alive).length;
+            // Subtract bye player for matchup rounds
+            if (data.matchups) {
+              const paired = new Set(data.matchups.flatMap(m => m.pair));
+              const byeCount = s.players.filter(p => p.is_alive && !paired.has(p.id)).length;
+              return alive - byeCount;
+            }
+            return alive;
+          })()
         : 0,
       voteCount: 0,
       voteTotalCount: 0,
@@ -581,6 +662,34 @@ export const useGameStore = create<GameState>((set) => ({
       brainTestWinnerId: null,
       brainTestWinnerAlias: null,
       brainTestAbilityAwarded: null,
+      // Matchup data
+      matchups: data.matchups ?? null,
+      myMatchupPrompt: (() => {
+        if (!data.matchups || !s.playerId) return null;
+        for (const m of data.matchups) {
+          if (m.pair.includes(s.playerId)) return m.prompt_text;
+        }
+        return null; // bye player
+      })(),
+      byePlayerId: (() => {
+        if (!data.matchups || !s.playerId) return null;
+        const allPaired = new Set(data.matchups.flatMap(m => m.pair));
+        const alive = s.players.filter(p => p.is_alive);
+        for (const p of alive) {
+          if (!allPaired.has(p.id)) return p.id;
+        }
+        return null;
+      })(),
+      matchupIndex: 0,
+      matchupLeftId: null,
+      matchupLeftAlias: null,
+      matchupLeftAnswer: null,
+      matchupRightId: null,
+      matchupRightAlias: null,
+      matchupRightAnswer: null,
+      matchupPromptText: null,
+      matchupMyVote: null,
+      matchupResults: null,
     })),
 
   onAnswerSubmitted: (data) =>
@@ -745,6 +854,28 @@ export const useGameStore = create<GameState>((set) => ({
   onScanResult: (data) =>
     set({
       scanResults: data.results,
+      lastSeq: data.seq,
+    }),
+
+  onMatchupChallenge: (data) =>
+    set({
+      matchupIndex: data.matchup_index,
+      matchupLeftId: data.left_player_id,
+      matchupLeftAlias: data.left_alias,
+      matchupLeftAnswer: data.left_answer,
+      matchupRightId: data.right_player_id,
+      matchupRightAlias: data.right_alias,
+      matchupRightAnswer: data.right_answer,
+      matchupPromptText: data.prompt_text,
+      matchupMyVote: null,
+      phaseDeadline: data.sub_deadline,
+      phaseDuration: data.phase_duration ?? 12,
+      lastSeq: data.seq,
+    }),
+
+  onMatchupResults: (data) =>
+    set({
+      matchupResults: data,
       lastSeq: data.seq,
     }),
 

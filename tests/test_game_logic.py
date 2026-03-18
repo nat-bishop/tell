@@ -15,6 +15,7 @@ from backend.services.game_logic import (
     determine_challenge_winner,
     fill_missing_answers,
     fill_missing_responses,
+    generate_matchup_pairs,
     get_next_round_type,
     get_phase_duration,
     is_question_eligible,
@@ -22,6 +23,7 @@ from backend.services.game_logic import (
     make_game_over_event,
     make_phase_changed_event,
     max_votes_for_player,
+    resolve_matchup_votes,
     resolve_nominations,
     resolve_votes,
     sanitize_players_for_client,
@@ -33,7 +35,7 @@ from backend.services.game_logic import (
     transition_to_question,
     transition_to_respond,
     transition_to_review,
-    transition_to_task_prompt,
+    transition_to_task_matchup_prompt,
     validate_player_alive,
 )
 from schemas.constants import NO_RESPONSE
@@ -348,15 +350,17 @@ class TestPhaseTransitions:
             results.add(rt)
         assert results == {RoundType.TASK, RoundType.BRAIN_TEST, RoundType.INTERROGATION}
 
-    def test_transition_to_task_prompt(self):
+    def test_transition_to_task_matchup_prompt(self):
         state, _ = make_standard_game()
         state.round_number = 0
-        result = transition_to_task_prompt(state, 25)
+        result = transition_to_task_matchup_prompt(state, 25)
         assert result.phase == GamePhase.PROMPT
         assert result.round_number == 1
         assert result.current_round is not None
         assert result.current_round.round_type == RoundType.TASK
         assert result.current_round.prompt_text is not None
+        # Should have matchups
+        assert len(result.current_round.matchups) > 0
 
 
 # ---------------------------------------------------------------------------
@@ -531,14 +535,15 @@ class TestTaskPrompts:
         state, _ = make_standard_game()
         state.round_number = 0
 
-        # Use task prompt
-        result = transition_to_task_prompt(state, 25)
-        assert len(result.used_task_prompt_indices) == 1
+        # Use task matchup prompt (creates per-pair prompts)
+        result = transition_to_task_matchup_prompt(state, 25)
+        # Each matchup pair gets a prompt, so task indices should be populated
+        assert len(result.used_task_prompt_indices) >= 1
         assert len(result.used_prompt_indices) == 0  # regular prompts untouched
 
         # Use interrogation prompt
         result2 = transition_to_prompt(result, 45)
-        assert len(result2.used_task_prompt_indices) == 1  # task indices untouched
+        assert len(result2.used_task_prompt_indices) >= 1  # task indices untouched
         assert len(result2.used_prompt_indices) == 1
 
 
@@ -803,3 +808,163 @@ class TestResolveVotesDoubleVote:
         # partial_scan should NOT double — each target gets 1 vote
         assert vote_results.vote_tallies["a1"] == 1
         assert vote_results.vote_tallies["a2"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Matchup pairing
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateMatchupPairs:
+    def test_even_count_no_bye(self):
+        state, _ = make_standard_game()  # 4 players: h1, h2, a1, a2
+        pairs, bye = generate_matchup_pairs(state)
+        assert bye is None
+        assert len(pairs) == 2
+        all_ids = [pid for pair in pairs for pid in pair]
+        assert len(set(all_ids)) == 4
+
+    def test_odd_count_has_bye(self):
+        state, _ = make_standard_game()
+        # Kill one to leave 3 alive
+        state.players[3].is_alive = False
+        pairs, bye = generate_matchup_pairs(state)
+        assert bye is not None
+        assert len(pairs) == 1
+        all_ids = [pid for pair in pairs for pid in pair]
+        assert bye not in all_ids
+        assert len(set(all_ids)) == 2
+
+    def test_three_players(self):
+        state = make_game_state(
+            players=[
+                make_player(player_id="p1"),
+                make_player(player_id="p2"),
+                make_player(player_id="p3"),
+            ]
+        )
+        pairs, bye = generate_matchup_pairs(state)
+        assert len(pairs) == 1
+        assert bye is not None
+
+
+# ---------------------------------------------------------------------------
+# Matchup vote resolution
+# ---------------------------------------------------------------------------
+
+
+class TestResolveMatchupVotes:
+    def _seq_fn(self):
+        n = 0
+
+        def fn():
+            nonlocal n
+            n += 1
+            return n
+
+        return fn
+
+    def test_clear_loser_eliminated(self):
+        from schemas.game_state import Matchup
+
+        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state.current_round.matchups = [
+            Matchup(
+                pair=["h1", "h2"],
+                prompt_text="test",
+                prompt_category="test",
+                votes={"a1": 0, "a2": 0},  # both vote left (h1)
+            ),
+            Matchup(
+                pair=["a1", "a2"],
+                prompt_text="test2",
+                prompt_category="test",
+                votes={"h1": 1, "h2": 1},  # both vote right (a2)
+            ),
+        ]
+        state, results_event, elimination = resolve_matchup_votes(state, self._seq_fn())
+
+        # h1 won (2-0), h2 lost (0-2), a1 lost (0-2), a2 won (2-0)
+        # h2 and a1 both lost by 2, random elimination
+        assert elimination.eliminated_id in ("h2", "a1")
+
+    def test_margins_computed_correctly(self):
+        from schemas.game_state import Matchup
+
+        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state.current_round.matchups = [
+            Matchup(
+                pair=["h1", "h2"],
+                prompt_text="test",
+                prompt_category="test",
+                votes={"a1": 0, "a2": 1},  # 1 left, 1 right — tie
+            ),
+            Matchup(
+                pair=["a1", "a2"],
+                prompt_text="test2",
+                prompt_category="test",
+                votes={"h1": 0, "h2": 0},  # both vote left (a1)
+            ),
+        ]
+        state, results_event, elimination = resolve_matchup_votes(state, self._seq_fn())
+
+        # h1/h2 matchup: tie (margin 0 for both)
+        # a1/a2 matchup: a1 won 2-0, a2 lost 0-2
+        assert results_event.margins["a2"] == 2  # lost by 2
+        assert results_event.margins["a1"] == -2  # won by 2
+        assert elimination.eliminated_id == "a2"
+
+    def test_double_vote_in_matchup(self):
+        from schemas.game_state import ActiveAbility, Matchup
+
+        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state.active_ability = ActiveAbility(
+            holder_id="a1",
+            holder_alias="BOT-01",
+            ability_type="double_vote",
+        )
+        state.current_round.matchups = [
+            Matchup(
+                pair=["h1", "h2"],
+                prompt_text="test",
+                prompt_category="test",
+                # a1 has double vote, votes left (h1) = 2 weight
+                # a2 votes right (h2) = 1 weight
+                votes={"a1": 0, "a2": 1},
+            ),
+        ]
+        state, results_event, _elimination = resolve_matchup_votes(state, self._seq_fn())
+
+        # h1 got 2 votes (a1 doubled), h2 got 1 vote
+        assert results_event.margins["h1"] == -1  # won by 1
+        assert results_event.margins["h2"] == 1  # lost by 1
+
+    def test_bye_player_excluded(self):
+        from schemas.game_state import Matchup
+
+        state = make_game_state(
+            phase=GamePhase.MATCHUP,
+            players=[
+                make_player(player_id="p1"),
+                make_player(player_id="p2"),
+                make_player(player_id="p3"),
+            ],
+            current_round=make_round_state(
+                round_type=RoundType.TASK,
+                matchups=[
+                    Matchup(
+                        pair=["p1", "p2"],
+                        prompt_text="test",
+                        prompt_category="test",
+                        votes={"p3": 0},  # bye player votes left (p1)
+                    ),
+                ],
+                bye_player_id="p3",
+            ),
+        )
+        state, results_event, elimination = resolve_matchup_votes(state, self._seq_fn())
+
+        # p1 won (1-0), p2 lost (0-1)
+        assert elimination.eliminated_id == "p2"
+        # Bye player (p3) is not in margins
+        assert "p3" not in results_event.margins
