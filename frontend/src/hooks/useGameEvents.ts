@@ -32,8 +32,6 @@ export function useGameEvents(gameId: string, playerId: string) {
       onResponseSubmitted: useGameStore.getState().onResponseSubmitted,
       onSynthesisReady: useGameStore.getState().onSynthesisReady,
       onVerdict: useGameStore.getState().onVerdict,
-      onChainSeed: useGameStore.getState().onChainSeed,
-      onChainProgress: useGameStore.getState().onChainProgress,
       onNarration: useGameStore.getState().onNarration,
       onComedyWinner: useGameStore.getState().onComedyWinner,
       onBrainTestChallenge: useGameStore.getState().onBrainTestChallenge,

@@ -7,9 +7,6 @@ from types import SimpleNamespace
 import pytest
 
 from backend.services.game_logic import (
-    _fuzzy_match,
-    _score_by_uniqueness,
-    _score_with_answer,
     assign_question_targets,
     build_state_sync,
     check_game_over,
@@ -29,8 +26,7 @@ from backend.services.game_logic import (
     resolve_votes,
     sanitize_players_for_client,
     score_brain_test,
-    select_chain_next_word,
-    select_round_types,
+    select_next_round_type,
     transition_to_elimination,
     transition_to_nominate,
     transition_to_prompt,
@@ -38,7 +34,6 @@ from backend.services.game_logic import (
     transition_to_respond,
     transition_to_review,
     transition_to_task_prompt,
-    transition_to_word_chain,
     validate_player_alive,
 )
 from schemas.constants import NO_RESPONSE
@@ -227,16 +222,16 @@ class TestResolveNominations:
 
 class TestCheckGameOver:
     @pytest.mark.parametrize(
-        "setup,expected",
+        "setup",
         [
-            ("all_humans_dead", "ai"),
-            ("all_ai_dead", "humans"),
-            ("two_left_with_human", "humans"),
-            ("max_rounds", "humans"),
-            ("game_continues", None),
+            "all_humans_dead",
+            "all_ai_dead",
+            "two_left_with_human",
+            "safety_cap",
+            "game_continues",
         ],
     )
-    def test_game_over_conditions(self, setup, expected):
+    def test_game_over_conditions(self, setup):
         if setup == "all_humans_dead":
             players = [
                 make_player(role=PlayerRole.HUMAN, is_alive=False, player_id="h1"),
@@ -244,6 +239,10 @@ class TestCheckGameOver:
                 make_player(role=PlayerRole.AI, player_id="a1"),
             ]
             state = make_game_state(players=players)
+            result = check_game_over(state)
+            assert result is not None
+            assert result[0] == "ai"
+            assert result[1] == []
 
         elif setup == "all_ai_dead":
             players = [
@@ -252,6 +251,10 @@ class TestCheckGameOver:
                 make_player(role=PlayerRole.AI, is_alive=False, player_id="a2"),
             ]
             state = make_game_state(players=players)
+            result = check_game_over(state)
+            assert result is not None
+            assert result[0] == "survivors"
+            assert "h1" in result[1]
 
         elif setup == "two_left_with_human":
             players = [
@@ -260,16 +263,22 @@ class TestCheckGameOver:
                 make_player(role=PlayerRole.HUMAN, is_alive=False, player_id="h2"),
             ]
             state = make_game_state(players=players)
+            result = check_game_over(state)
+            assert result is not None
+            assert result[0] == "survivors"
+            assert set(result[1]) == {"h1", "a1"}
 
-        elif setup == "max_rounds":
+        elif setup == "safety_cap":
             state, _ = make_standard_game()
-            state.round_number = 3
-            state.max_rounds = 3
+            state.round_number = 10
+            state.max_rounds = 10
+            result = check_game_over(state)
+            assert result is not None
+            assert result[0] == "survivors"
 
         else:  # game_continues
             state, _ = make_standard_game()
-
-        assert check_game_over(state) == expected
+            assert check_game_over(state) is None
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +290,6 @@ class TestPhaseTransitions:
     def test_transition_to_prompt(self):
         state, _ = make_standard_game()
         state.round_number = 0
-        state.round_types = [RoundType.INTERROGATION, RoundType.TASK]
 
         result = transition_to_prompt(state, 45)
         assert result.phase == GamePhase.PROMPT
@@ -290,10 +298,9 @@ class TestPhaseTransitions:
         assert result.current_round.round_type == RoundType.INTERROGATION
         assert result.phase_deadline is not None
 
-    def test_transition_to_prompt_respects_round_types(self):
+    def test_transition_to_prompt_always_interrogation(self):
         state, _ = make_standard_game()
         state.round_number = 1
-        state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
 
         result = transition_to_prompt(state, 45)
         assert result.round_number == 2
@@ -314,18 +321,32 @@ class TestPhaseTransitions:
         assert result.phase == expected_phase
         assert result.phase_deadline is not None
 
-    def test_select_round_types(self):
-        types = select_round_types(8)
-        assert types == [
-            RoundType.TASK,
-            RoundType.WORD_CHAIN,
-            RoundType.BRAIN_TEST,
-            RoundType.INTERROGATION,
-            RoundType.TASK,
-            RoundType.WORD_CHAIN,
-            RoundType.BRAIN_TEST,
-            RoundType.INTERROGATION,
-        ]
+    def test_select_next_round_type_no_repeat(self):
+        for _ in range(50):
+            rt = select_next_round_type(RoundType.TASK, 5)
+            assert rt != RoundType.TASK
+
+    def test_select_next_round_type_interrogation_needs_4(self):
+        for _ in range(50):
+            rt = select_next_round_type(None, 3)
+            assert rt != RoundType.INTERROGATION
+
+    def test_select_next_round_type_interrogation_eligible_with_4(self):
+        results = {select_next_round_type(RoundType.TASK, 5) for _ in range(100)}
+        assert RoundType.INTERROGATION in results
+
+    def test_select_next_round_type_no_consecutive_non_eliminating(self):
+        for _ in range(50):
+            rt = select_next_round_type(RoundType.BRAIN_TEST, 5)
+            assert rt != RoundType.BRAIN_TEST
+
+    def test_select_next_round_type_three_types_only(self):
+        """Only Task, Brain Test, and Interrogation exist."""
+        results = set()
+        for _ in range(200):
+            rt = select_next_round_type(None, 5)
+            results.add(rt)
+        assert results == {RoundType.TASK, RoundType.BRAIN_TEST, RoundType.INTERROGATION}
 
     def test_transition_to_task_prompt(self):
         state, _ = make_standard_game()
@@ -433,8 +454,9 @@ class TestStateSanitization:
             seq_n += 1
             return seq_n
 
-        event = make_game_over_event(state, "humans", seq_fn)
-        assert event.winner == "humans"
+        event = make_game_over_event(state, "survivors", ["h1", "h2"], seq_fn)
+        assert event.winner == "survivors"
+        assert event.winner_ids == ["h1", "h2"]
         roles = {p["id"]: p["role"] for p in event.players}
         assert roles["h1"] == "human"
         assert roles["a1"] == "ai"
@@ -499,44 +521,6 @@ class TestQuestionResponseEligibility:
 
 
 # ---------------------------------------------------------------------------
-# Word Chain seed selection
-# ---------------------------------------------------------------------------
-
-
-class TestSelectChainNextWord:
-    def test_prefers_unique_word(self):
-        responses = {"p1": "wave", "p2": "wave", "p3": "tide"}
-        # "tide" is unique (only p3), should be preferred
-        for _ in range(20):
-            word, pid = select_chain_next_word(responses)
-            assert word == "tide"
-            assert pid == "p3"
-
-    def test_all_same_word(self):
-        responses = {"p1": "wave", "p2": "wave", "p3": "wave"}
-        word, pid = select_chain_next_word(responses)
-        assert word == "wave"
-        assert pid in ("p1", "p2", "p3")
-
-    def test_multiple_unique_words(self):
-        responses = {"p1": "tide", "p2": "shore", "p3": "surf"}
-        # All unique — should pick randomly among them
-        word, _pid = select_chain_next_word(responses)
-        assert word in ("tide", "shore", "surf")
-
-    def test_empty_responses(self):
-        word, pid = select_chain_next_word({})
-        assert word == ""
-        assert pid is None
-
-    def test_case_insensitive(self):
-        responses = {"p1": "Wave", "p2": "WAVE", "p3": "tide"}
-        word, _pid = select_chain_next_word(responses)
-        # "wave" appears twice (case-insensitive), "tide" is unique
-        assert word == "tide"
-
-
-# ---------------------------------------------------------------------------
 # Task prompt selection
 # ---------------------------------------------------------------------------
 
@@ -573,7 +557,8 @@ def _mock_settings(**overrides):
         "review_duration": 40,
         "nominate_duration": 15,
         "elimination_duration": 8,
-        "chain_duration": 64,
+        "brain_test_duration": 85,
+        "brain_test_results_duration": 15,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -588,9 +573,9 @@ class TestGetPhaseDuration:
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.PROMPT, RoundType.TASK) == 35  # 25 + 10
 
-    def test_chain(self):
+    def test_brain_test(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.CHAIN) == 64
+        assert get_phase_duration(s, GamePhase.BRAIN_TEST) == 85
 
     @pytest.mark.parametrize(
         "phase,attr",
@@ -617,57 +602,27 @@ class TestGetPhaseDuration:
 
 
 class TestGetNextRoundType:
-    def test_within_bounds(self):
+    def test_respects_last_round_type(self):
         state, _ = make_standard_game()
-        state.round_number = 0
-        state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
-        assert get_next_round_type(state) == RoundType.TASK
-
-    def test_second_round(self):
-        state, _ = make_standard_game()
-        state.round_number = 1
-        state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
-        assert get_next_round_type(state) == RoundType.INTERROGATION
-
-    def test_out_of_bounds_falls_back(self):
-        state, _ = make_standard_game()
-        state.round_number = 10
         state.round_types = [RoundType.TASK]
-        assert get_next_round_type(state) == RoundType.TASK
+        for _ in range(50):
+            rt = get_next_round_type(state)
+            assert rt != RoundType.TASK
 
-    def test_empty_round_types(self):
+    def test_respects_alive_count(self):
         state, _ = make_standard_game()
-        state.round_number = 0
+        # Kill players to leave 3 alive — no interrogation
+        state.players[3].is_alive = False
+        state.round_types = [RoundType.BRAIN_TEST]
+        for _ in range(50):
+            rt = get_next_round_type(state)
+            assert rt != RoundType.INTERROGATION
+
+    def test_empty_round_types_any_eligible(self):
+        state, _ = make_standard_game()
         state.round_types = []
-        assert get_next_round_type(state) == RoundType.TASK
-
-
-# ---------------------------------------------------------------------------
-# transition_to_word_chain
-# ---------------------------------------------------------------------------
-
-
-class TestTransitionToWordChain:
-    def test_basic(self):
-        state, _ = make_standard_game()
-        state.round_number = 0
-        result = transition_to_word_chain(state, "ocean", 64)
-
-        assert result.phase == GamePhase.CHAIN
-        assert result.round_number == 1
-        assert result.current_round is not None
-        assert result.current_round.round_type == RoundType.WORD_CHAIN
-        assert result.current_round.current_sub_round == 0
-        assert len(result.current_round.chain_rounds) == 1
-        assert result.current_round.chain_rounds[0].seed == "ocean"
-        assert result.phase_deadline is not None
-
-    def test_prompt_is_word_chain(self):
-        state, _ = make_standard_game()
-        state.round_number = 0
-        result = transition_to_word_chain(state, "bridge", 64)
-        assert result.current_round.prompt_text == "word chain"
-        assert result.current_round.prompt_category == "word_chain"
+        rt = get_next_round_type(state)
+        assert rt in list(RoundType)
 
 
 # ---------------------------------------------------------------------------
@@ -709,175 +664,59 @@ class TestBuildStateSyncEdgeCases:
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["my_votes"] == []
 
-    def test_chain_phase_includes_chain_rounds(self):
-        state, _ = make_standard_game(phase=GamePhase.CHAIN)
-        from schemas.game_state import ChainRound
-
-        state.current_round.chain_rounds = [ChainRound(seed="ocean")]
-        state.current_round.current_sub_round = 0
-        sync = build_state_sync(state, "h1", seq=1)
-        assert len(sync["chain_rounds"]) == 1
-        assert sync["chain_rounds"][0]["seed"] == "ocean"
-        assert sync["current_sub_round"] == 0
-
 
 # ---------------------------------------------------------------------------
 # Brain Test scoring
 # ---------------------------------------------------------------------------
 
 
-class TestFuzzyMatch:
-    def test_exact_match(self):
-        assert _fuzzy_match("Paris", "Paris") is True
-
-    def test_case_insensitive(self):
-        assert _fuzzy_match("PARIS", "paris") is True
-
-    def test_numeric_match(self):
-        assert _fuzzy_match("42", "42") is True
-
-    def test_numeric_float_match(self):
-        assert _fuzzy_match("3.14", "3.14") is True
-
-    def test_cents_to_decimal(self):
-        assert _fuzzy_match("5 cents", "0.05") is True
-
-    def test_word_number_cents(self):
-        assert _fuzzy_match("five cents", "0.05") is True
-
-    def test_currency_symbol_stripped(self):
-        assert _fuzzy_match("$10", "10") is True
-
-    def test_leading_article_stripped(self):
-        assert _fuzzy_match("the moon", "moon") is True
-
-    def test_no_match(self):
-        assert _fuzzy_match("cat", "dog") is False
-
-    def test_whitespace_handling(self):
-        assert _fuzzy_match("  Paris  ", "paris") is True
-
-    def test_numeric_mismatch(self):
-        assert _fuzzy_match("5", "10") is False
-
-
-class TestScoreWithAnswer:
-    def test_correct_answers(self):
-        ch = BrainTestChallenge(
-            challenge_type="trivia",
-            question="Capital of France?",
-            correct_answer="Paris",
-            responses={"h1": "Paris", "h2": "paris", "a1": "London"},
-        )
-        scores = _score_with_answer(ch)
-        assert scores["h1"] == 1
-        assert scores["h2"] == 1
-        assert scores["a1"] == 0
-
-    def test_no_correct_answer(self):
-        ch = BrainTestChallenge(
-            challenge_type="uniqueness",
-            question="Name an animal",
-            correct_answer=None,
-            responses={"h1": "cat"},
-        )
-        scores = _score_with_answer(ch)
-        assert scores == {}
-
-    def test_empty_responses(self):
-        ch = BrainTestChallenge(
-            challenge_type="trivia",
-            question="What is 2+2?",
-            correct_answer="4",
-            responses={},
-        )
-        scores = _score_with_answer(ch)
-        assert scores == {}
-
-
-class TestScoreByUniqueness:
-    def test_all_unique(self):
-        ch = BrainTestChallenge(
-            challenge_type="uniqueness",
-            question="Name a color",
-            responses={"h1": "red", "h2": "blue", "a1": "green"},
-        )
-        scores = _score_by_uniqueness(ch)
-        assert scores == {"h1": 1, "h2": 1, "a1": 1}
-
-    def test_duplicates_score_zero(self):
-        ch = BrainTestChallenge(
-            challenge_type="uniqueness",
-            question="Name a color",
-            responses={"h1": "red", "h2": "red", "a1": "blue"},
-        )
-        scores = _score_by_uniqueness(ch)
-        assert scores["h1"] == 0
-        assert scores["h2"] == 0
-        assert scores["a1"] == 1
-
-    def test_case_insensitive_duplicates(self):
-        ch = BrainTestChallenge(
-            challenge_type="uniqueness",
-            question="Name a color",
-            responses={"h1": "Red", "h2": "red"},
-        )
-        scores = _score_by_uniqueness(ch)
-        assert scores["h1"] == 0
-        assert scores["h2"] == 0
-
-    def test_empty_responses(self):
-        ch = BrainTestChallenge(
-            challenge_type="uniqueness",
-            question="Name a color",
-            responses={},
-        )
-        scores = _score_by_uniqueness(ch)
-        assert scores == {}
-
-
 class TestScoreBrainTest:
-    def test_mixed_challenge_types(self):
-        trivia = BrainTestChallenge(
-            challenge_type="trivia",
-            question="2+2?",
-            correct_answer="4",
-            responses={"h1": "4", "h2": "5", "a1": "4"},
+    def test_correct_answers_score_one(self):
+        ch = BrainTestChallenge(
+            challenge_type="trick",
+            question="What weighs more?",
+            options=["Feathers", "Steel", "Same", "Depends"],
+            correct_index=2,
+            responses={"h1": 2, "h2": 0, "a1": 2},
         )
-        uniqueness = BrainTestChallenge(
-            challenge_type="uniqueness",
-            question="Name a fruit",
-            correct_answer=None,
-            responses={"h1": "apple", "h2": "apple", "a1": "kiwi"},
-        )
-        totals = score_brain_test([trivia, uniqueness])
-        # h1: 1 (trivia) + 0 (apple duplicate) = 1
+        totals = score_brain_test([ch])
         assert totals["h1"] == 1
-        # h2: 0 (wrong) + 0 (apple duplicate) = 0
         assert totals["h2"] == 0
-        # a1: 1 (trivia) + 1 (unique kiwi) = 2
-        assert totals["a1"] == 2
+        assert totals["a1"] == 1
+
+    def test_multiple_challenges(self):
+        ch1 = BrainTestChallenge(
+            challenge_type="trick",
+            question="Q1",
+            options=["A", "B", "C", "D"],
+            correct_index=1,
+            responses={"h1": 1, "h2": 0},
+        )
+        ch2 = BrainTestChallenge(
+            challenge_type="pattern",
+            question="Q2",
+            options=["X", "Y", "Z", "W"],
+            correct_index=2,
+            responses={"h1": 2, "h2": 2},
+        )
+        totals = score_brain_test([ch1, ch2])
+        assert totals["h1"] == 2
+        assert totals["h2"] == 1
 
     def test_empty_challenges(self):
         totals = score_brain_test([])
         assert totals == {}
 
-    def test_all_trivia(self):
-        ch1 = BrainTestChallenge(
-            challenge_type="trivia",
-            question="Q1",
-            correct_answer="yes",
-            responses={"h1": "yes", "h2": "no"},
+    def test_no_responses(self):
+        ch = BrainTestChallenge(
+            challenge_type="trick",
+            question="Q",
+            options=["A", "B", "C", "D"],
+            correct_index=0,
+            responses={},
         )
-        ch2 = BrainTestChallenge(
-            challenge_type="trivia",
-            question="Q2",
-            correct_answer="blue",
-            responses={"h1": "blue", "h2": "blue"},
-        )
-        totals = score_brain_test([ch1, ch2])
-        assert totals["h1"] == 2
-        assert totals["h2"] == 1
+        totals = score_brain_test([ch])
+        assert totals == {}
 
 
 class TestDetermineChallengeWinner:

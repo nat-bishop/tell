@@ -61,15 +61,6 @@ class Settings:
         self.elimination_duration: int = int(
             os.environ.get("TELL_ELIMINATION_DURATION", game.get("elimination_duration", 8))
         )
-        self.chain_duration: int = int(
-            os.environ.get("TELL_CHAIN_DURATION", game.get("chain_duration", 64))
-        )
-        self.chain_sub_round_duration: int = int(
-            os.environ.get("TELL_CHAIN_SUB_ROUND_DURATION", game.get("chain_sub_round_duration", 8))
-        )
-        self.chain_sub_rounds: int = int(
-            os.environ.get("TELL_CHAIN_SUB_ROUNDS", game.get("chain_sub_rounds", 8))
-        )
         self.brain_test_duration: int = int(
             os.environ.get("TELL_BRAIN_TEST_DURATION", game.get("brain_test_duration", 75))
         )
@@ -97,6 +88,16 @@ class Settings:
         self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 10)))
         self.min_ai: int = int(os.environ.get("TELL_MIN_AI", game.get("min_ai", 1)))
         self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 3)))
+
+        # Discussion AI
+        self.discussion_buffer_delay: float = float(
+            os.environ.get("TELL_DISCUSSION_BUFFER_DELAY", game.get("discussion_buffer_delay", 1.5))
+        )
+        self.discussion_react_cooldown: float = float(
+            os.environ.get(
+                "TELL_DISCUSSION_REACT_COOLDOWN", game.get("discussion_react_cooldown", 5.0)
+            )
+        )
 
         # Recording
         self.record_games: bool = os.environ.get(

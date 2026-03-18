@@ -31,8 +31,6 @@ from backend.services.game_logic import (
     resolve_nominations,
     resolve_votes,
     score_brain_test,
-    select_chain_next_word,
-    select_round_types,
     transition_to_brain_test,
     transition_to_brain_test_results,
     transition_to_elimination,
@@ -42,14 +40,12 @@ from backend.services.game_logic import (
     transition_to_respond,
     transition_to_review,
     transition_to_task_prompt,
-    transition_to_word_chain,
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
     AbilityAwardedEvent,
     BrainTestChallengeEvent,
     BrainTestResultsEvent,
-    ChainSeedEvent,
     ComedyWinnerEvent,
     NarrationEvent,
     NominatedEvent,
@@ -61,14 +57,12 @@ from schemas.api_models import (
 from schemas.constants import MISSING_ALIAS
 from schemas.game_state import (
     ActiveAbility,
-    ChainRound,
     GamePhase,
     NarratorEntry,
     Player,
     PlayerRole,
     RoundType,
 )
-from schemas.word_chain import select_seed_word
 
 log = structlog.get_logger(__name__)
 
@@ -77,8 +71,8 @@ def _build_narrator_context(state) -> str:
     """Build a context string for the narrator from game state."""
     parts: list[str] = []
     n_players = len(state.players)
-    rnd, mx = state.round_number, state.max_rounds
-    parts.append(f"Game: {n_players} players, round {rnd} of {mx}.")
+    rnd = state.round_number
+    parts.append(f"Game: {n_players} players, round {rnd}.")
 
     alive = [p for p in state.players if p.is_alive]
     eliminated = [p for p in state.players if not p.is_alive]
@@ -99,10 +93,6 @@ def _build_narrator_context(state) -> str:
             for pid, ans in rs.answers.items():
                 alias = alias_map.get(pid, pid)
                 parts.append(f'  {alias} answered: "{ans}"')
-        if rs.chain_rounds:
-            chain_words = [cr.seed for cr in rs.chain_rounds]
-            parts.append(f"Chain: {' -> '.join(chain_words)}")
-
     return "\n".join(parts)
 
 
@@ -258,10 +248,6 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
 
         elif expired_phase == GamePhase.ELIMINATION:
             await do_after_elimination(game_id, session)
-
-        elif expired_phase == GamePhase.CHAIN:
-            # Safety timer expired — transition to review
-            await do_chain_complete(game_id, session)
 
         elif expired_phase == GamePhase.BRAIN_TEST:
             # Safety timer — transition to results
@@ -494,7 +480,6 @@ async def do_vote_resolution(game_id: str, session) -> None:
                 answer=round_state.answers.get(elimination.eliminated_id, ""),
                 vote_count=elimination.vote_count,
                 round_number=round_state.round_number,
-                max_rounds=state.max_rounds,
                 game_id=game_id,
             )
             if verdict:
@@ -591,6 +576,7 @@ async def _start_next_round(game_id: str, session) -> None:
     state.active_ability = None
 
     next_round_type = get_next_round_type(state)
+    state.round_types.append(next_round_type)
 
     if next_round_type == RoundType.TASK:
         total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
@@ -622,16 +608,6 @@ async def _start_next_round(game_id: str, session) -> None:
         await start_phase_timer(game_id, GamePhase.BRAIN_TEST)
         await _start_brain_test_loop(game_id, session)
 
-    elif next_round_type == RoundType.WORD_CHAIN:
-        seed = select_seed_word()
-        transition_to_word_chain(state, seed, settings.chain_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(state, session, settings, round_type=RoundType.WORD_CHAIN),
-        )
-        await start_phase_timer(game_id, GamePhase.CHAIN)
-        await _start_chain_loop(game_id, session)
-
     else:
         # INTERROGATION (default)
         total = get_phase_duration(settings, GamePhase.PROMPT) or 55
@@ -655,32 +631,36 @@ async def _start_next_round(game_id: str, session) -> None:
 async def do_after_elimination(game_id: str, session) -> None:
     """ELIMINATION complete → next round or GAME_OVER.
 
-    Branch on next round type:
-    - TASK: select task prompt → PROMPT (25s)
-    - INTERROGATION: select prompt → PROMPT (45s)
-    - WORD_CHAIN: select seed → CHAIN (64s) + start chain loop
-
     Assumes caller holds the game lock.
     """
     cm = get_connection_manager()
     settings = get_settings()
     state = session.state
 
-    winner = check_game_over(state)
-    if winner:
-        log.info("game_over", winner=winner)
+    result = check_game_over(state)
+    if result:
+        winner, winner_ids = result
+        log.info("game_over", winner=winner, winner_ids=winner_ids)
         state.phase = GamePhase.GAME_OVER
         state.winner = winner
+        state.winner_ids = winner_ids
         state.phase_deadline = None
-        event = make_game_over_event(state, winner, session.next_seq)
+        event = make_game_over_event(state, winner, winner_ids, session.next_seq)
         await cm.broadcast(game_id, event)
 
         # Fire narrator: game over wrap-up
+        if winner == "ai":
+            narr_msg = "The game is over. THE MACHINES WIN. Write a knockout wrap-up — "
+        else:
+            survivor_aliases = [p.alias for p in state.players if p.id in winner_ids]
+            narr_msg = (
+                f"The game is over. {', '.join(survivor_aliases)} survive. "
+                "Write a knockout wrap-up — "
+            )
         await _fire_narration(
             game_id,
             "game_over",
-            f"The game is over. {winner.upper()} wins. Write a knockout wrap-up — "
-            "the story of this game in 1-2 sentences. Reference specific moments.",
+            narr_msg + "the story of this game in 1-2 sentences. Reference specific moments.",
         )
 
         if settings.record_games:
@@ -703,151 +683,6 @@ async def do_after_elimination(game_id: str, session) -> None:
     await _start_next_round(game_id, session)
 
 
-async def do_chain_complete(game_id: str, session) -> None:
-    """CHAIN complete → REVIEW. Called by safety timer or after all sub-rounds.
-
-    Assumes caller holds the game lock.
-    """
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-
-    round_state = state.current_round
-    transition_to_review(state, settings.review_duration)
-    review_ts = _compute_review_timestamps(state, settings.review_duration)
-    await cm.broadcast(
-        game_id,
-        _make_event(
-            state,
-            session,
-            settings,
-            round_type=RoundType.WORD_CHAIN,
-            chain_rounds=[cr.model_dump() for cr in round_state.chain_rounds],
-            **review_ts,
-        ),
-    )
-    await _trigger_ability_on_review(game_id, session)
-
-    await start_phase_timer(game_id, GamePhase.REVIEW)
-    await _notify_ai(game_id, GamePhase.REVIEW)
-
-
-async def _start_chain_loop(game_id: str, session) -> None:
-    """Launch the async sub-round loop for Word Chain. Runs as a background task."""
-
-    async def _chain_loop():
-        try:
-            # Wait for client interstitial to finish before starting sub-rounds
-            await asyncio.sleep(get_interstitial_hold(GamePhase.CHAIN))
-
-            cm = get_connection_manager()
-            settings = get_settings()
-            repo = get_game_repository()
-            sub_duration = settings.chain_sub_round_duration
-            num_sub_rounds = settings.chain_sub_rounds
-
-            # Broadcast the first seed
-            lock = cm.get_lock(game_id)
-            async with lock:
-                session = repo.get(game_id)
-                if not session or session.state.phase != GamePhase.CHAIN:
-                    return
-                state = session.state
-                rs = state.current_round
-                if not rs or not rs.chain_rounds:
-                    return
-
-                sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
-                state.phase_deadline = sub_deadline
-
-                await cm.broadcast(
-                    game_id,
-                    ChainSeedEvent(
-                        seq=session.next_seq(),
-                        word=rs.chain_rounds[0].seed,
-                        round_index=0,
-                        sub_deadline=sub_deadline.isoformat(),
-                        chain_so_far=[rs.chain_rounds[0].seed],
-                        phase_duration=sub_duration,
-                    ),
-                )
-
-            # Schedule AI for first sub-round
-            from backend.services.ai_scheduler import on_chain_sub_round
-
-            await on_chain_sub_round(game_id, 0)
-
-            for sub_round in range(num_sub_rounds):
-                await asyncio.sleep(sub_duration)
-
-                async with lock:
-                    session = repo.get(game_id)
-                    if not session or session.state.phase != GamePhase.CHAIN:
-                        return
-                    state = session.state
-                    rs = state.current_round
-                    if not rs:
-                        return
-
-                    # Collect responses from current sub-round
-                    current_cr = rs.chain_rounds[rs.current_sub_round]
-                    responses = current_cr.responses
-
-                    # Pick next seed
-                    if responses:
-                        chosen, chosen_pid = select_chain_next_word(responses)
-                        current_cr.chosen_word = chosen
-                        current_cr.chosen_player_id = chosen_pid
-                    else:
-                        # No responses — pick a random word
-                        from schemas.word_chain import get_fallback_association
-
-                        chosen = get_fallback_association(current_cr.seed)
-                        current_cr.chosen_word = chosen
-
-                    # Check if this was the last sub-round
-                    if sub_round >= num_sub_rounds - 1:
-                        # Done — transition to review
-                        get_timer_manager().cancel_timer(game_id)
-                        await do_chain_complete(game_id, session)
-                        return
-
-                    # Set up next sub-round
-                    next_idx = sub_round + 1
-                    rs.current_sub_round = next_idx
-                    rs.chain_rounds.append(ChainRound(seed=chosen))
-
-                    sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
-                    state.phase_deadline = sub_deadline
-
-                    chain_so_far = [cr.seed for cr in rs.chain_rounds]
-
-                    await cm.broadcast(
-                        game_id,
-                        ChainSeedEvent(
-                            seq=session.next_seq(),
-                            word=chosen,
-                            round_index=next_idx,
-                            sub_deadline=sub_deadline.isoformat(),
-                            chain_so_far=chain_so_far,
-                            phase_duration=sub_duration,
-                        ),
-                    )
-
-                # Schedule AI for this sub-round
-                await on_chain_sub_round(game_id, next_idx)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            log.exception("chain_loop_error", game_id=game_id)
-
-    task = asyncio.create_task(_chain_loop())
-    from backend.services.ai_scheduler import register_task
-
-    register_task(game_id, task)
-
-
 async def do_brain_test_complete(game_id: str, session) -> None:
     """Brain test challenges done → score, pick winner, assign ability, show results."""
     cm = get_connection_manager()
@@ -857,7 +692,7 @@ async def do_brain_test_complete(game_id: str, session) -> None:
     if not rs:
         return
 
-    # Build results: player_id -> list of {question, answer, ...}
+    # Build results: player_id -> list of {question, options, selected_index, correct_index, ...}
     results: dict[str, list[dict]] = {}
     for p in state.players:
         if p.is_alive:
@@ -866,8 +701,9 @@ async def do_brain_test_complete(game_id: str, session) -> None:
                 player_results.append(
                     {
                         "question": ch.question,
-                        "answer": ch.responses.get(p.id, ""),
-                        "correct_answer": ch.correct_answer,
+                        "options": ch.options,
+                        "selected_index": ch.responses.get(p.id, -1),
+                        "correct_index": ch.correct_index,
                         "challenge_type": ch.challenge_type,
                     }
                 )
@@ -981,6 +817,7 @@ async def _start_brain_test_loop(game_id: str, session) -> None:
                             challenge_index=i,
                             challenge_type=ch.challenge_type,
                             question=ch.question,
+                            options=ch.options,
                             sub_deadline=sub_deadline.isoformat(),
                             phase_duration=sub_duration,
                         ),
@@ -1023,7 +860,6 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     from backend.services.ai_scheduler import assign_personalities
 
     cm = get_connection_manager()
-    settings = get_settings()
     repo = get_game_repository()
     lock = cm.get_lock(game_id)
 
@@ -1058,58 +894,24 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
         ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI]
         assign_personalities(game_id, ai_player_ids)
 
-        # Calculate max rounds and generate round types
-        human_count = len([p for p in state.players if p.role == PlayerRole.HUMAN])
-        state.max_rounds = max(3, human_count + 1)
-        state.round_types = select_round_types(state.max_rounds)
-
-        # Transition to first round based on round type
-        first_round_type = state.round_types[0] if state.round_types else RoundType.TASK
-        reading = settings.prompt_reading_duration
-        if first_round_type == RoundType.TASK:
-            total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
-            transition_to_task_prompt(state, total, reading)
-        else:
-            total = get_phase_duration(settings, GamePhase.PROMPT) or 55
-            transition_to_prompt(state, total, reading)
-
-        round_state = state.current_round
-        pd = get_phase_duration(
-            settings, state.phase, round_state.round_type if round_state else None
-        )
-        writing_begins_at = (
-            round_state.writing_begins_at.isoformat()
-            if round_state and round_state.writing_begins_at
-            else None
-        )
-        await cm.broadcast(
-            game_id,
-            make_phase_changed_event(
-                state,
-                session.next_seq(),
-                phase_duration=pd,
-                prompt_text=round_state.prompt_text if round_state else None,
-                prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else RoundType.TASK,
-                writing_begins_at=writing_begins_at,
-            ),
-        )
+        # Dynamic round selection — no pre-generated cycle
+        state.max_rounds = 10  # safety cap
 
         # Capture for logging after lock release
         player_count = len(state.players)
-        max_rounds = state.max_rounds
 
-    await start_phase_timer(
-        game_id, GamePhase.PROMPT, state.round_types[0] if state.round_types else None
-    )
-    await _notify_ai(game_id, GamePhase.PROMPT)
+    # Delegate first round setup to _start_next_round (handles all round types)
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            return
+        await _start_next_round(game_id, session)
 
     log.info(
         "game_started",
         game_id=game_id,
         player_count=player_count,
         ai_count=ai_count,
-        max_rounds=max_rounds,
     )
 
     # Fire narrator: game start

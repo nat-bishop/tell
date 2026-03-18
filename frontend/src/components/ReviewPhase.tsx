@@ -4,7 +4,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   useGameStore,
   type PlayerInfo,
-  type ChainRoundData,
 } from "@/hooks/useGameStore";
 import { castVote, castComedyVote, sendDiscussionMessage } from "@/api/actions";
 import { AnswerCard } from "./AnswerCard";
@@ -109,54 +108,6 @@ function PlayerCard({
           )}
         </div>
       )}
-    </AnswerCard>
-  );
-}
-
-function WordChainCard({
-  player,
-  chainRounds,
-  voted,
-  canVote,
-  onToggle,
-  disabled,
-}: {
-  player: PlayerInfo;
-  chainRounds: ChainRoundData[];
-  voted: boolean;
-  canVote: boolean;
-  onToggle: () => void;
-  disabled: boolean;
-}) {
-  return (
-    <AnswerCard
-      alias={player.alias}
-      highlighted={voted}
-      showVotedLabel={voted}
-      as={canVote ? "button" : "div"}
-      onClick={onToggle}
-      disabled={disabled}
-    >
-      <div className="flex flex-col gap-1">
-        {chainRounds.map((cr, i) => {
-          const response = cr.responses[player.id];
-          const wasChosen = cr.chosen_player_id === player.id;
-          return (
-            <div key={i} className="flex items-baseline gap-2 text-[0.85rem]">
-              <span className="font-system text-[0.65rem] text-cold shrink-0 tracking-wide">
-                {cr.seed} &rarr;
-              </span>
-              <span
-                className={`font-literary ${
-                  wasChosen ? "text-warm" : "text-ink"
-                }`}
-              >
-                {response || "\u2014"}
-              </span>
-            </div>
-          );
-        })}
-      </div>
     </AnswerCard>
   );
 }
@@ -291,7 +242,6 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     voteTotalCount,
     roundType,
     promptText,
-    chainRounds,
   } = useGameStore();
   const subPhase = useSubPhase();
   const alivePlayers = players.filter((p) => p.is_alive);
@@ -382,7 +332,6 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
     useGameStore.setState({ myComedyVote: pid });
   };
 
-  const isWordChain = roundType === "word_chain";
   const isTask = roundType === "task";
 
   return (
@@ -393,15 +342,9 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
         </p>
       )}
 
-      {!isTask && !isWordChain && promptText && (
+      {!isTask && promptText && (
         <p className="text-center font-literary text-[1rem] italic leading-[1.6] text-dim">
           {promptText}
-        </p>
-      )}
-
-      {isWordChain && chainRounds.length > 0 && (
-        <p className="text-center font-system text-[0.85rem] text-dim tracking-wide">
-          {chainRounds.map((cr) => cr.seed).join(" \u2192 ")}
         </p>
       )}
 
@@ -413,17 +356,7 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
               <div key={p.id} className="card-placeholder p-5 h-full min-h-[100px]" />
             );
           }
-          return isWordChain ? (
-            <WordChainCard
-              key={p.id}
-              player={p}
-              chainRounds={chainRounds}
-              voted={selected.includes(p.id)}
-              canVote={isVotePhase && !spectator && p.id !== playerId}
-              onToggle={() => toggleVote(p.id)}
-              disabled={!isVotePhase}
-            />
-          ) : (
+          return (
             <PlayerCard
               key={p.id}
               player={p}

@@ -191,61 +191,74 @@ class BrainTestChallengeType(enum.StrEnum):
 class BrainTestChallengeSpec(BaseModel):
     challenge_type: BrainTestChallengeType
     question: str
-    correct_answer: str | None = None
+    options: list[str]  # exactly 4 choices
+    correct_index: int  # index into options
 
 
 BRAIN_TEST_CHALLENGES: list[BrainTestChallengeSpec] = [
-    # Estimation
+    # --- Estimation ---
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.ESTIMATION,
         question="How many piano tuners are in London?",
+        options=["About 20", "About 200", "About 2,000", "About 20,000"],
+        correct_index=1,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.ESTIMATION,
         question="How many golf balls fit in a school bus?",
+        options=["About 500", "About 5,000", "About 500,000", "About 5 million"],
+        correct_index=2,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.ESTIMATION,
         question="How many words are in the average novel?",
+        options=["About 10,000", "About 40,000", "About 80,000", "About 200,000"],
+        correct_index=2,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.ESTIMATION,
         question="How many flights take off worldwide each day?",
+        options=["About 1,000", "About 10,000", "About 100,000", "About 1,000,000"],
+        correct_index=2,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.ESTIMATION,
         question="How many slices of pizza are eaten in the US per second?",
+        options=["About 10", "About 100", "About 350", "About 1,000"],
+        correct_index=2,
     ),
-    # Common knowledge
+    # --- Common Knowledge ---
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name a yellow fruit.",
-    ),
-    BrainTestChallengeSpec(
-        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name something you'd find in a junk drawer.",
-    ),
-    BrainTestChallengeSpec(
-        challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name a famous person everyone would recognize.",
+        question="Which planet is closest to the Sun?",
+        options=["Venus", "Mercury", "Mars", "Earth"],
+        correct_index=1,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name something people are irrationally afraid of.",
+        question="What is the hardest natural substance?",
+        options=["Titanium", "Quartz", "Diamond", "Graphene"],
+        correct_index=2,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name an animal that starts with the letter P.",
+        question="Which country has the most time zones?",
+        options=["Russia", "USA", "France", "China"],
+        correct_index=2,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name a song everyone knows the words to.",
+        question="What is the most spoken native language in the world?",
+        options=["English", "Hindi", "Mandarin Chinese", "Spanish"],
+        correct_index=2,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.COMMON_KNOWLEDGE,
-        question="Name something people argue about at dinner.",
+        question="Which ocean is the largest?",
+        options=["Atlantic", "Indian", "Arctic", "Pacific"],
+        correct_index=3,
     ),
-    # Trick questions
+    # --- Trick Questions ---
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.TRICK,
         question=(
@@ -253,38 +266,69 @@ BRAIN_TEST_CHALLENGES: list[BrainTestChallengeSpec] = [
             "The bat costs $1 more than the ball. "
             "How much is the ball?"
         ),
-        correct_answer="$0.05",
+        options=["$0.10", "$0.05", "$0.15", "$0.01"],
+        correct_index=1,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.TRICK,
-        question=("If you have 3 apples and take away 2, how many do you have?"),
-        correct_answer="2 (you took them)",
+        question="If you have 3 apples and take away 2, how many do you have?",
+        options=["1", "2", "3", "0"],
+        correct_index=1,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.TRICK,
-        question=("What weighs more, a pound of feathers or a pound of steel?"),
-        correct_answer="They weigh the same",
+        question="A rooster lays an egg on a roof. Which side does it roll down?",
+        options=["The left side", "The right side", "Both sides", "Roosters don't lay eggs"],
+        correct_index=3,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.TRICK,
-        question=("A farmer has 17 sheep. All but 9 run away. How many are left?"),
-        correct_answer="9",
+        question="A farmer has 17 sheep. All but 9 run away. How many are left?",
+        options=["8", "9", "17", "0"],
+        correct_index=1,
     ),
-    # Pattern
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.TRICK,
+        question="What weighs more, a pound of feathers or a pound of steel?",
+        options=["Feathers", "Steel", "They weigh the same", "Depends on gravity"],
+        correct_index=2,
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.TRICK,
+        question="How many months have 28 days?",
+        options=["1", "2", "6", "All 12"],
+        correct_index=3,
+    ),
+    # --- Pattern ---
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.PATTERN,
         question="What comes next: 2, 6, 12, 20, ?",
-        correct_answer="30",
+        options=["24", "26", "28", "30"],
+        correct_index=3,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.PATTERN,
         question="What comes next: O, T, T, F, F, S, S, ?",
-        correct_answer="E (Eight)",
+        options=["T", "E", "N", "O"],
+        correct_index=1,
     ),
     BrainTestChallengeSpec(
         challenge_type=BrainTestChallengeType.PATTERN,
         question="What comes next: 1, 1, 2, 3, 5, 8, ?",
-        correct_answer="13",
+        options=["11", "12", "13", "15"],
+        correct_index=2,
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.PATTERN,
+        question="What comes next: J, F, M, A, M, J, ?",
+        options=["A", "J", "S", "O"],
+        correct_index=1,
+    ),
+    BrainTestChallengeSpec(
+        challenge_type=BrainTestChallengeType.PATTERN,
+        question="What comes next: 3, 6, 9, 12, ?",
+        options=["14", "15", "16", "18"],
+        correct_index=1,
     ),
 ]
 

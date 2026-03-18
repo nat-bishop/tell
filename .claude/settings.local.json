@@ -44,7 +44,12 @@
       "Bash(python -m pytest tests/ -x -q)",
       "WebFetch(domain:duckduckgo.com)",
       "WebFetch(domain:html.duckduckgo.com)",
-      "Bash(uv run:*)"
+      "Bash(uv run:*)",
+      "mcp__plugin_playwright_playwright__browser_tabs",
+      "Bash(find /c/Users/Nat/Documents/dev/tell/recordings -name *.json)",
+      "Bash(xargs python3:*)",
+      "Bash(git commit:*)",
+      "Bash(game:\"\\) with native PydanticAI message_history pattern. Narrator now:*)"
     ]
   }
 }

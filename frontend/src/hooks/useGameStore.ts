@@ -11,7 +11,6 @@ export type GamePhase =
   | "review"
   | "elimination"
   | "game_over"
-  | "chain"
   | "brain_test"
   | "brain_test_results";
 
@@ -41,29 +40,6 @@ export interface RevealedPlayer {
   eliminated_round?: number;
 }
 
-export interface ChainRoundData {
-  seed: string;
-  responses: Record<string, string>;
-  chosen_word: string | null;
-  chosen_player_id: string | null;
-}
-
-export interface ChainSeedData {
-  seq: number;
-  word: string;
-  round_index: number;
-  sub_deadline: string | null;
-  chain_so_far: string[];
-  phase_duration: number | null;
-}
-
-export interface ChainProgressData {
-  seq: number;
-  round_index: number;
-  count: number;
-  total: number;
-}
-
 export interface StateSyncData {
   seq: number;
   phase: GamePhase;
@@ -82,13 +58,12 @@ export interface StateSyncData {
   my_answer: string | null;
   my_votes: string[];
   winner: string | null;
+  winner_ids: string[];
   is_host: boolean;
   phase_deadline: string | null;
   phase_duration: number | null;
   writing_begins_at?: string | null;
   action_starts_at?: string | null;
-  chain_rounds: ChainRoundData[];
-  current_sub_round: number;
 }
 
 export interface PlayerEventData {
@@ -144,6 +119,7 @@ export interface EliminationData {
 export interface GameOverData {
   seq: number;
   winner: string;
+  winner_ids: string[];
   players: RevealedPlayer[];
 }
 
@@ -188,6 +164,7 @@ export interface BrainTestChallengeData {
   challenge_index: number;
   challenge_type: string;
   question: string;
+  options: string[];
   sub_deadline: string | null;
   phase_duration: number | null;
 }
@@ -196,8 +173,9 @@ export interface BrainTestResultsData {
   seq: number;
   results: Record<string, Array<{
     question: string;
-    answer: string;
-    correct_answer: string | null;
+    options: string[];
+    selected_index: number;
+    correct_index: number;
     challenge_type: string;
   }>>;
   scores: Record<string, number> | null;
@@ -293,14 +271,6 @@ interface GameState {
   // Interstitial
   actionStartsAt: string | null;
 
-  // Word Chain
-  chainRounds: ChainRoundData[];
-  currentSubRound: number;
-  currentSeedWord: string | null;
-  chainSoFar: string[];
-  chainResponseCount: number;
-  chainTotalCount: number;
-
   // Elimination
   eliminatedId: string | null;
   eliminatedAlias: string | null;
@@ -321,6 +291,7 @@ interface GameState {
   aisEliminated: number;
 
   // Game over
+  winnerIds: string[];
   revealedPlayers: RevealedPlayer[] | null;
 
   // Narration
@@ -331,10 +302,12 @@ interface GameState {
   brainTestQuestion: string | null;
   brainTestChallengeIndex: number;
   brainTestChallengeType: string | null;
+  brainTestOptions: string[];
   brainTestResults: Record<string, Array<{
     question: string;
-    answer: string;
-    correct_answer: string | null;
+    options: string[];
+    selected_index: number;
+    correct_index: number;
     challenge_type: string;
   }>> | null;
   // Comedy
@@ -383,8 +356,6 @@ interface GameState {
   onResponseSubmitted: (data: ResponseSubmittedData) => void;
   onSynthesisReady: (data: SynthesisReadyData) => void;
   onVerdict: (data: VerdictData) => void;
-  onChainSeed: (data: ChainSeedData) => void;
-  onChainProgress: (data: ChainProgressData) => void;
   onNarration: (data: NarrationData) => void;
   onComedyWinner: (data: ComedyWinnerData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
@@ -396,10 +367,6 @@ interface GameState {
   onError: () => void;
   reset: () => void;
 }
-
-// Stable empty references to avoid unnecessary re-renders
-const EMPTY_CHAIN_ROUNDS: ChainRoundData[] = [];
-const EMPTY_CHAIN_SO_FAR: string[] = [];
 
 const initialState = {
   gameId: null as string | null,
@@ -438,12 +405,6 @@ const initialState = {
   phaseDuration: null as number | null,
   writingBeginsAt: null as string | null,
   actionStartsAt: null as string | null,
-  chainRounds: [] as ChainRoundData[],
-  currentSubRound: 0,
-  currentSeedWord: null as string | null,
-  chainSoFar: [] as string[],
-  chainResponseCount: 0,
-  chainTotalCount: 0,
   eliminatedId: null as string | null,
   eliminatedAlias: null as string | null,
   wasHuman: null as boolean | null,
@@ -457,14 +418,16 @@ const initialState = {
   lastEliminationWasHuman: null as boolean | null,
   humansEliminated: 0,
   aisEliminated: 0,
+  winnerIds: [] as string[],
   revealedPlayers: null as RevealedPlayer[] | null,
   narrationText: null as string | null,
   narrationTrigger: null as string | null,
   brainTestQuestion: null as string | null,
   brainTestChallengeIndex: 0,
   brainTestChallengeType: null as string | null,
+  brainTestOptions: [] as string[],
   brainTestResults: null as Record<string, Array<{
-    question: string; answer: string; correct_answer: string | null; challenge_type: string;
+    question: string; options: string[]; selected_index: number; correct_index: number; challenge_type: string;
   }>> | null,
   comedyWinnerAlias: null as string | null,
   comedyWinnerVotes: 0,
@@ -506,6 +469,7 @@ export const useGameStore = create<GameState>((set) => ({
       verdict: data.verdict,
       myAnswer: data.my_answer,
       winner: data.winner,
+      winnerIds: data.winner_ids || [],
       isHost: data.is_host,
       phaseDeadline: data.phase_deadline,
       phaseDuration: data.phase_duration ?? null,
@@ -518,13 +482,6 @@ export const useGameStore = create<GameState>((set) => ({
       myResponseSubmitted: false,
       voteResults: null,
       voteTallies: null,
-      chainRounds: data.chain_rounds || [],
-      currentSubRound: data.current_sub_round || 0,
-      currentSeedWord:
-        data.chain_rounds?.length > 0
-          ? data.chain_rounds[data.chain_rounds.length - 1].seed
-          : null,
-      chainSoFar: data.chain_rounds?.map((cr: ChainRoundData) => cr.seed) || [],
     }),
 
   onPlayerJoined: (data) =>
@@ -614,14 +571,6 @@ export const useGameStore = create<GameState>((set) => ({
       voteStartsAt: data.vote_starts_at ?? null,
       // Scan reset per round
       scanResults: null,
-      chainRounds: data.chain_rounds?.length ? data.chain_rounds : EMPTY_CHAIN_ROUNDS,
-      currentSubRound: 0,
-      currentSeedWord: data.chain_rounds?.length
-        ? data.chain_rounds[data.chain_rounds.length - 1].seed
-        : null,
-      chainSoFar: data.chain_rounds?.map((cr: ChainRoundData) => cr.seed) || EMPTY_CHAIN_SO_FAR,
-      chainResponseCount: 0,
-      chainTotalCount: 0,
     })),
 
   onAnswerSubmitted: (data) =>
@@ -673,25 +622,6 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     }),
 
-  onChainSeed: (data) =>
-    set({
-      currentSeedWord: data.word,
-      currentSubRound: data.round_index,
-      chainSoFar: data.chain_so_far,
-      phaseDeadline: data.sub_deadline,
-      phaseDuration: data.phase_duration ?? 8,
-      lastSeq: data.seq,
-      chainResponseCount: 0,
-      chainTotalCount: 0,
-    }),
-
-  onChainProgress: (data) =>
-    set({
-      chainResponseCount: data.count,
-      chainTotalCount: data.total,
-      lastSeq: data.seq,
-    }),
-
   onNarration: (data) =>
     set({
       narrationText: data.text,
@@ -711,6 +641,7 @@ export const useGameStore = create<GameState>((set) => ({
       brainTestQuestion: data.question,
       brainTestChallengeIndex: data.challenge_index,
       brainTestChallengeType: data.challenge_type,
+      brainTestOptions: data.options || [],
       phaseDeadline: data.sub_deadline,
       phaseDuration: data.phase_duration ?? 12,
       lastSeq: data.seq,
@@ -765,6 +696,7 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       phase: "game_over",
       winner: data.winner,
+      winnerIds: data.winner_ids || [],
       revealedPlayers: data.players,
       lastSeq: data.seq,
     }),

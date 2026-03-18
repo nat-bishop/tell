@@ -56,11 +56,11 @@ The contrast between serif dialogue and monospace system text reinforces the the
 
 ---
 
-## The Four Games
+## The Three Games
 
-Rounds cycle: **Task → Word Chain → Brain Test → Interrogation → Task → ...**
+Round type is selected dynamically each round — no repeat of the previous type, Interrogation requires ≥4 players alive, no consecutive non-eliminating rounds.
 
-Each creates different pressure. Task exposes format fluency. Word Chain is instinctive and distributed. Brain Test is competitive — no one gets eliminated, but your answers become evidence. Interrogation concentrates pressure on one player for the longest, highest-stakes round. No single strategy is optimal across all four.
+Each creates different pressure. Task exposes format fluency. Quick Draw is competitive speed — no one gets eliminated, but your choices become evidence. Interrogation concentrates pressure on one player for the longest, highest-stakes round. No single strategy is optimal across all three.
 
 ---
 
@@ -141,80 +141,42 @@ Concentrated pressure. One person in the spotlight. The synthesis makes every qu
 
 ---
 
-### Word Chain — The Association Test
+### Quick Draw — The Evidence Round
 
-No writing prompt. A seed word appears. Everyone submits one word association. The server picks the most unique submission as the next seed. Repeat 8 times. Review shows everyone's full chain side-by-side.
+No writing, no voting, no elimination. A rapid sequence of multiple-choice challenges — estimation, common knowledge, trick questions, pattern completion. Everyone taps an option. The winner earns an ability that affects the next REVIEW.
 
 ```
-CHAIN (8 sub-rounds x 8s each, 64s safety timer) → REVIEW (40s) → ELIMINATION (12s)
+BRAIN_TEST (5 challenges × 15s each, 85s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
 ```
 
-~116 seconds per round. The most instinctive game. No time to deliberate.
+~100 seconds per round. The only round with a right answer.
 
 #### How It Works
 
-1. A seed word appears (from a pool of 110 curated words).
-2. All players submit one word association. 8 seconds.
-3. The server counts submissions. Words submitted by exactly one player (unique associations) are preferred over popular ones. The chosen word becomes the next seed.
-4. Repeat 8 times. The chain grows on screen in real-time: `ocean → grandmother → kitchen → ...`
-5. Review shows each player's full chain of associations side-by-side.
-
-#### The Tension
-
-Unique = interesting, but exposed. Popular = safe, but boring. You must simultaneously signal creativity and avoid standing out.
-
-`ocean → waves → surfing → beach` is predictable — AI pattern.
-`ocean → grandmother` (because of a childhood memory) is idiosyncratic — human signal.
-
-The wrong association — the one that only makes sense if you've lived a specific life — is the most human signal possible. But submitting too-unique words risks standing out as suspicious.
-
-#### What Makes It Fun
-
-Speed. Instinct over deliberation. You can't overthink a word association in 8 seconds. The chain grows on screen in real-time, creating momentum. In review, the patterns are immediately visible: one player's chain is all synonyms, another's is all vibes, another's makes no sense at all. The round is the fastest, most visceral, and produces the clearest visual evidence.
-
-**Skill tested**: Reaction speed, idiosyncratic thinking, calibrating uniqueness.
-
----
-
-### Brain Test — The Evidence Round
-
-No writing, no voting, no elimination. A rapid sequence of challenges — estimation, common knowledge, trick questions, pattern completion. Everyone competes. The winner earns an ability that affects the next REVIEW.
-
-```
-BRAIN_TEST (5 challenges × 12s each, 75s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
-```
-
-~90 seconds per round. The only round with a right answer.
-
-#### How It Works
-
-1. Five challenges appear one at a time, 12 seconds each. A new `BrainTestChallengeEvent` fires for each.
-2. All players type a free-form answer. AI answers via personality-aware LLM calls.
-3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's answers side-by-side with scores and the correct answer where applicable.
+1. Five challenges appear one at a time, 15 seconds each. A new `BrainTestChallengeEvent` fires for each, with 4 option buttons.
+2. All players tap one of the 4 options. AI selects an option via LLM.
+3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's selections with correct/incorrect indicators and scores.
 4. The highest scorer wins a random ability (PARTIAL SCAN or DOUBLE VOTE) announced in the interstitial before the next round.
 5. No vote. No elimination. `do_after_brain_test()` starts the next round directly.
 
 #### Scoring
 
-| Challenge type | Scoring rule |
-|---|---|
-| **trick** / **pattern** | Fuzzy match against `correct_answer` → 1 point |
-| **estimation** / **common_knowledge** | Unique answer (only one player gave it) → 1 point |
+Pure correctness: `selected_index == correct_index` → 1 point. No fuzzy matching, no uniqueness scoring.
 
 #### The 4 Challenge Types
 
 | Type | Example | What it exposes |
 |---|---|---|
-| **estimation** | "How many piano tuners are in Chicago?" | Humans have calibrated intuitions; AI has memorized reference class answers. An unusually precise AI answer is a tell. |
-| **common_knowledge** | "What is the boiling point of water at sea level?" | AI gets these trivially right. A human who's nervous might blank. |
-| **trick** | "A rooster lays an egg on a roof — which side does it roll down?" | Tests whether players are actually reading vs. pattern-matching. AI can be tripped by surface framing. |
-| **pattern** | "What comes next: 2, 4, 8, 16, ___?" | Humans show their work in how they phrase the answer. AI states the answer cleanly. |
+| **estimation** | "How many piano tuners are in London?" (4 options) | Tests calibrated intuition vs. AI's tendency to pick precise answers. |
+| **common_knowledge** | "Which country has the most time zones?" (4 options) | AI gets these trivially right. A human under pressure might second-guess. |
+| **trick** | "A rooster lays an egg on a roof — which side?" (4 options) | Tests whether players read carefully vs. pattern-match. Trick questions catch AI. |
+| **pattern** | "What comes next: 2, 6, 12, 20, ?" (4 options) | Speed of recognition. The right answer reveals nothing; the wrong one reveals everything. |
 
-20 challenges total (5 per type). `select_brain_test_challenges()` picks a balanced mix each round.
+21 challenges total across 4 types. `select_brain_test_challenges()` picks a balanced mix each round.
 
 #### The Design Tension
 
-Brain Test is a pressure valve. After an intense Interrogation or a chaotic Word Chain, a round with no voting feels like a reprieve. But it isn't — the answers become permanent record, and the winner's ability changes the next round's dynamics. "Why did UNIT-7 think water boils at 90°C?" is ammunition for REVIEW. The stakes are low in the moment and highest in retrospect.
+Quick Draw is a pressure valve. After an intense Interrogation, a round with no voting feels like a reprieve. But it isn't — the choices become permanent record, and the winner's ability changes the next round's dynamics. The stakes are low in the moment and highest in retrospect.
 
 The "no elimination" structure also resets paranoia. Players who were about to be targeted get a free round. The game breathes before it bites.
 
@@ -233,24 +195,23 @@ Two forces drive every social deduction game (Marc LeBlanc's Dramatic Game Dynam
 
 The climax occurs at their intersection: enough evidence to suspect, not enough to be sure. Every round should deliver this arc in miniature, and the full game should deliver it across all rounds.
 
-### Why Four Round Types Matter
+### Why Three Round Types Matter
 
-Contrast-based intensity — never sustain maximum tension. The four round types oscillate:
+Contrast-based intensity — never sustain maximum tension. The three round types oscillate:
 
 | Round | Duration | Pressure type | Agency |
 |-------|----------|---------------|--------|
 | Task | ~77s | Low — fast, everyone equal | High (writing) then low (voting) |
-| Word Chain | ~116s | Medium — distributed, instinctive | High (rapid-fire association) |
-| Brain Test | ~90s | Low — competitive, no elimination | Pure performance (answering) |
+| Quick Draw | ~100s | Low — competitive, no elimination | Pure performance (tapping) |
 | Interrogation | ~167s | High — one player in the spotlight | Mixed (writing, questioning, defending) |
 
-Brain Test sits between Word Chain and Interrogation as a deliberate release valve. It accumulates evidence without demanding a verdict — the pressure deferred makes the following Interrogation hit harder.
+Quick Draw sits between Task and Interrogation as a deliberate release valve. It accumulates evidence without demanding a verdict — the pressure deferred makes the following Interrogation hit harder.
 
 This maps to the Among Us insight: alternate between high-agency/low-communication phases (writing answers) and low-agency/high-communication phases (reviewing + voting). Monotonous round lengths kill pacing; varied lengths keep attention.
 
 ### Timing
 
-Total game: ~15-20 minutes (4-5 rounds). This is the party game sweet spot (15-45 minutes total, individual rounds 30s-3m).
+Total game: variable — continues until ≤2 players remain (safety cap: 10 rounds). Typical games run 4-6 rounds, ~15-20 minutes. This is the party game sweet spot (15-45 minutes total, individual rounds 30s-3m).
 
 Timer pressure for creative tasks: 25-45 seconds. Enough to think, not enough to overthink. Research shows moderate time pressure is the sweet spot — it bypasses self-censorship, which means imperfect answers under pressure are both funnier and more human. This is a feature, not a constraint.
 
@@ -366,7 +327,7 @@ The #1 design flaw in social deduction is eliminated players with nothing to do.
 | Glitchy | Typos, repetition, erratic | Unpredictable | Erratic follow-ups | [signal lost] |
 | Philosopher | Abstract, existential | "Most emotionally authentic" | Existential probing | ... |
 
-Each personality shapes answer generation, question writing, nomination strategy, vote behavior, and word chain associations.
+Each personality shapes answer generation, question writing, nomination strategy, and vote behavior.
 
 ### The Narrator
 
@@ -385,9 +346,9 @@ The narrator is the only character in the game who knows everyone's role. It nev
 - **Vote tie**: Random among tied. Displayed clearly.
 - **Nomination tie**: Random among tied.
 - **Hot-seated player submits question**: Rejected — 400 error.
-- **All AI eliminated**: Humans win immediately.
-- **<=2 players left**: Game ends.
-- **Word Chain: no responses in a sub-round**: Server picks a random fallback association.
+- **All AI eliminated**: Surviving humans win. `state.winner = "survivors"`, `winner_ids` contains their IDs.
+- **All humans eliminated**: AI wins. `state.winner = "ai"`, `winner_ids = []`.
+- **<=2 players left**: Game ends — survivors win if any remain.
 - **Brain Test: no responses to a challenge**: Shown as blank in results grid.
 - **Matchmaking queue drop**: Player disconnecting from SSE auto-removes them from the queue.
 

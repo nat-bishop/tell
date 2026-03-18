@@ -78,10 +78,6 @@ def mock_ai():
             "backend.services.ai_scheduler.assign_personalities",
         ) as mock_assign,
         patch(
-            "backend.services.ai_scheduler.on_chain_sub_round",
-            new_callable=AsyncMock,
-        ) as mock_chain,
-        patch(
             "backend.services.ai_scheduler.register_task",
         ) as mock_register,
         patch(
@@ -91,7 +87,6 @@ def mock_ai():
         yield {
             "on_phase_change": mock_phase,
             "assign_personalities": mock_assign,
-            "on_chain_sub_round": mock_chain,
             "register_task": mock_register,
             "cleanup_game": mock_cleanup,
         }
@@ -112,11 +107,6 @@ def mock_llm():
             return_value="A dramatic verdict.",
         ) as mock_verdict,
         patch(
-            "backend.llm.agents.generate_association",
-            new_callable=AsyncMock,
-            return_value="wave",
-        ) as mock_assoc,
-        patch(
             "backend.llm.agents.generate_narration",
             new_callable=AsyncMock,
             return_value=(None, []),
@@ -125,7 +115,6 @@ def mock_llm():
         yield {
             "synthesize_questions": mock_synth,
             "generate_verdict": mock_verdict,
-            "generate_association": mock_assoc,
             "generate_narration": mock_narration,
         }
 

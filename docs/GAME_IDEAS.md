@@ -97,9 +97,9 @@ RAPID (60s: 10 questions x 6s each) → REVIEW (40s) → ELIMINATION (8s)
 - Trap questions are validated by Human or Not research — location/time-dependent questions ("What time is it?", "What's outside your window?") were among the few detection strategies that actually worked in their 15M-conversation study. Humans know real answers; AI generates plausible stock descriptions.
 - Missed questions are evidence. Humans miss. AI never does.
 - The review grid is visually distinctive — 10 short answers per player, patterns jump out immediately.
-- It's the fourth pressure surface: Task tests format, Interrogation tests defense, Word Chain tests instinct, Rapid Fire tests authenticity.
+- It's a new pressure surface: Task tests format, Interrogation tests defense, Quick Draw tests knowledge, Rapid Fire tests authenticity.
 
-**Implementation**: New phase `RAPID`. Reuses Word Chain's sub-round loop architecture (background task, per-sub-round timer, safety timer). New review grid component (10 answers per player, compact layout). Question pool mixing trap questions (time-dependent, location-dependent) with safe questions (preferences, opinions). AI agent needs `generate_rapid_answer` — should occasionally miss a question.
+**Implementation**: New phase `RAPID`. Reuses Brain Test's sub-round loop architecture (background task, per-sub-round timer, safety timer). New review grid component (10 answers per player, compact layout). Question pool mixing trap questions (time-dependent, location-dependent) with safe questions (preferences, opinions). AI agent needs `generate_rapid_answer` — should occasionally miss a question.
 
 **Effort**: Medium. Sub-round infrastructure exists.
 
@@ -202,7 +202,7 @@ Rules for evaluating future ideas. Research-backed where noted.
 
 2. **The review phase is sacred.** Every round must produce evidence that's visible, comparable, and voteable in Review. If you can't display the evidence clearly, the round doesn't work.
 
-3. **Speed > complexity.** The best rounds are the ones with the fewest instructions. Word Chain needs zero explanation. Rapid Fire needs zero explanation. The Debate needs a paragraph — that's why it was cut.
+3. **Speed > complexity.** The best rounds are the ones with the fewest instructions. Quick Draw needs zero explanation. Rapid Fire needs zero explanation. The Debate needs a paragraph — that's why it was cut.
 
 ### Information Design
 

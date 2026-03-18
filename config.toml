@@ -12,9 +12,6 @@ respond_duration = 35
 review_duration = 55
 nominate_duration = 20
 elimination_duration = 15
-chain_duration = 100
-chain_sub_round_duration = 12
-chain_sub_rounds = 8
 brain_test_duration = 85
 brain_test_challenge_duration = 15
 brain_test_challenges = 5
@@ -24,6 +21,8 @@ max_players = 10
 min_ai = 1
 max_ai = 3
 record_games = true
+discussion_buffer_delay = 1.5
+discussion_react_cooldown = 5.0
 
 [matchmaking]
 min_humans = 2

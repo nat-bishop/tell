@@ -231,7 +231,12 @@ NARRATOR_SYSTEM_PROMPT = (
 )
 
 
-def build_discussion_prompt(deps: AIPlayerDeps, chat_so_far: list[dict] | None = None) -> str:
+def build_discussion_prompt(
+    deps: AIPlayerDeps,
+    chat_so_far: list[dict] | None = None,
+    *,
+    reactive: bool = False,
+) -> str:
     """User message for DISCUSS sub-phase of REVIEW. One short chat message."""
     answers_text = "\n".join(f"  {alias}: {answer}" for alias, answer in deps.all_answers.items())
     chat_text = ""
@@ -240,8 +245,15 @@ def build_discussion_prompt(deps: AIPlayerDeps, chat_so_far: list[dict] | None =
             f"  {m['alias']}: {m['message']}" for m in chat_so_far
         )
 
+    reactive_text = ""
+    if reactive:
+        reactive_text = (
+            "React to the most recent message. Be specific about what you're responding to. "
+        )
+
     return (
         f"Discussion phase. Answers this round:\n{answers_text}{chat_text}\n\n"
+        f"{reactive_text}"
         "Write ONE short message (1 sentence, max 100 chars) to the group. "
         "You can accuse, defend, react, or point out evidence. "
         "Stay in character. Be specific.\n\n"
@@ -249,13 +261,32 @@ def build_discussion_prompt(deps: AIPlayerDeps, chat_so_far: list[dict] | None =
     )
 
 
-ASSOCIATION_SYSTEM_PROMPT_TEMPLATE = (
-    "You are playing Word Chain in Tell, a social deduction game where players take turns "
-    "associating words — unusual patterns may reveal who's human.\n\n"
-    "Given a word, respond with ONE single word that you associate with it. Rules:\n"
-    "- Exactly ONE word. No punctuation, no explanation.\n"
-    "- Be creative but connected. The association should make sense.\n"
-    "- Do NOT repeat any word already in the chain.\n"
-    "- {hint}\n"
-    "Respond with ONLY the single word."
+# ---------------------------------------------------------------------------
+# Coordinator agent prompt (discussion responder selection)
+# ---------------------------------------------------------------------------
+
+COORDINATOR_SYSTEM_PROMPT = (
+    "You are the conversation coordinator for Tell, a social deduction game. "
+    "Given the discussion so far and the active AI characters, decide if any character "
+    "should respond to the latest message. Return ONLY a character alias (e.g. UNIT-7) or NONE.\n\n"
+    "Prefer responding when: someone is addressed directly, a question is asked, "
+    "a previous answer is referenced, an accusation is made.\n"
+    "Prefer NONE when: the chat is flowing between humans, nothing new to add, "
+    "the latest message is a dead-end, someone just agreed with something."
 )
+
+
+def build_coordinator_prompt(
+    chat_so_far: list[dict],
+    characters: list[dict],
+    latest_message: dict,
+) -> str:
+    """Build the user prompt for the discussion coordinator."""
+    chars_text = "\n".join(f"  {c['alias']}: {c['description']}" for c in characters)
+    chat_text = "\n".join(f"  {m['alias']}: {m['message']}" for m in chat_so_far[-10:])
+    return (
+        f"Available characters:\n{chars_text}\n\n"
+        f"Discussion so far:\n{chat_text}\n\n"
+        f"Latest message — {latest_message['alias']}: {latest_message['message']}\n\n"
+        "Who should respond? Return ONE alias or NONE."
+    )

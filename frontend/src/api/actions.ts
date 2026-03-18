@@ -105,31 +105,15 @@ export function castComedyVote(
 export function submitBrainTestAnswer(
   gameId: string,
   playerId: string,
-  answer: string,
+  selectedIndex: number,
   challengeIndex: number,
 ): Promise<void> {
   return apiFetch(`/games/${gameId}/brain-test-answer`, {
     method: "POST",
     body: JSON.stringify({
       player_id: playerId,
-      answer,
+      selected_index: selectedIndex,
       challenge_index: challengeIndex,
-    }),
-  });
-}
-
-export function submitChainWord(
-  gameId: string,
-  playerId: string,
-  word: string,
-  roundIndex: number,
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/chain-word`, {
-    method: "POST",
-    body: JSON.stringify({
-      player_id: playerId,
-      word,
-      round_index: roundIndex,
     }),
   });
 }

@@ -11,7 +11,6 @@ import { QuestionPhase } from "@/components/QuestionPhase";
 import { RespondPhase } from "@/components/RespondPhase";
 import { NominatePhase } from "@/components/NominatePhase";
 import { ReviewPhase } from "@/components/ReviewPhase";
-import { WordChainPhase } from "@/components/WordChainPhase";
 import { BrainTestPhase } from "@/components/BrainTestPhase";
 import { Elimination } from "@/components/Elimination";
 import { GameOver } from "@/components/GameOver";
@@ -86,11 +85,11 @@ function EliminatedBanner() {
 }
 
 const INTERSTITIAL_PHASES = new Set<GamePhase>([
-  "prompt", "nominate", "question", "respond", "review", "elimination", "chain",
+  "prompt", "nominate", "question", "respond", "review", "elimination",
   "brain_test", "brain_test_results",
 ]);
 
-const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "chain", "brain_test"]);
+const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
 
 const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   prompt: 45,
@@ -99,7 +98,6 @@ const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   respond: 30,
   review: 40,
   elimination: 12,
-  chain: 8,
   brain_test: 12,
   brain_test_results: 15,
 };
@@ -247,7 +245,6 @@ function GameContent() {
             {phase === "nominate" && <NominatePhase spectator={!isAlive} />}
             {phase === "question" && <QuestionPhase spectator={!isAlive} />}
             {phase === "respond" && <RespondPhase spectator={!isAlive} />}
-            {phase === "chain" && <WordChainPhase spectator={!isAlive} />}
             {(phase === "brain_test" || phase === "brain_test_results") && (
               <BrainTestPhase spectator={!isAlive} />
             )}

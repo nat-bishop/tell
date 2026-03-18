@@ -17,7 +17,6 @@ class GamePhase(enum.StrEnum):
     REVIEW = "review"
     ELIMINATION = "elimination"
     GAME_OVER = "game_over"
-    CHAIN = "chain"
     BRAIN_TEST = "brain_test"
     BRAIN_TEST_RESULTS = "brain_test_results"
 
@@ -25,7 +24,6 @@ class GamePhase(enum.StrEnum):
 class RoundType(enum.StrEnum):
     INTERROGATION = "interrogation"
     TASK = "task"
-    WORD_CHAIN = "word_chain"
     BRAIN_TEST = "brain_test"
 
 
@@ -56,22 +54,14 @@ class QuestionEntry(BaseModel):
     response: str | None = None
 
 
-class ChainRound(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    seed: str
-    responses: dict[str, str] = Field(default_factory=dict)  # player_id -> word
-    chosen_word: str | None = None
-    chosen_player_id: str | None = None
-
-
 class BrainTestChallenge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     challenge_type: str
     question: str
-    correct_answer: str | None = None  # for scoring display
-    responses: dict[str, str] = Field(default_factory=dict)  # player_id -> answer
+    options: list[str] = Field(default_factory=list)  # 4 choices
+    correct_index: int = 0
+    responses: dict[str, int] = Field(default_factory=dict)  # player_id -> selected index
 
 
 class RoundState(BaseModel):
@@ -92,10 +82,8 @@ class RoundState(BaseModel):
     comedy_votes: dict[str, str] = Field(default_factory=dict)  # voter_id -> target_id
     # Reading period — when set, answers are not accepted until this time
     writing_begins_at: datetime | None = None
-    # Word Chain
-    current_sub_round: int = 0
-    chain_rounds: list[ChainRound] = Field(default_factory=list)
     # Brain Test
+    current_sub_round: int = 0
     brain_challenges: list[BrainTestChallenge] = Field(default_factory=list)
     # Discussion — rate limiting per player during REVIEW
     discussion_counts: dict[str, int] = Field(default_factory=dict)
@@ -125,13 +113,14 @@ class TellGameState(BaseModel):
     players: list[Player] = Field(default_factory=list)
     current_round: RoundState | None = None
     round_number: int = 0
-    max_rounds: int = 3
+    max_rounds: int = 10
     round_types: list[RoundType] = Field(default_factory=list)
     used_prompt_indices: list[int] = Field(default_factory=list)
     used_task_prompt_indices: list[int] = Field(default_factory=list)
     last_prompt_category: str | None = None
     last_task_prompt_category: str | None = None
     winner: str | None = None
+    winner_ids: list[str] = Field(default_factory=list)
     phase_deadline: datetime | None = None
     narrator_context: list[NarratorEntry] = Field(default_factory=list)
     active_ability: ActiveAbility | None = None

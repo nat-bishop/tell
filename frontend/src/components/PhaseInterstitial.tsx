@@ -25,66 +25,66 @@ type VoiceId = "clinical" | "bureaucratic" | "military" | "malfunctioning" | "fr
 
 interface Voice {
   roundLabel: (n: number, type: string | null) => string;
-  typeLabel: (type: string | null, phase: GamePhase) => string;
+  typeLabel: (type: string | null) => string;
 }
 
 const VOICES: Record<VoiceId, Voice> = {
   clinical: {
     roundLabel: (n, type) => {
-      if (type === "chain") return `TEST SEQUENCE ${n} / ASSOCIATION MATRIX`;
+      if (type === "brain_test") return `TEST SEQUENCE ${n} / RAPID ASSESSMENT`;
       if (type === "interrogation") return `TEST SEQUENCE ${n} / BEHAVIORAL PROBE`;
       return `TEST SEQUENCE ${n} / PERFORMANCE EVAL`;
     },
-    typeLabel: (type, phase) => {
-      if (phase === "chain") return "WORD ASSOCIATION";
+    typeLabel: (type) => {
+      if (type === "brain_test") return "QUICK DRAW";
       if (type === "interrogation") return "INTERROGATION";
       return "TASK";
     },
   },
   bureaucratic: {
     roundLabel: (n, type) => {
-      if (type === "chain") return `PLEASE PROCEED TO ASSESSMENT ${n}`;
+      if (type === "brain_test") return `PLEASE PROCEED TO ASSESSMENT ${n}`;
       if (type === "interrogation") return `ASSESSMENT ${n} / COMPLIANCE REVIEW`;
       return `ASSESSMENT ${n} / STANDARD FORM`;
     },
-    typeLabel: (type, phase) => {
-      if (phase === "chain") return "FORM 12C: WORD ASSOCIATION";
+    typeLabel: (type) => {
+      if (type === "brain_test") return "FORM 9D: RAPID RESPONSE";
       if (type === "interrogation") return "FORM 7B: BEHAVIORAL INTERVIEW";
       return "FORM 3A: WRITTEN RESPONSE";
     },
   },
   military: {
     roundLabel: (n, type) => {
-      if (type === "chain") return `OPERATION ${n} / PATTERN RECON`;
+      if (type === "brain_test") return `OPERATION ${n} / SNAP JUDGMENT`;
       if (type === "interrogation") return `OPERATION ${n} / THREAT ASSESSMENT`;
       return `OPERATION ${n} / FIELD TEST`;
     },
-    typeLabel: (type, phase) => {
-      if (phase === "chain") return "ASSOCIATION SWEEP";
+    typeLabel: (type) => {
+      if (type === "brain_test") return "RAPID FIRE";
       if (type === "interrogation") return "TARGET INTERROGATION";
       return "MISSION BRIEFING";
     },
   },
   malfunctioning: {
     roundLabel: (n, type) => {
-      if (type === "chain") return `R-R-ROUND ${n} / WORD... WORD CHAIN`;
+      if (type === "brain_test") return `R-R-ROUND ${n} / Q-QUICK... DRAW`;
       if (type === "interrogation") return `R-R-ROUND ${n} / INTER... INTERROGATION`;
       return `R-R-ROUND ${n} / T-TASK [retry]`;
     },
-    typeLabel: (type, phase) => {
-      if (phase === "chain") return "WORD— WORD ASSOCIATION";
+    typeLabel: (type) => {
+      if (type === "brain_test") return "PICK— PICK AN OPTION. [retry]";
       if (type === "interrogation") return "SELECT— SELECT TARGET. [retry]";
       return "RESPOND. [buffer overflow]";
     },
   },
   friendly: {
     roundLabel: (n, type) => {
-      if (type === "chain") return `round ${n}! word game time :)`;
+      if (type === "brain_test") return `round ${n}! quick quiz time :)`;
       if (type === "interrogation") return `round ${n}! time to chat :)`;
       return `round ${n}! here we go :)`;
     },
-    typeLabel: (type, phase) => {
-      if (phase === "chain") return "word association";
+    typeLabel: (type) => {
+      if (type === "brain_test") return "quick draw";
       if (type === "interrogation") return "get to know each other";
       return "creative writing";
     },
@@ -218,10 +218,10 @@ export function PhaseInterstitial({
   let subtitle: string | undefined;
   let situationLine: string | null = null;
 
-  if (phase === "prompt" || phase === "chain") {
+  if (phase === "prompt" || phase === "brain_test") {
     // Round start — use voice archetype
-    text = voice.roundLabel(roundNumber, phase === "chain" ? "chain" : roundType);
-    subtitle = voice.typeLabel(roundType, phase);
+    text = voice.roundLabel(roundNumber, roundType);
+    subtitle = voice.typeLabel(roundType);
     situationLine = getSituationLine(
       roundNumber,
       alivePlayers,

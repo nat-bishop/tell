@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import random
-import re
 from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -20,7 +19,6 @@ from schemas.api_models import (
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
     BrainTestChallenge,
-    ChainRound,
     GamePhase,
     Player,
     PlayerRole,
@@ -67,45 +65,52 @@ def fill_missing_responses(state: TellGameState) -> None:
             q.response = NO_RESPONSE
 
 
-def select_chain_next_word(responses: dict[str, str]) -> tuple[str, str | None]:
-    """Pick the next seed word from chain responses. Prefers unique (single-submitter) words.
+class MinigameMeta:
+    """Metadata for a round type, used by round selection."""
 
-    Returns (chosen_word, player_id_who_submitted_it_or_None).
+    __slots__ = ("has_elimination", "min_players")
+
+    def __init__(self, *, min_players: int, has_elimination: bool) -> None:
+        self.min_players = min_players
+        self.has_elimination = has_elimination
+
+
+MINIGAMES: dict[RoundType, MinigameMeta] = {
+    RoundType.TASK: MinigameMeta(min_players=3, has_elimination=True),
+    RoundType.BRAIN_TEST: MinigameMeta(min_players=2, has_elimination=False),
+    RoundType.INTERROGATION: MinigameMeta(min_players=4, has_elimination=True),
+}
+
+
+def select_next_round_type(
+    last_round_type: RoundType | None,
+    alive_count: int,
+) -> RoundType:
+    """Pick the next round type dynamically.
+
+    Rules (driven by MINIGAMES registry):
+    - Exclude types where alive_count < min_players
+    - No repeat of previous round type
+    - No consecutive non-eliminating rounds
+    - Random from remaining eligible types
     """
-    if not responses:
-        return "", None
+    eligible: list[RoundType] = []
+    last_meta = MINIGAMES.get(last_round_type) if last_round_type else None
 
-    # Count occurrences of each word (case-insensitive)
-    normalized = {pid: word.strip().lower() for pid, word in responses.items()}
-    word_counts = Counter(normalized.values())
-    word_to_players: dict[str, list[str]] = {}
-    for pid, w in normalized.items():
-        word_to_players.setdefault(w, []).append(pid)
+    for rt, meta in MINIGAMES.items():
+        if alive_count < meta.min_players:
+            continue
+        if rt == last_round_type:
+            continue
+        # Don't allow consecutive non-eliminating rounds
+        if last_meta and not last_meta.has_elimination and not meta.has_elimination:
+            continue
+        eligible.append(rt)
 
-    # Prefer unique words (submitted by exactly one player)
-    unique_words = [w for w, count in word_counts.items() if count == 1]
-    if unique_words:
-        chosen = random.choice(unique_words)
-    else:
-        chosen = random.choice(list(word_counts.keys()))
+    if not eligible:
+        return RoundType.TASK
 
-    player_id = random.choice(word_to_players[chosen])
-    return chosen, player_id
-
-
-def select_round_types(num_rounds: int) -> list[RoundType]:
-    """Cycle: Task → Word Chain → Brain Test → Interrogation → ...
-
-    Brain Test is evidence-only (no voting). It appears every 3rd round
-    starting from round 3.
-    """
-    cycle = [
-        RoundType.TASK,
-        RoundType.WORD_CHAIN,
-        RoundType.BRAIN_TEST,
-        RoundType.INTERROGATION,
-    ]
-    return [cycle[i % len(cycle)] for i in range(num_rounds)]
+    return random.choice(eligible)
 
 
 # Interstitial hold times (seconds) added to phase deadlines so
@@ -113,7 +118,6 @@ def select_round_types(num_rounds: int) -> list[RoundType]:
 # The frontend derives its dismiss timing from the action_starts_at timestamp.
 _INTERSTITIAL_HOLD: dict[GamePhase, int] = {
     GamePhase.PROMPT: 5,  # round start — staggered visual beats
-    GamePhase.CHAIN: 5,  # round start
     GamePhase.BRAIN_TEST: 5,  # round start
     GamePhase.BRAIN_TEST_RESULTS: 2,
     GamePhase.NOMINATE: 2,  # mid-round (~1.5s on client, 2s gives buffer)
@@ -138,8 +142,6 @@ def get_phase_duration(
         if round_type == RoundType.TASK:
             return settings.task_prompt_duration + reading
         return settings.prompt_duration + reading
-    if phase == GamePhase.CHAIN:
-        return settings.chain_duration
     if phase == GamePhase.BRAIN_TEST:
         return settings.brain_test_duration
     if phase == GamePhase.BRAIN_TEST_RESULTS:
@@ -228,11 +230,10 @@ def max_votes_for_player(alive_count: int) -> int:
 
 
 def get_next_round_type(state: TellGameState) -> RoundType:
-    """Get the round type for the next round."""
-    next_round = state.round_number + 1
-    if state.round_types and next_round <= len(state.round_types):
-        return state.round_types[next_round - 1]
-    return RoundType.TASK
+    """Get the round type for the next round (dynamic selection)."""
+    last = state.round_types[-1] if state.round_types else None
+    alive_count = len(get_alive_players(state))
+    return select_next_round_type(last, alive_count)
 
 
 def transition_to_prompt(
@@ -248,16 +249,12 @@ def transition_to_prompt(
     state.used_prompt_indices.append(idx)
     state.last_prompt_category = prompt.category.value
 
-    round_type = RoundType.INTERROGATION
-    if state.round_types and state.round_number <= len(state.round_types):
-        round_type = state.round_types[state.round_number - 1]
-
     now = datetime.now(UTC)
     state.current_round = RoundState(
         round_number=state.round_number,
         prompt_text=prompt.text,
         prompt_category=prompt.category.value,
-        round_type=round_type,
+        round_type=RoundType.INTERROGATION,
         writing_begins_at=(
             now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
         ),
@@ -298,26 +295,6 @@ def transition_to_task_prompt(
     return state
 
 
-def transition_to_word_chain(state: TellGameState, seed_word: str, duration: int) -> TellGameState:
-    """Start a new Word Chain round."""
-
-    state.round_number += 1
-
-    state.current_round = RoundState(
-        round_number=state.round_number,
-        prompt_text="word chain",
-        prompt_category="word_chain",
-        round_type=RoundType.WORD_CHAIN,
-        current_sub_round=0,
-        chain_rounds=[ChainRound(seed=seed_word)],
-    )
-    state.phase = GamePhase.CHAIN
-    state.phase_deadline = datetime.now(UTC) + timedelta(
-        seconds=duration + get_interstitial_hold(GamePhase.CHAIN)
-    )
-    return state
-
-
 def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) -> TellGameState:
     """Move to a phase with a deadline (includes interstitial hold)."""
     state.phase = phase
@@ -338,7 +315,7 @@ def transition_to_brain_test(
     state.round_number += 1
     state.current_round = RoundState(
         round_number=state.round_number,
-        prompt_text="brain test",
+        prompt_text="quick draw",
         prompt_category="brain_test",
         round_type=RoundType.BRAIN_TEST,
         current_sub_round=0,
@@ -346,7 +323,8 @@ def transition_to_brain_test(
             BrainTestChallenge(
                 challenge_type=c.challenge_type,
                 question=c.question,
-                correct_answer=c.correct_answer,
+                options=c.options,
+                correct_index=c.correct_index,
             )
             for c in challenges
         ],
@@ -489,101 +467,16 @@ def resolve_comedy_votes(
 
 
 # ---------------------------------------------------------------------------
-# Brain Test scoring
+# Brain Test scoring (multiple choice — pure correctness)
 # ---------------------------------------------------------------------------
-
-_WORD_TO_NUM: dict[str, int] = {
-    "zero": 0,
-    "one": 1,
-    "two": 2,
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-}
-
-
-def _normalize_answer(answer: str) -> str:
-    """Normalize an answer for fuzzy matching: lowercase, strip whitespace/articles/currency."""
-    s = answer.strip().lower()
-    # Strip leading articles
-    s = re.sub(r"^(the|a|an)\s+", "", s)
-    # Strip currency symbols
-    s = re.sub(r"^[$€£¥]", "", s)
-    return s.strip()
-
-
-def _parse_numeric(s: str) -> float | None:
-    """Try to parse a string as a number."""
-    s = re.sub(r"[,$€£¥%]", "", s.strip())
-    # Handle "X cents" patterns
-    m = re.match(r"^(\d+(?:\.\d+)?)\s*cents?$", s, re.IGNORECASE)
-    if m:
-        return float(m.group(1)) / 100
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def _fuzzy_match(response: str, correct: str) -> bool:
-    """Check if a response matches the correct answer (fuzzy)."""
-    norm_r = _normalize_answer(response)
-    norm_c = _normalize_answer(correct)
-    if norm_r == norm_c:
-        return True
-    # Numeric comparison
-    num_r = _parse_numeric(response)
-    num_c = _parse_numeric(correct)
-    if num_r is not None and num_c is not None:
-        return abs(num_r - num_c) < 0.001
-    # Handle "five cents" -> 0.05 style
-    words = norm_r.split()
-    if len(words) >= 1 and words[0] in _WORD_TO_NUM:
-        val = _WORD_TO_NUM[words[0]]
-        if len(words) >= 2 and "cent" in words[1]:
-            val = val / 100
-        if num_c is not None and abs(val - num_c) < 0.001:
-            return True
-    return False
-
-
-def _score_with_answer(challenge: BrainTestChallenge) -> dict[str, int]:
-    """1 point for matching correct_answer (fuzzy)."""
-    scores: dict[str, int] = {}
-    if not challenge.correct_answer:
-        return scores
-    for pid, response in challenge.responses.items():
-        scores[pid] = 1 if _fuzzy_match(response, challenge.correct_answer) else 0
-    return scores
-
-
-def _score_by_uniqueness(challenge: BrainTestChallenge) -> dict[str, int]:
-    """1 point if your answer is unique among all responses."""
-    scores: dict[str, int] = {}
-    if not challenge.responses:
-        return scores
-    # Count normalized occurrences
-    normalized = {pid: _normalize_answer(ans) for pid, ans in challenge.responses.items()}
-    counts: dict[str, int] = {}
-    for norm in normalized.values():
-        counts[norm] = counts.get(norm, 0) + 1
-    for pid, norm in normalized.items():
-        scores[pid] = 1 if counts[norm] == 1 else 0
-    return scores
 
 
 def score_brain_test(challenges: list[BrainTestChallenge]) -> dict[str, int]:
-    """Score all challenges. Returns player_id -> total points."""
+    """Score all challenges. 1 point per correct answer (selected_index == correct_index)."""
     totals: dict[str, int] = {}
     for ch in challenges:
-        ch_scores = _score_with_answer(ch) if ch.correct_answer else _score_by_uniqueness(ch)
-        for pid, pts in ch_scores.items():
-            totals[pid] = totals.get(pid, 0) + pts
+        for pid, selected in ch.responses.items():
+            totals[pid] = totals.get(pid, 0) + (1 if selected == ch.correct_index else 0)
     return totals
 
 
@@ -604,26 +497,30 @@ def determine_challenge_winner(
     return winner, ""  # alias resolved by caller
 
 
-def check_game_over(state: TellGameState) -> str | None:
-    """Check if the game should end. Returns 'humans', 'ai', or None."""
+def check_game_over(state: TellGameState) -> tuple[str, list[str]] | None:
+    """Check if the game should end.
+
+    Returns ("ai", []) or ("survivors", [player_ids...]) or None.
+    """
     alive_humans = get_alive_humans(state)
     alive_ai = get_alive_ai(state)
     alive = get_alive_players(state)
 
     if not alive_humans:
-        return "ai"
+        return ("ai", [])
     if not alive_ai:
-        return "humans"
+        return ("survivors", [p.id for p in alive])
     if len(alive) <= 2:
-        if alive_humans:
-            return "humans"
-        return "ai"
+        return ("survivors", [p.id for p in alive])
     if state.round_number >= state.max_rounds:
-        return "humans"
+        # Safety cap — shouldn't normally be reached
+        return ("survivors", [p.id for p in alive])
     return None
 
 
-def make_game_over_event(state: TellGameState, winner: str, seq_fn) -> GameOverEvent:
+def make_game_over_event(
+    state: TellGameState, winner: str, winner_ids: list[str], seq_fn
+) -> GameOverEvent:
     players_revealed = []
     for p in state.players:
         players_revealed.append(
@@ -638,6 +535,7 @@ def make_game_over_event(state: TellGameState, winner: str, seq_fn) -> GameOverE
     return GameOverEvent(
         seq=seq_fn(),
         winner=winner,
+        winner_ids=winner_ids,
         players=players_revealed,
     )
 
@@ -701,8 +599,6 @@ def build_state_sync(
     nominations: dict[str, str] = {}
     synthesis: str | None = None
     verdict: str | None = None
-    chain_rounds: list[dict] = []
-    current_sub_round: int = 0
 
     if round_state:
         prompt_text = round_state.prompt_text
@@ -740,11 +636,6 @@ def build_state_sync(
             }
             questions.append(qd)
 
-        # Word Chain state
-        if round_state.chain_rounds:
-            chain_rounds = [cr.model_dump() for cr in round_state.chain_rounds]
-            current_sub_round = round_state.current_sub_round
-
     player_obj = get_player_by_id(state, player_id)
     is_host = player_obj.is_host if player_obj else False
 
@@ -773,6 +664,7 @@ def build_state_sync(
         "phase_deadline": state.phase_deadline.isoformat() if state.phase_deadline else None,
         "phase_duration": phase_duration,
         "winner": state.winner,
+        "winner_ids": state.winner_ids,
         "is_host": is_host,
         "my_answer": my_answer,
         "writing_begins_at": (
@@ -780,8 +672,6 @@ def build_state_sync(
             if round_state and round_state.writing_begins_at
             else None
         ),
-        "chain_rounds": chain_rounds,
-        "current_sub_round": current_sub_round,
         "action_starts_at": (
             (state.phase_deadline - timedelta(seconds=phase_duration)).isoformat()
             if state.phase_deadline and phase_duration

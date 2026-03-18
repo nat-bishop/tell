@@ -75,7 +75,7 @@ def make_game_state(
     players: list[Player] | None = None,
     round_number: int = 1,
     round_type: RoundType = RoundType.TASK,
-    max_rounds: int = 3,
+    max_rounds: int = 10,
     round_types: list[RoundType] | None = None,
     current_round: RoundState | None = "auto",
     used_prompt_indices: list[int] | None = None,
@@ -115,6 +115,6 @@ def make_standard_game(
         phase=phase,
         players=players,
         round_type=round_type,
-        round_types=[RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN],
+        round_types=[RoundType.TASK],
     )
     return state, players

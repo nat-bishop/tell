@@ -5,7 +5,6 @@ from __future__ import annotations
 from backend.api.deps import get_connection_manager, get_game_repository
 from backend.services.game_repository import TellGameSession
 from schemas.game_state import (
-    ChainRound,
     GamePhase,
     QuestionEntry,
     RoundType,
@@ -224,66 +223,24 @@ class TestDoAfterElimination:
         await do_after_elimination(game_id, session)
 
         assert session.state.phase == GamePhase.GAME_OVER
-        assert session.state.winner == "humans"
+        assert session.state.winner == "survivors"
+        assert len(session.state.winner_ids) > 0
 
-    async def test_next_round_task(self, fresh_deps, mock_ai, mock_llm):
+    async def test_next_round_advances(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_after_elimination
 
         _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
-        # Set up round_types so next round is TASK
-        session.state.round_types = [RoundType.TASK, RoundType.TASK, RoundType.TASK]
+        session.state.round_types = [RoundType.TASK]
         session.state.round_number = 1
         game_id = _store_session(session)
         await do_after_elimination(game_id, session)
 
-        assert session.state.phase == GamePhase.PROMPT
-        assert session.state.current_round.round_type == RoundType.TASK
-
-    async def test_next_round_interrogation(self, fresh_deps, mock_ai, mock_llm):
-        from backend.services.transitions import do_after_elimination
-
-        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
-        session.state.round_types = [RoundType.TASK, RoundType.INTERROGATION, RoundType.WORD_CHAIN]
-        session.state.round_number = 1
-        game_id = _store_session(session)
-        await do_after_elimination(game_id, session)
-
-        assert session.state.phase == GamePhase.PROMPT
-        assert session.state.current_round.round_type == RoundType.INTERROGATION
-
-    async def test_next_round_word_chain(self, fresh_deps, mock_ai, mock_llm):
-        from backend.services.transitions import do_after_elimination
-
-        _state, session, _ = _make_session(GamePhase.ELIMINATION, round_type=RoundType.TASK)
-        session.state.round_types = [
-            RoundType.TASK,
-            RoundType.TASK,
-            RoundType.WORD_CHAIN,
-        ]
-        session.state.round_number = 2
-        game_id = _store_session(session)
-        await do_after_elimination(game_id, session)
-
-        assert session.state.phase == GamePhase.CHAIN
-        assert session.state.current_round.round_type == RoundType.WORD_CHAIN
-
-
-# ---------------------------------------------------------------------------
-# do_chain_complete
-# ---------------------------------------------------------------------------
-
-
-class TestDoChainComplete:
-    async def test_goes_to_review(self, fresh_deps, mock_ai, mock_llm):
-        from backend.services.transitions import do_chain_complete
-
-        _state, session, _ = _make_session(GamePhase.CHAIN, round_type=RoundType.WORD_CHAIN)
-        session.state.current_round.chain_rounds = [ChainRound(seed="ocean")]
-        session.state.current_round.current_sub_round = 0
-        game_id = _store_session(session)
-        await do_chain_complete(game_id, session)
-
-        assert session.state.phase == GamePhase.REVIEW
+        # Should advance to a new round (dynamically selected)
+        assert session.state.phase in (
+            GamePhase.PROMPT,
+            GamePhase.BRAIN_TEST,
+        )
+        assert session.state.round_number == 2
 
 
 # ---------------------------------------------------------------------------
@@ -313,10 +270,14 @@ class TestInitializeAndStartGame:
 
         await initialize_and_start_game("init_test", 2)
 
-        assert session.state.phase == GamePhase.PROMPT
+        assert session.state.phase in (
+            GamePhase.PROMPT,
+            GamePhase.BRAIN_TEST,
+        )
         assert len(session.state.players) == 4  # 2 human + 2 AI
         assert session.state.round_number == 1
-        assert len(session.state.round_types) == session.state.max_rounds
+        assert len(session.state.round_types) >= 1  # dynamically grown
+        assert session.state.max_rounds == 10  # safety cap
 
         mock_ai["assign_personalities"].assert_called_once()
 
@@ -335,16 +296,18 @@ class TestDoBrainTestComplete:
 
         session.state.current_round.brain_challenges = [
             BrainTestChallenge(
-                challenge_type="trivia",
+                challenge_type="trick",
                 question="2+2?",
-                correct_answer="4",
-                responses={"h1": "4", "h2": "3", "a1": "4", "a2": "5"},
+                options=["3", "4", "5", "6"],
+                correct_index=1,
+                responses={"h1": 1, "h2": 0, "a1": 1, "a2": 2},
             ),
             BrainTestChallenge(
-                challenge_type="trivia",
+                challenge_type="trick",
                 question="Capital of France?",
-                correct_answer="Paris",
-                responses={"h1": "Paris", "h2": "Paris", "a1": "London", "a2": "Paris"},
+                options=["London", "Paris", "Berlin", "Madrid"],
+                correct_index=1,
+                responses={"h1": 1, "h2": 1, "a1": 0, "a2": 1},
             ),
         ]
         game_id = _store_session(session)
@@ -378,10 +341,11 @@ class TestDoBrainTestComplete:
 
         session.state.current_round.brain_challenges = [
             BrainTestChallenge(
-                challenge_type="trivia",
+                challenge_type="trick",
                 question="Impossible?",
-                correct_answer="xyz",
-                responses={"h1": "wrong", "h2": "nope", "a1": "bad", "a2": "no"},
+                options=["A", "B", "C", "D"],
+                correct_index=3,
+                responses={"h1": 0, "h2": 1, "a1": 2, "a2": 0},
             ),
         ]
         game_id = _store_session(session)
@@ -479,7 +443,7 @@ class TestStartNextRound:
             holder_alias="UNIT-01",
             ability_type="partial_scan",
         )
-        session.state.round_types = [RoundType.TASK, RoundType.TASK, RoundType.TASK]
+        session.state.round_types = [RoundType.TASK]
         session.state.round_number = 1
         game_id = _store_session(session)
         await _start_next_round(game_id, session)

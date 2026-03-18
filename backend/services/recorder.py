@@ -26,6 +26,7 @@ def save_recording(game_id: str, state: TellGameState, events: list[GameEvent]) 
             "game_id": game_id,
             "recorded_at": datetime.now(UTC).isoformat(),
             "winner": state.winner,
+            "winner_ids": state.winner_ids,
             "round_count": state.round_number,
             "players": [
                 {"alias": p.alias, "role": p.role.value, "is_alive": p.is_alive}

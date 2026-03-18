@@ -13,8 +13,6 @@ import type {
   ResponseSubmittedData,
   SynthesisReadyData,
   VerdictData,
-  ChainSeedData,
-  ChainProgressData,
   NarrationData,
   ComedyWinnerData,
   BrainTestChallengeData,
@@ -43,8 +41,6 @@ export interface GameEventCallbacks {
   onResponseSubmitted: (data: ResponseSubmittedData) => void;
   onSynthesisReady: (data: SynthesisReadyData) => void;
   onVerdict: (data: VerdictData) => void;
-  onChainSeed: (data: ChainSeedData) => void;
-  onChainProgress: (data: ChainProgressData) => void;
   onNarration: (data: NarrationData) => void;
   onComedyWinner: (data: ComedyWinnerData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
@@ -85,8 +81,6 @@ export function connectGameEvents(
     response_submitted: callbacks.onResponseSubmitted,
     synthesis_ready: callbacks.onSynthesisReady,
     verdict: callbacks.onVerdict,
-    chain_seed: callbacks.onChainSeed,
-    chain_progress: callbacks.onChainProgress,
     narration: callbacks.onNarration,
     comedy_winner: callbacks.onComedyWinner,
     brain_test_challenge: callbacks.onBrainTestChallenge,

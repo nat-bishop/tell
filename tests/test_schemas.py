@@ -86,7 +86,7 @@ class TestModelDefaults:
         assert state.players == []
         assert state.current_round is None
         assert state.round_number == 0
-        assert state.max_rounds == 3
+        assert state.max_rounds == 10
 
     def test_player_defaults(self):
         player = Player(id="p1", alias="UNIT-1", role=PlayerRole.HUMAN)
@@ -104,7 +104,6 @@ class TestModelDefaults:
         assert rs.questions == []
         assert rs.votes == {}
         assert rs.nominated_id is None
-        assert rs.chain_rounds == []
         assert rs.current_sub_round == 0
 
 

@@ -24,10 +24,11 @@ from pydantic_ai.messages import ModelMessage
 from backend.api.deps import get_settings
 from backend.llm.personalities import Personality
 from backend.llm.prompts import (
-    ASSOCIATION_SYSTEM_PROMPT_TEMPLATE,
+    COORDINATOR_SYSTEM_PROMPT,
     NARRATOR_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
     VERDICT_SYSTEM_PROMPT,
+    build_coordinator_prompt,
     build_system_prompt,
 )
 from schemas.game_state import RoundType
@@ -145,17 +146,17 @@ verdict_agent: Agent[None, str] = Agent(
     model_settings={"max_tokens": 100},
 )
 
-association_agent: Agent[None, str] = Agent(
-    output_type=str,
-    retries=1,
-    model_settings={"max_tokens": 20},
-)
-
 brain_test_agent: Agent[None, str] = Agent(
     output_type=str,
     retries=1,
-    instructions="Answer concisely.",
-    model_settings={"max_tokens": 50},
+    instructions="Pick the best option. Reply with ONLY the number (0, 1, 2, or 3).",
+    model_settings={"max_tokens": 10},
+)
+
+discussion_coordinator: Agent[None, str] = Agent(
+    output_type=str,
+    retries=1,
+    model_settings={"max_tokens": 20},
 )
 
 
@@ -371,7 +372,6 @@ async def generate_verdict(
     answer: str,
     vote_count: int,
     round_number: int,
-    max_rounds: int,
     *,
     game_id: str | None = None,
 ) -> str | None:
@@ -382,59 +382,60 @@ async def generate_verdict(
         f"{alias} was revealed as {role}.\n"
         f'The prompt was: "{prompt_text}"\n'
         f'Their answer: "{answer}"\n'
-        f"They received {vote_count} votes in round {round_number} of {max_rounds}."
+        f"They received {vote_count} votes in round {round_number}."
     )
 
     return await _run_system_call(verdict_agent, user_prompt, timeout=3.0, game_id=game_id)
 
 
-async def generate_association(
-    seed_word: str,
-    personality: Personality,
-    chain_history: list[str] | None = None,
-    *,
-    game_id: str | None = None,
-) -> str:
-    """Generate a single-word association for Word Chain. Personality-aware, lightweight."""
-    history_text = f"\nChain so far: {' → '.join(chain_history)}" if chain_history else ""
-    user_prompt = f"Word: {seed_word}{history_text}"
-
-    result = await _run_system_call(
-        association_agent,
-        user_prompt,
-        timeout=3.0,
-        game_id=game_id,
-        instructions=ASSOCIATION_SYSTEM_PROMPT_TEMPLATE.format(hint=personality.chain_style_hint),
-    )
-    if result:
-        # Clean up: take first word only
-        word = result.strip().split()[0].strip(".,!?\"'").lower()
-        if word:
-            return word
-
-    # Fallback
-    from schemas.word_chain import get_fallback_association
-
-    return get_fallback_association(seed_word)
-
-
 async def generate_brain_test_answer(
     question: str,
-    personality_name: str,
+    options: list[str],
+    *,
+    game_id: str | None = None,
+) -> int:
+    """Select an option for a brain test challenge. Returns the selected index (0-3).
+
+    Falls back to random selection on timeout/failure.
+    """
+    options_text = "\n".join(f"{i}. {opt}" for i, opt in enumerate(options))
+    prompt = f"Question: {question}\n\nOptions:\n{options_text}\n\nReply with ONLY the number."
+
+    result = await _run_system_call(brain_test_agent, prompt, timeout=3.0, game_id=game_id)
+    if result:
+        # Parse the number from the response
+        stripped = result.strip()
+        for ch in stripped:
+            if ch in "0123":
+                return int(ch)
+
+    # Fallback: random selection
+    return random.randint(0, len(options) - 1)
+
+
+async def decide_discussion_responder(
+    chat_so_far: list[dict],
+    eligible_characters: list[dict],
+    latest_message: dict,
     *,
     game_id: str | None = None,
 ) -> str | None:
-    """Generate a short answer to a brain test challenge.
-
-    Returns None on timeout/failure.
-    """
-    prompt = (
-        f"You are playing a brain test game. "
-        f"Your personality: {personality_name}. "
-        f"Question: {question}\n"
-        "Give a short answer (a few words). Just the answer, nothing else."
+    """Decide which AI character should respond. Returns alias or None."""
+    prompt = build_coordinator_prompt(chat_so_far, eligible_characters, latest_message)
+    result = await _run_system_call(
+        discussion_coordinator,
+        prompt,
+        timeout=1.0,
+        game_id=game_id,
+        instructions=COORDINATOR_SYSTEM_PROMPT,
     )
-    return await _run_system_call(brain_test_agent, prompt, timeout=3.0, game_id=game_id)
+    if not result:
+        return None
+    alias = result.strip()
+    valid_aliases = {c["alias"] for c in eligible_characters}
+    if alias in valid_aliases:
+        return alias
+    return None
 
 
 async def generate_narration(

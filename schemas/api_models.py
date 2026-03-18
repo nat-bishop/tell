@@ -50,13 +50,11 @@ class StateSyncEvent(GameEvent):
     phase_deadline: str | None = None
     phase_duration: int | None = None
     winner: str | None = None
+    winner_ids: list[str] = Field(default_factory=list)
     is_host: bool = False
     my_answer: str | None = None
     # Reading period
     writing_begins_at: str | None = None
-    # Word Chain
-    chain_rounds: list[dict] = Field(default_factory=list)
-    current_sub_round: int = 0
 
 
 class PlayerJoinedEvent(GameEvent):
@@ -92,8 +90,6 @@ class PhaseChangedEvent(GameEvent):
     synthesis: str | None = None
     writing_begins_at: str | None = None
     action_starts_at: str | None = None
-    # Word Chain
-    chain_rounds: list[dict] = Field(default_factory=list)
     # Discussion sub-phase timestamps (REVIEW only)
     discuss_starts_at: str | None = None
     vote_starts_at: str | None = None
@@ -176,6 +172,7 @@ class EliminationEvent(GameEvent):
 class GameOverEvent(GameEvent):
     event_type: Literal["game_over"] = "game_over"
     winner: str
+    winner_ids: list[str] = Field(default_factory=list)
     players: list[dict]
 
 
@@ -190,22 +187,6 @@ class HostChangedEvent(GameEvent):
     new_host_alias: str
 
 
-class ChainSeedEvent(GameEvent):
-    event_type: Literal["chain_seed"] = "chain_seed"
-    word: str
-    round_index: int
-    sub_deadline: str | None = None
-    chain_so_far: list[str] = Field(default_factory=list)
-    phase_duration: int | None = None
-
-
-class ChainProgressEvent(GameEvent):
-    event_type: Literal["chain_progress"] = "chain_progress"
-    round_index: int
-    count: int
-    total: int
-
-
 class NarrationEvent(GameEvent):
     event_type: Literal["narration"] = "narration"
     text: str
@@ -217,13 +198,14 @@ class BrainTestChallengeEvent(GameEvent):
     challenge_index: int
     challenge_type: str
     question: str
+    options: list[str] = Field(default_factory=list)
     sub_deadline: str | None = None
     phase_duration: int | None = None
 
 
 class BrainTestResultsEvent(GameEvent):
     event_type: Literal["brain_test_results"] = "brain_test_results"
-    # player_id -> list of {question, answer, correct_answer, challenge_type}
+    # player_id -> list of {question, options, selected_index, correct_index, challenge_type}
     results: dict[str, list[dict]]
     scores: dict[str, int] | None = None
     winner_id: str | None = None
@@ -254,7 +236,7 @@ class SubmitBrainTestAnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
-    answer: str
+    selected_index: int
     challenge_index: int
 
 
@@ -352,14 +334,6 @@ class ComedyWinnerEvent(GameEvent):
     winner_id: str
     winner_alias: str
     vote_count: int
-
-
-class SubmitChainWordRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    player_id: str
-    word: str
-    round_index: int
 
 
 class GameInfoResponse(BaseModel):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import structlog
@@ -38,8 +39,6 @@ from schemas.api_models import (
     AnswerSubmittedEvent,
     CastComedyVoteRequest,
     CastVoteRequest,
-    ChainProgressEvent,
-    DiscussionMessageEvent,
     JoinGameRequest,
     JoinGameResponse,
     NominateRequest,
@@ -52,7 +51,6 @@ from schemas.api_models import (
     StatusResponse,
     SubmitAnswerRequest,
     SubmitBrainTestAnswerRequest,
-    SubmitChainWordRequest,
     SubmitQuestionRequest,
     SubmitResponseRequest,
     VoteCastEvent,
@@ -516,67 +514,6 @@ async def cast_comedy_vote(game_id: str, req: CastComedyVoteRequest):
     return {"status": "ok"}
 
 
-@router.post("/{game_id}/chain-word", response_model=StatusResponse)
-async def submit_chain_word(game_id: str, req: SubmitChainWordRequest):
-    """Submit a word during a Word Chain sub-round."""
-    structlog.contextvars.clear_contextvars()
-    structlog.contextvars.bind_contextvars(game_id=game_id)
-    cm = get_connection_manager()
-    repo = get_game_repository()
-    lock = cm.get_lock(game_id)
-
-    async with lock:
-        session = repo.get(game_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Game not found")
-
-        state = session.state
-        if state.phase != GamePhase.CHAIN:
-            raise HTTPException(status_code=400, detail="Not in chain phase")
-
-        result = validate_player_alive(state, req.player_id)
-        if isinstance(result, str):
-            raise HTTPException(status_code=400, detail=result)
-
-        round_state = state.current_round
-        if not round_state:
-            raise HTTPException(status_code=400, detail="No active round")
-
-        if req.round_index != round_state.current_sub_round:
-            raise HTTPException(status_code=400, detail="Wrong sub-round")
-
-        # Validate single word: no spaces, max 30 chars
-        word = req.word.strip().lower()
-        if not word or " " in word or len(word) > 30:
-            raise HTTPException(status_code=400, detail="Must be a single word, max 30 characters")
-
-        current_cr = round_state.chain_rounds[round_state.current_sub_round]
-        if req.player_id in current_cr.responses:
-            raise HTTPException(status_code=400, detail="Already submitted this sub-round")
-
-        current_cr.responses[req.player_id] = word
-
-        alive = get_alive_players(state)
-
-        await cm.broadcast(
-            game_id,
-            ChainProgressEvent(
-                seq=session.next_seq(),
-                round_index=req.round_index,
-                count=len(current_cr.responses),
-                total=len(alive),
-            ),
-        )
-        log.info(
-            "chain_word_submitted",
-            player_id=req.player_id,
-            round_index=req.round_index,
-            count=len(current_cr.responses),
-        )
-
-    return {"status": "ok"}
-
-
 @router.post("/{game_id}/brain-test-answer", response_model=StatusResponse)
 async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerRequest):
     """Submit an answer to a brain test challenge."""
@@ -606,11 +543,14 @@ async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerReque
         if req.challenge_index >= len(round_state.brain_challenges):
             raise HTTPException(status_code=400, detail="Invalid challenge index")
 
+        if req.selected_index < 0 or req.selected_index > 3:
+            raise HTTPException(status_code=400, detail="selected_index must be 0-3")
+
         ch = round_state.brain_challenges[req.challenge_index]
         if req.player_id in ch.responses:
             raise HTTPException(status_code=400, detail="Already answered")
 
-        ch.responses[req.player_id] = req.answer.strip()
+        ch.responses[req.player_id] = req.selected_index
         log.info(
             "brain_test_answer",
             player_id=req.player_id,
@@ -658,24 +598,16 @@ async def send_discussion_message(game_id: str, req: SendDiscussionMessageReques
             raise HTTPException(status_code=400, detail="Message limit reached (max 3)")
 
         round_state.discussion_counts[req.player_id] = count + 1
-
-        await cm.broadcast(
-            game_id,
-            DiscussionMessageEvent(
-                seq=session.next_seq(),
-                sender_id=req.player_id,
-                sender_alias=player.alias,
-                message=message,
-            ),
-        )
-
-        from backend.services.ai_scheduler import record_discussion_message
-
-        record_discussion_message(game_id, player.alias, message)
         log.info(
             "discussion_message",
             player_id=req.player_id,
             msg_count=count + 1,
         )
+
+    # Fire buffered broadcast + AI reaction pipeline (outside lock)
+    from backend.services.ai_scheduler import on_discussion_message, register_task
+
+    task = asyncio.create_task(on_discussion_message(game_id, req.player_id, player.alias, message))
+    register_task(game_id, task)
 
     return {"status": "ok"}

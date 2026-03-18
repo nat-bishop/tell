@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from schemas.game_state import (
-    ChainRound,
     GamePhase,
     QuestionEntry,
     RoundType,
@@ -364,63 +363,6 @@ class TestCastVote:
         )
         assert resp.status_code == 200
         assert session.state.current_round.votes["h1"] == ["a2"]
-
-
-# ---------------------------------------------------------------------------
-# Submit chain word
-# ---------------------------------------------------------------------------
-
-
-class TestSubmitChainWord:
-    def _setup_chain_phase(self):
-        game_id, session, players = seed_game(GamePhase.CHAIN, round_type=RoundType.WORD_CHAIN)
-        session.state.current_round.chain_rounds = [ChainRound(seed="ocean")]
-        session.state.current_round.current_sub_round = 0
-        return game_id, session, players
-
-    async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.PROMPT)
-        resp = await client.post(
-            f"/games/{game_id}/chain-word",
-            json={"player_id": "h1", "word": "wave", "round_index": 0},
-        )
-        assert resp.status_code == 400
-
-    async def test_wrong_sub_round(self, client, mock_ai):
-        game_id, _, _ = self._setup_chain_phase()
-        resp = await client.post(
-            f"/games/{game_id}/chain-word",
-            json={"player_id": "h1", "word": "wave", "round_index": 5},
-        )
-        assert resp.status_code == 400
-        assert "wrong sub-round" in resp.json()["detail"].lower()
-
-    async def test_invalid_word_spaces(self, client, mock_ai):
-        game_id, _, _ = self._setup_chain_phase()
-        resp = await client.post(
-            f"/games/{game_id}/chain-word",
-            json={"player_id": "h1", "word": "two words", "round_index": 0},
-        )
-        assert resp.status_code == 400
-        assert "single word" in resp.json()["detail"].lower()
-
-    async def test_duplicate_submission(self, client, mock_ai):
-        game_id, session, _ = self._setup_chain_phase()
-        session.state.current_round.chain_rounds[0].responses["h1"] = "wave"
-        resp = await client.post(
-            f"/games/{game_id}/chain-word",
-            json={"player_id": "h1", "word": "tide", "round_index": 0},
-        )
-        assert resp.status_code == 400
-        assert "already submitted" in resp.json()["detail"].lower()
-
-    async def test_success(self, client, mock_ai):
-        game_id, _, _ = self._setup_chain_phase()
-        resp = await client.post(
-            f"/games/{game_id}/chain-word",
-            json={"player_id": "h1", "word": "wave", "round_index": 0},
-        )
-        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
