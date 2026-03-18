@@ -18,6 +18,15 @@ The game was completely redesigned from elimination-based to score-based in 2026
 - Removed: Interrogation, Discussion chat, Comedy Cup, Abilities (PARTIAL SCAN + DOUBLE VOTE), multi-vote, ELIMINATION phase
 - Added: Matchup sub-round loop (1v1 head-to-head), FinalRevealEvent, scoring on Player model
 
+## Facility UI (current frontend, branch: verification-chamber-ui)
+
+`frontend/src/facility/` is a parallel diegetic rewrite — old `components/` untouched, used by join/queue screens only. `FacilityGameContent` replaces old `GameContent` in `game/[id]/page.tsx`. Key things to keep in sync:
+
+- **Zone table**: `zones.ts` is authoritative for panel positions. 9 zones. Changes there should update the zone table in ARCHITECTURE.md.
+- **Transition machine states**: `idle → lockdown → reconfigure → boot → idle`. `FacilityScene` hidden during lockdown/reconfigure; `TransitionOverlay` renders only in reconfigure.
+- **Rive inputs**: state machine name `"facility_sm"`, 6 character slots × 3 inputs (`char_{i}_x`, `char_{i}_state`, `char_{i}_visible`), plus 3 room inputs. `phaseLayouts.ts` is authoritative for what gets set per phase.
+- **Legacy components are NOT removed**: They're still used. Don't document them as removed.
+
 ## Common drift sources (v2)
 
 - **Round types**: Only `TASK` and `BRAIN_TEST` in `MINIGAMES`. Selection rule: no consecutive repeat only (no player count restrictions).

@@ -59,20 +59,34 @@ tests/
 frontend/src/
   app/page.tsx             Landing: "play" (→ queue) + "private game" (→ create)
   app/queue/page.tsx       Matchmaking queue: name input, SSE lobby updates, redirect
-  app/game/[id]/page.tsx   Game page: join → phase routing + cold open sequence on start
-  components/
-    AnswerCard.tsx         Shared answer-first card (alias pinned to bottom, button/div)
-    PlayerBar.tsx          Persistent player strip during gameplay; running scores
-    PhaseInterstitial.tsx  Phase transition overlay — 5 rotating robot voice archetypes,
-                           directive subtitles, situation lines
-    Narration.tsx          Narrator overlay (Narration) + inline for game over
-                           (NarrationInline); auto-dismiss after 6s, game_over persists
-    BrainTestPhase.tsx     BRAIN_TEST/BRAIN_TEST_RESULTS — multiple-choice Quick Draw + scored results
-    MatchupPhase.tsx       MATCHUP phase — 1v1 head-to-head voting sub-rounds
-    Prompt.tsx, GameOver.tsx, Lobby.tsx
-    GameTextarea.tsx   Shared textarea with auto-resize + Enter-to-submit
-    LabeledCard.tsx    Card wrapper with label
-    Stage.tsx, Timer.tsx, Dialogue.tsx, SystemText.tsx
+  app/game/[id]/page.tsx   Game page: join → renders FacilityGameContent after join
+  facility/                Verification Facility UI — diegetic themed rewrite
+    zones.ts               PanelZone interface + ZONES layout registry (9 named zones)
+    Panel.tsx              Frosted-glass panel at absolute zone position; enter/exit anims
+    FacilityViewport.tsx   Full-viewport container (vignette layer + z-index stack)
+    FacilityProvider.tsx   React context: rive instance + transition state + snapTo
+    useTransitionMachine.ts State machine: idle → lockdown(300ms) → reconfigure → boot(400ms) → idle
+    FacilityScene.tsx      Phase router → facility phase components; hidden during lockdown/reconfigure
+    FacilityGameContent.tsx Main orchestrator: cold open, transition timing, RiveScene, Narration
+    RiveScene.tsx          Full-viewport Rive canvas; checks for real .riv (>100 bytes) before loading;
+                           null render if missing. State machine name: "facility_sm"
+    useFacilityCharacters.ts Maps players → 6 Rive character slots (3 inputs each: x, state, visible)
+    phaseLayouts.ts        roomIndex/brightness/accentColor + character positions per phase
+    FacilityTimer.tsx      Timer as facility gauge with warning/urgent/critical states
+    FacilityNarration.tsx  PA ticker at bottom of viewport, auto-dismiss after 6s
+    HudPanel.tsx           Player info readout (replaces PlayerBar)
+    TransitionOverlay.tsx  Diegetic interstitial in wall-display panel; 5 voice archetypes cycling
+                           by round; shows during "reconfigure" state only
+    phases/
+      FacilityLobby.tsx    wall-display (title + player list) + desk-terminal (host controls)
+      FacilityPrompt.tsx   wall-display (prompt) + desk-terminal (textarea input)
+      FacilityBrainTest.tsx  Challenge mode (main-screen + center-area) + results mode (full-screen)
+      FacilityMatchup.tsx  left-screen + right-screen panels + readout
+      FacilityGameOver.tsx full-screen panel: headline, scoreboard, narration, play again
+  components/              Shared primitives — used by app screens and facility phases
+    Stage.tsx              Full-screen centered layout wrapper
+    SystemText.tsx         Mono-font system text (IBM Plex Mono)
+    GameTextarea.tsx       Auto-resize textarea with Enter-to-submit
   hooks/useGameStore.ts    Zustand store — all game state + SSE event handlers;
                            narrationText/narrationTrigger; brain test state + scores;
                            totalRounds; winnerIds; Quick Draw challenge state;
@@ -203,7 +217,8 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 - **TypeScript**: Strict mode, path aliases (`@/*` → `src/*`), Zustand for state
 - **Fonts**: Cormorant (literary content), Cormorant SC (character names), IBM Plex Mono (system text)
 - **Color**: `--page` `--ink` `--dim` `--rule` `--surface` `--raised` `--cold`. `--warm` (#B85C38) reserved for timer warning, vote selection, and "human" reveals.
-- **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-headline-reveal`.
+- **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-headline-reveal`, `animate-panel-enter`, `animate-panel-exit`.
+- **Facility CSS classes**: `facility-viewport` (fixed full-screen, grid overlay), `facility-vignette` (edge darkening), `facility-panel` (frosted glass + CRT scanline overlay via `backdrop-filter`). Defined in `globals.css`.
 - **Textarea submit**: All gameplay textareas submit on Enter (no Shift). Auto-resize via `scrollHeight`. `maxLength` enforced per field.
 
 ## Documentation

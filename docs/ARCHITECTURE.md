@@ -166,30 +166,60 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 **SSE connection**: `useGameEvents` hook connects `EventSource` on mount, routes events to store. Auto-reconnects natively.
 
-**Phase routing**: `game/[id]/page.tsx` renders phase-appropriate component based on `store.phase`.
-
 **Session persistence**: Player ID stored in `sessionStorage` keyed by game ID. Survives page refresh within the same tab.
 
 **Timer**: Server sends `phase_deadline` (ISO timestamp). Client counts down locally via `useTimer` hook (1s interval).
 
-**Interstitial holds**: Each phase start has a built-in hold period (`_INTERSTITIAL_HOLD` dict in `game_logic.py`). `PhaseChangedEvent` carries `action_starts_at` so the frontend knows when the actual action window begins. `PhaseInterstitial` component shows during the hold.
+**Interstitial holds**: Each phase start has a built-in hold period (`_INTERSTITIAL_HOLD` dict in `game_logic.py`). `PhaseChangedEvent` carries `action_starts_at` so the frontend knows when the actual action window begins. `TransitionOverlay` shows during the `reconfigure` state of the transition machine.
 
-**Phase interstitials**: `PhaseInterstitial` has 5 rotating robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that cycle per round. Each phase gets directive subtitle text. Situation lines ("round N of 5") derived from `totalRounds` in the store. On first game start, `game/[id]/page.tsx` shows a cold open sequence ("N SUBJECTS DETECTED / some are not what they seem") before round 1.
+**Narrator**: `Narration` component receives `narrationText`/`narrationTrigger` from the store. Fades in, holds, then auto-dismisses after 6s. `game_over` trigger persists.
 
-**Narrator**: `Narration` component receives `narrationText`/`narrationTrigger` from the store. Fades in, holds, then auto-dismisses after 6s. `game_over` trigger persists. `NarrationInline` used on the game over screen.
+**Matchmaking**: `/queue` page uses `connectMatchmakingEvents()` (separate SSE client) to receive `lobby_status` and `game_assigned` events. On `game_assigned`, stores `{playerId, alias}` in `sessionStorage` keyed by game ID, then redirects to `/game/{id}`.
 
-**Matchmaking**: `/queue` page uses `connectMatchmakingEvents()` (separate SSE client from game events) to receive `lobby_status` and `game_assigned` events. On `game_assigned`, stores `{playerId, alias}` in `sessionStorage` keyed by game ID, then redirects to `/game/{id}`.
+### Verification Facility UI
 
-**View components**:
+`frontend/src/facility/` is a parallel, diegetic rewrite of the game view. `game/[id]/page.tsx` renders `FacilityGameContent` after join. Legacy `components/` are unchanged and still used by join/queue screens.
 
-| Component | Phase | Role |
+**Layer stack** (bottom → top in `FacilityViewport`):
+1. `RiveScene` — fixed full-viewport Rive canvas (z-index 0); fades in on load
+2. `facility-vignette` — edge darkening overlay
+3. Content layer (z-index 10) — panels, timer, narration, overlays
+
+**Panel system**: `Panel` component reads zone geometry from `ZONES` in `zones.ts` and renders as `position: absolute` with frosted-glass (`facility-panel` CSS class: `backdrop-filter`, CRT scanline pseudo-element). 9 named zones:
+
+| Zone | Layout purpose |
+|---|---|
+| `wall-display` | Large center-top — primary info, interstitials |
+| `desk-terminal` | Center-bottom — player input |
+| `main-screen` | Wide top — brain test challenge |
+| `center-area` | Wide center — brain test options |
+| `left-screen` / `right-screen` | Split — matchup answers |
+| `full-screen` | Full-area — brain test results, game over |
+| `readout` | Top-right — HUD readout |
+| `ticker` | Bottom — narration PA strip |
+
+**Transition machine** (`useTransitionMachine`): `idle → lockdown (300ms) → reconfigure → boot (400ms) → idle`. Total duration equals the server `action_starts_at` hold window. `FacilityScene` hides during `lockdown`/`reconfigure`; `TransitionOverlay` renders only during `reconfigure`. On reconnection (`state_sync` without phase change), `snapTo()` skips the animation and goes straight to `idle`.
+
+**Phase interstitials** (`TransitionOverlay`): Shows in `wall-display` panel during `reconfigure`. 5 robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) cycle by round number. Round-start phases (`prompt`, `brain_test`) show round label + type label + situation line. Non-round-start phases show a directive.
+
+**Cold open**: When phase transitions from `lobby` to first round, `FacilityGameContent` shows "N SUBJECTS DETECTED / some are not what they seem" for 5.5s before handing off to `FacilityScene`.
+
+**Rive integration** (scaffolded — requires real `.riv` asset):
+- `RiveScene` checks `content-length` of `/facility.riv` via `HEAD` request; renders null if file is missing or <100 bytes.
+- State machine name: `"facility_sm"`. Per-player inputs: `char_{i}_x` (number, 0–1 normalized), `char_{i}_state` (number, maps to `CHAR_STATES`), `char_{i}_visible` (boolean). Supports up to 6 character slots.
+- Room inputs: `room_config` (number), `ambient_brightness` (number, 0–1), `accent_color` (number, 0=cold/1=warm).
+- `useFacilityCharacters` updates all inputs on phase and player changes via `phaseLayouts.ts` config.
+- Rive instance passed via `FacilityProvider` context so multiple components can drive inputs.
+
+**Facility phase components**:
+
+| Component | Zones used | Notes |
 |---|---|---|
-| `AnswerCard` | Shared | Answer-first card; alias + role label pinned to bottom; renders as `button` or `div` |
-| `PlayerBar` | All gameplay phases | Persistent strip showing players, connection status, and running scores |
-| `PhaseInterstitial` | Phase transitions | Robot voice archetype overlay with directive subtitles and situation lines |
-| `Narration` | Async narrator events | Floating overlay, auto-dismiss 6s; `NarrationInline` for game over |
-| `BrainTestPhase` | BRAIN_TEST / BRAIN_TEST_RESULTS | 4-option buttons + scored results grid |
-| `MatchupPhase` | MATCHUP | 1v1 answer pair with vote buttons; sub-round loop |
+| `FacilityLobby` | `wall-display` + `desk-terminal` | Title + player list; host start button |
+| `FacilityPrompt` | `wall-display` + `desk-terminal` | Prompt display + answer textarea |
+| `FacilityMatchup` | `left-screen` + `right-screen` + `readout` | Split 1v1 voting |
+| `FacilityBrainTest` | `main-screen` + `center-area` (challenge) / `full-screen` (results) | Dual-mode based on phase |
+| `FacilityGameOver` | `full-screen` | Headline, scoreboard, play again |
 
 ## Prompt Selection
 

@@ -1,22 +1,13 @@
 "use client";
 
-import { useEffect, useState, useRef, use } from "react";
+import { useEffect, useState, use } from "react";
 import { Stage } from "@/components/Stage";
-import { Timer } from "@/components/Timer";
-import { PlayerBar } from "@/components/PlayerBar";
-import { PhaseInterstitial } from "@/components/PhaseInterstitial";
-import { Lobby } from "@/components/Lobby";
-import { Prompt } from "@/components/Prompt";
-import { BrainTestPhase } from "@/components/BrainTestPhase";
-import { MatchupPhase } from "@/components/MatchupPhase";
-import { GameOver } from "@/components/GameOver";
-import { Narration } from "@/components/Narration";
 import { SystemText } from "@/components/SystemText";
 import { joinGame, createGame } from "@/api/actions";
-import { useGameStore, type GamePhase } from "@/hooks/useGameStore";
+import { useGameStore } from "@/hooks/useGameStore";
 import { useGameEvents } from "@/hooks/useGameEvents";
-import { useTimer } from "@/hooks/useTimer";
 import { useRouter } from "next/navigation";
+import { FacilityGameContent } from "@/facility/FacilityGameContent";
 
 function JoinScreen({
   gameId,
@@ -66,151 +57,6 @@ function JoinScreen({
         {joining ? "joining..." : "enter \u2192"}
       </button>
     </div>
-  );
-}
-
-const INTERSTITIAL_PHASES = new Set<GamePhase>([
-  "prompt", "brain_test", "brain_test_results", "matchup",
-]);
-
-const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
-
-const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
-  prompt: 45,
-  brain_test: 12,
-  brain_test_results: 15,
-  matchup: 12,
-};
-
-function ColdOpen({ playerCount }: { playerCount: number }) {
-  const [step, setStep] = useState(0);
-
-  useEffect(() => {
-    const timers = [
-      setTimeout(() => setStep(1), 400),
-      setTimeout(() => setStep(2), 3000),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, []);
-
-  return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6">
-      {step >= 0 && (
-        <p className="animate-fade-in font-system text-[1.2rem] text-ink tracking-[0.2em] uppercase">
-          {playerCount} SUBJECTS DETECTED
-        </p>
-      )}
-      {step >= 1 && (
-        <p
-          className="animate-fade-in font-system text-[0.8rem] text-dim tracking-[0.15em] lowercase"
-        >
-          some are not what they seem
-        </p>
-      )}
-    </div>
-  );
-}
-
-function GameContent() {
-  const {
-    phase, phaseDeadline, phaseDuration, playerId, players,
-    roundNumber, roundType, actionStartsAt, totalRounds, scores,
-  } = useGameStore();
-  const remaining = useTimer(phaseDeadline);
-
-  // Cold open state — show once when game transitions from lobby to first round
-  const [showColdOpen, setShowColdOpen] = useState(false);
-  const [coldOpenDone, setColdOpenDone] = useState(false);
-  const prevPhaseForColdRef = useRef<GamePhase>("lobby");
-
-  useEffect(() => {
-    if (
-      prevPhaseForColdRef.current === "lobby" &&
-      phase !== "lobby" &&
-      !coldOpenDone
-    ) {
-      setShowColdOpen(true);
-      const timer = setTimeout(() => {
-        setShowColdOpen(false);
-        setColdOpenDone(true);
-      }, 5500);
-      return () => clearTimeout(timer);
-    }
-    prevPhaseForColdRef.current = phase;
-  }, [phase, coldOpenDone]);
-
-  // Phase interstitial state — dismiss timing driven by server's action_starts_at
-  const [showInterstitial, setShowInterstitial] = useState(false);
-  const [interstitialFading, setInterstitialFading] = useState(false);
-  const [isRoundStart, setIsRoundStart] = useState(false);
-
-  useEffect(() => {
-    if (!INTERSTITIAL_PHASES.has(phase) || !actionStartsAt || showColdOpen) {
-      setShowInterstitial(false);
-      setInterstitialFading(false);
-      return;
-    }
-
-    const holdMs = new Date(actionStartsAt).getTime() - Date.now();
-    if (holdMs <= 0) {
-      // Already past interstitial (e.g. reconnection) — skip
-      setShowInterstitial(false);
-      return;
-    }
-
-    setIsRoundStart(ROUND_START_PHASES.has(phase));
-    setShowInterstitial(true);
-    setInterstitialFading(false);
-
-    const fadeMs = 300;
-    const t1 = setTimeout(() => setInterstitialFading(true), holdMs);
-    const t2 = setTimeout(() => {
-      setShowInterstitial(false);
-      setInterstitialFading(false);
-    }, holdMs + fadeMs);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [phase, actionStartsAt, showColdOpen]);
-
-  const total = phaseDuration ?? FALLBACK_DURATIONS[phase] ?? 0;
-
-  return (
-    <>
-      <PlayerBar />
-      {phase !== "lobby" && phase !== "game_over" && !showColdOpen && !showInterstitial && (
-        <Timer remaining={remaining} total={total} />
-      )}
-      <Narration position="bottom" />
-      <Stage>
-        {showColdOpen ? (
-          <ColdOpen playerCount={players.length} />
-        ) : showInterstitial ? (
-          <PhaseInterstitial
-            phase={phase}
-            roundNumber={roundNumber}
-            roundType={roundType}
-            fading={interstitialFading}
-            isRoundStart={isRoundStart}
-            totalRounds={totalRounds}
-            scores={scores}
-            players={players}
-          />
-        ) : (
-          <>
-            {phase === "lobby" && <Lobby />}
-            {phase === "prompt" && <Prompt />}
-            {(phase === "brain_test" || phase === "brain_test_results") && (
-              <BrainTestPhase />
-            )}
-            {phase === "matchup" && <MatchupPhase />}
-            {phase === "game_over" && <GameOver />}
-          </>
-        )}
-      </Stage>
-    </>
   );
 }
 
@@ -274,5 +120,5 @@ export default function GamePage({
     );
   }
 
-  return <GameContent />;
+  return <FacilityGameContent />;
 }

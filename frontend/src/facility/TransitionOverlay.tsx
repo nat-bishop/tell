@@ -1,15 +1,8 @@
-import type { GamePhase, PlayerInfo } from "@/hooks/useGameStore";
+"use client";
 
-interface PhaseInterstitialProps {
-  phase: GamePhase;
-  roundNumber: number;
-  roundType: string | null;
-  fading: boolean;
-  isRoundStart?: boolean;
-  totalRounds?: number;
-  scores?: Record<string, number>;
-  players?: PlayerInfo[];
-}
+import { useGameStore, type GamePhase, type PlayerInfo } from "@/hooks/useGameStore";
+import { useFacilityContext } from "@/facility/FacilityProvider";
+import { Panel } from "@/facility/Panel";
 
 // ─── Robot Voice Archetypes ───
 
@@ -80,7 +73,7 @@ function getVoice(roundNumber: number): Voice {
   return VOICES[VOICE_ORDER[idx]];
 }
 
-// ─── Phase Directives + Subtitles ───
+// ─── Phase Directives ───
 
 interface Directive {
   text: string;
@@ -101,23 +94,21 @@ function getDirective(phase: GamePhase): Directive | null {
 
 // ─── Situation Lines ───
 
+const INTERSTITIAL_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
+
 function getSituationLine(
   roundNumber: number,
   totalRounds: number,
   scores?: Record<string, number>,
   players?: PlayerInfo[],
 ): string | null {
-  // Final round
   if (totalRounds > 0 && roundNumber >= totalRounds) {
     return "final round";
   }
 
-  // Round 1 — clean start
   if (roundNumber <= 1) return null;
 
-  // Show round progress
   if (totalRounds > 0) {
-    // Show leader if scores exist
     if (scores && players && Object.keys(scores).length > 0) {
       const maxScore = Math.max(...Object.values(scores));
       if (maxScore > 0) {
@@ -136,33 +127,32 @@ function getSituationLine(
 
 // ─── Component ───
 
-export function PhaseInterstitial({
-  phase,
-  roundNumber,
-  roundType,
-  fading,
-  isRoundStart = false,
-  totalRounds = 5,
-  scores = {},
-  players = [],
-}: PhaseInterstitialProps) {
+export function TransitionOverlay() {
+  const { transitionState } = useFacilityContext();
+  if (transitionState !== "reconfigure") return null;
+  return <TransitionOverlayContent />;
+}
+
+function TransitionOverlayContent() {
+  const phase = useGameStore((s) => s.phase);
+  const roundNumber = useGameStore((s) => s.roundNumber);
+  const roundType = useGameStore((s) => s.roundType);
+  const totalRounds = useGameStore((s) => s.totalRounds);
+  const scores = useGameStore((s) => s.scores);
+  const players = useGameStore((s) => s.players);
+
+  const isRoundStart = INTERSTITIAL_PHASES.has(phase);
   const voice = getVoice(roundNumber);
+
   let text: string;
   let subtitle: string | undefined;
   let situationLine: string | null = null;
 
-  if (phase === "prompt" || phase === "brain_test") {
-    // Round start — use voice archetype
+  if (isRoundStart) {
     text = voice.roundLabel(roundNumber, roundType);
     subtitle = voice.typeLabel(roundType);
-    situationLine = getSituationLine(
-      roundNumber,
-      totalRounds,
-      scores,
-      players,
-    );
+    situationLine = getSituationLine(roundNumber, totalRounds, scores, players);
   } else {
-    // Mid-round phase — use directives
     const directive = getDirective(phase);
     if (directive) {
       text = directive.text;
@@ -173,51 +163,48 @@ export function PhaseInterstitial({
   }
 
   return (
-    <div
-      className={`relative flex min-h-[60vh] flex-col items-center justify-center gap-4 ${
-        fading ? "animate-interstitial-out" : "animate-interstitial-in"
-      } ${!fading ? "interstitial-scan" : ""}`}
-    >
-      {/* Situation line — above the main text */}
-      {isRoundStart && situationLine && !fading && (
-        <p
-          className="animate-fade-in font-system text-[0.65rem] text-dim tracking-[0.2em] uppercase mb-2"
-          style={{ animationDelay: "0.3s" }}
-        >
-          {situationLine}
-        </p>
-      )}
-
-      <p
-        className="font-system text-[1.4rem] text-ink tracking-[0.2em] uppercase"
-        style={{ textShadow: '0 0 30px var(--cold-glow)' }}
-      >
-        {text}
-      </p>
-
-      {isRoundStart && subtitle && !fading && (
-        <>
-          <hr
-            className="animate-line-draw border-none"
-            style={{
-              animationDelay: "1s",
-              height: "1px",
-              background: "var(--rule)",
-            }}
-          />
+    <Panel zone="wall-display">
+      <div className="animate-interstitial-in interstitial-scan flex h-full flex-col items-center justify-center gap-4">
+        {isRoundStart && situationLine && (
           <p
-            className="animate-reveal-expand font-system text-[0.7rem] text-cold tracking-[0.25em] uppercase"
-            style={{ animationDelay: "1.5s" }}
+            className="animate-fade-in font-system text-[0.65rem] text-dim tracking-[0.2em] uppercase mb-2"
+            style={{ animationDelay: "0.3s" }}
           >
+            {situationLine}
+          </p>
+        )}
+
+        <p
+          className="font-system text-[1.4rem] text-ink tracking-[0.2em] uppercase"
+          style={{ textShadow: '0 0 30px var(--cold-glow)' }}
+        >
+          {text}
+        </p>
+
+        {isRoundStart && subtitle && (
+          <>
+            <hr
+              className="animate-line-draw border-none"
+              style={{
+                animationDelay: "1s",
+                height: "1px",
+                background: "var(--rule)",
+              }}
+            />
+            <p
+              className="animate-reveal-expand font-system text-[0.7rem] text-cold tracking-[0.25em] uppercase"
+              style={{ animationDelay: "1.5s" }}
+            >
+              {subtitle}
+            </p>
+          </>
+        )}
+        {!isRoundStart && subtitle && (
+          <p className="font-system text-[0.65rem] text-dim tracking-[0.15em] lowercase mt-1">
             {subtitle}
           </p>
-        </>
-      )}
-      {!isRoundStart && subtitle && (
-        <p className="font-system text-[0.65rem] text-dim tracking-[0.15em] lowercase mt-1">
-          {subtitle}
-        </p>
-      )}
-    </div>
+        )}
+      </div>
+    </Panel>
   );
 }

@@ -1,4 +1,6 @@
-export function Timer({ remaining, total }: { remaining: number; total: number }) {
+"use client";
+
+export function FacilityTimer({ remaining, total }: { remaining: number; total: number }) {
   const fraction = total > 0 ? remaining / total : 0;
   const isWarning = remaining <= Math.min(10, Math.floor(total * 0.25));
   const isUrgent = remaining <= Math.min(5, Math.floor(total * 0.15));
@@ -17,15 +19,15 @@ export function Timer({ remaining, total }: { remaining: number; total: number }
         style={{
           width: `${fraction * 100}%`,
           height: isUrgent ? "3px" : "2px",
-          backgroundColor: isWarning ? 'var(--warm)' : 'var(--cold)',
+          backgroundColor: isWarning ? "var(--warm)" : "var(--cold)",
           boxShadow: isWarning
-            ? '0 0 12px var(--warm), 0 0 24px var(--glow)'
-            : '0 0 8px var(--cold-glow)',
+            ? "0 0 12px var(--warm), 0 0 24px var(--glow)"
+            : "0 0 8px var(--cold-glow)",
         }}
       />
       <span
-        className={`shrink-0 pr-3 pl-1 font-system text-xs tracking-wider ${
-          isWarning ? 'text-warm' : 'text-cold'
+        className={`shrink-0 pr-3 pl-1 font-system text-[0.65rem] tracking-[0.15em] ${
+          isWarning ? "text-warm" : "text-cold"
         } ${pulseClass}`}
       >
         {remaining}
