@@ -487,24 +487,6 @@ TWO TRUTHS (30s write 3 statements) → REVIEW (55s) → ELIMINATION (15s)
 
 **AI implementation**: AI generates 3 statements via LLM, all fabricated but styled as "2 truths + 1 lie." The LLM must create statements with the right *texture contrast* — making two feel lived-in and one feel invented — without having any real experiences to draw from. This is a fundamentally different prompt challenge than answering a creative prompt.
 
-### Profile
-
-Inspired by: The Game of Things, Herd Mentality, Psych!
-
-A question appears (e.g., "What's your guilty pleasure TV show?"). Everyone answers for themselves. But also: everyone predicts what one other assigned player will answer. In review, actual answers and predictions are shown side by side. Prediction accuracy and answer content are both evidence. Discussion + vote.
-
-```
-PROFILE (20s answer + predict) → REVIEW (55s) → ELIMINATION (15s)
-```
-
-**What it tests**: Theory of mind and social reading — the only round type where you analyze a specific other player rather than performing yourself.
-
-**Why it's fun**: The dual reveal is consistently entertaining. First: what did everyone actually say? (comedy from the answers themselves). Second: how well did people predict each other? (comedy from the misses, respect from the hits). "UNIT-7 predicted I'd say The Bachelor and they were RIGHT" is a genuine moment. It tests whether you've been paying attention to who people are — their personality, their humor, their patterns from earlier rounds. The prediction accuracy is a new kind of evidence: a human who's been socially engaged makes insightful predictions; an AI predicts based on statistical priors.
-
-**The detection challenge**: Theory of mind — modeling what a *specific* person will say — is a fundamentally human skill that AI approaches differently. AI predicts based on what the "average person" would say (statistical priors from training data); humans predict based on accumulated social observation ("BOT-4 seems like a reality TV person based on their answers in round 2"). The prediction accuracy *pattern* is evidence: AI might be surprisingly accurate at predicting common answers but fail at predicting idiosyncratic ones. And your own answer reveals you the same way Task does — but the prediction adds a second evidence surface. (Section 7, AI Mafia: "Play the player, not just the board state" — this round type literally requires playing the player.)
-
-**AI implementation**: Server assigns prediction targets (round-robin, like question targets in Interrogation). AI generates both an answer and a prediction. The prediction prompt includes what the AI knows about the target from earlier rounds — testing whether the LLM can model a specific player or defaults to generic expectations.
-
 ### No Thanks
 
 Inspired by: No Thanks! (BGG Top 100 party games, praised for distilling game design to its atomic unit)
@@ -523,7 +505,7 @@ NO THANKS (60s: ~6 cards x 10s) → REVIEW (55s) → ELIMINATION (15s)
 
 **AI implementation**: Sequential sub-round loop (reuses brain test pattern). Each sub-round broadcasts the current card + chip pile, collects simultaneous TAKE/PASS decisions. AI calculates optimal play via LLM, but must decide whether to play optimally (detectable) or add noise (might play worse than a human would). The same strategic dilemma as Sync, but in an economic domain.
 
-### Full Summary
+### Summary
 
 | Idea | Modality | Axis Tested | Inspired By | Key Evidence |
 |------|----------|-------------|-------------|--------------|
@@ -533,7 +515,13 @@ NO THANKS (60s: ~6 cards x 10s) → REVIEW (55s) → ELIMINATION (15s)
 | Rapid Fire | Typing fast | Grounding + authenticity | Human or Not study | Specificity, missed questions, traps |
 | Sync | Typing to match | Collaborative intuition | The Mind, Codenames Duet | Match rates, convergence patterns |
 | Wager | Number + bet | Estimation + social reading | Wits & Wagers | Guess accuracy, bet rationality |
-| Impostor | Text (asymmetric info) | Incomplete-information blending | Spyfall | Calibrated vagueness, hedging patterns |
 | Two Truths | 3 statements | Truth vs fabrication texture | Two Truths and a Lie | Detail specificity, consistency texture |
-| Profile | Text + prediction | Theory of mind + social reading | The Game of Things, Psych! | Prediction accuracy, observation depth |
 | No Thanks | Binary take/pass | Economic decision-making | No Thanks! | Decision sequences, emotional vs optimal play |
+
+### Round Modifiers
+
+These aren't standalone round types — they're mechanics that layer on top of any text-based round to add an extra detection surface. They don't change the core input (you still write an answer), but they change what the answer *means* or add a second task alongside it.
+
+**Impostor** (inspired by Spyfall): One player receives a different but related prompt. Everyone else gets the same prompt. The impostor must blend in without knowing exactly what the others are answering. Layerable on Task, Rapid Fire, Wavelength, or any round with a prompt. Adds a second axis of suspicion — "are they vague because they're the impostor, because they're AI, or because that's just a vague answer?" — which increases the information funnel from ~5 to ~8 explanations per event (Section 3). The paradox that makes it work: non-impostors must also be vague (to avoid giving the answer away), so *everyone* sounds suspicious. Spyfall research shows AI struggles specifically with *calibrated vagueness* — being exactly vague enough.
+
+**Prediction** (inspired by The Game of Things, Psych!): Alongside your normal answer, predict what one assigned player will answer. Predictions revealed in review alongside actual answers. Layerable on any round where players produce individual output. Tests theory of mind — humans predict based on accumulated social observation ("BOT-4 seems like a reality TV person from their round 2 answer"); AI predicts based on statistical priors. Prediction accuracy becomes a second evidence surface without requiring a separate round type. (Section 7, AI Mafia: "Play the player, not just the board state.")
