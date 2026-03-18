@@ -115,6 +115,9 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_CORS_ORIGINS` — comma-separated allowed origins (default: `*`). Set for production.
 - `TELL_MM_MIN_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
 - `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing
+- `TELL_MATCHUP_DURATION`, `TELL_MATCHUP_CHALLENGE_DURATION` — matchup safety timer and per-sub-round duration
+- `TELL_TOTAL_ROUNDS` — override fixed game length (default 5)
+- `TELL_MIN_HUMANS` — minimum humans required to start a private game (default 1)
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
 
 **Logging convention**: INFO for game actions (player_joined, answer_submitted, vote_cast, phase transitions). DEBUG for SSE internals (sse_connected, sse_replay, queue ops).
@@ -169,7 +172,7 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 ### LLM-powered features
 - **Narrator** (persistent show host): `generate_narration(trigger, context)` fires as a non-blocking background task at: `game_start`, `post_submissions`, `between_rounds`, `game_over`. Dry, literary voice (the robot running the test). 3s timeout for most triggers, 5s for `game_over`. Result stored in `state.narrator_context` (last 5 kept for continuity) and broadcast as `NarrationEvent`. Never blocks game flow. `_fire_narration()` + `_build_narrator_context()` in `transitions.py`.
 - **AI answers** (PROMPT): AI players generate answers trying to pass as human. System prompt is personality-driven via `build_system_prompt()`.
-- **AI matchup votes** (MATCHUP): AI votes on which answer sounds more human using `generate_vote()`.
+- **AI matchup votes** (MATCHUP): AI votes on which answer sounds more human using `decide_vote()`.
 - **AI brain test** (BRAIN_TEST): AI selects a multiple-choice option via stateless `brain_test_agent`.
 
 ## Gotchas
@@ -200,7 +203,7 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 - **TypeScript**: Strict mode, path aliases (`@/*` → `src/*`), Zustand for state
 - **Fonts**: Cormorant (literary content), Cormorant SC (character names), IBM Plex Mono (system text)
 - **Color**: `--page` `--ink` `--dim` `--rule` `--surface` `--raised` `--cold`. `--warm` (#B85C38) reserved for timer warning, vote selection, and "human" reveals.
-- **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-elimination-reveal`.
+- **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-headline-reveal`.
 - **Textarea submit**: All gameplay textareas submit on Enter (no Shift). Auto-resize via `scrollHeight`. `maxLength` enforced per field.
 
 ## Documentation

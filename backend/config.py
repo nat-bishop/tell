@@ -46,9 +46,6 @@ class Settings:
         self.prompt_reading_duration: int = int(
             os.environ.get("TELL_PROMPT_READING_DURATION", game.get("prompt_reading_duration", 10))
         )
-        self.review_duration: int = int(
-            os.environ.get("TELL_REVIEW_DURATION", game.get("review_duration", 40))
-        )
         self.brain_test_duration: int = int(
             os.environ.get("TELL_BRAIN_TEST_DURATION", game.get("brain_test_duration", 75))
         )

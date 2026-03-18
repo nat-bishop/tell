@@ -6,7 +6,7 @@ import { createGame } from "@/api/actions";
 import { useRouter } from "next/navigation";
 
 export function GameOver() {
-  const { winner, winnerIds, revealedPlayers, playerId, scores } = useGameStore();
+  const { winnerIds, revealedPlayers, playerId, scores } = useGameStore();
   const router = useRouter();
 
   const handlePlayAgain = async () => {
@@ -46,7 +46,7 @@ export function GameOver() {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-10">
       <p
-        className="animate-elimination-reveal font-system text-[1.3rem] text-ink tracking-[0.15em] uppercase"
+        className="animate-headline-reveal font-system text-[1.3rem] text-ink tracking-[0.15em] uppercase"
         style={{
           textShadow: isMachineWin
             ? '0 0 30px var(--cold), 0 0 60px rgba(91, 143, 185, 0.2)'

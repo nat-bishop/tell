@@ -78,7 +78,7 @@ def build_system_prompt(deps: AIPlayerDeps) -> str:
         "",
         f"You are {deps.player_alias}.",
         f"This is round {deps.round_number}. Round type: {deps.round_type}.",
-        f"Players: {', '.join(deps.alive_players)}.",
+        f"Players: {', '.join(deps.players)}.",
     ]
 
     if deps.all_answers:
@@ -104,7 +104,7 @@ def build_answer_prompt(deps: AIPlayerDeps) -> str:
 
 def build_vote_prompt(deps: AIPlayerDeps) -> str:
     """User message for matchup voting. AI should strategically protect fellow AI."""
-    other_players = [a for a in deps.alive_players if a != deps.player_alias]
+    other_players = [a for a in deps.players if a != deps.player_alias]
     answers_text = "\n".join(
         f"  {alias}: {answer}"
         for alias, answer in deps.all_answers.items()

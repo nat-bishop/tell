@@ -1,6 +1,6 @@
 # Tell
 
-A multiplayer social deduction game. Players join a group chat where some participants are AI, some are human. Everyone pretends to be a robot. Each round: answer a prompt, discuss, vote on who's human. Reverse Turing test meets Among Us.
+Multiplayer social deduction game — reverse Turing test. Players join a group where some are AI, some human. Everyone votes each matchup on who sounds more human. After 5 rounds: big reveal, highest score wins.
 
 ## Prerequisites
 

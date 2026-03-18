@@ -18,7 +18,6 @@ from backend.services.game_logic import (
     sanitize_players_for_client,
     score_brain_test,
     select_next_round_type,
-    transition_to_review,
     transition_to_task_matchup_prompt,
 )
 from schemas.constants import NO_RESPONSE
@@ -159,12 +158,6 @@ class TestPhaseTransitions:
         # Should have matchups
         assert len(result.current_round.matchups) > 0
 
-    def test_transition_to_review(self):
-        state, _ = make_standard_game()
-        result = transition_to_review(state, 30)
-        assert result.phase == GamePhase.REVIEW
-        assert result.phase_deadline is not None
-
 
 # ---------------------------------------------------------------------------
 # Fill functions
@@ -233,8 +226,8 @@ class TestStateSanitization:
         assert sync["answers"] == {}  # all answers hidden during PROMPT
         assert sync["my_answer"] == "my answer"  # own answer visible
 
-    def test_build_state_sync_shows_answers_in_review(self):
-        state, _ = make_standard_game(phase=GamePhase.REVIEW)
+    def test_build_state_sync_shows_answers_in_matchup(self):
+        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
@@ -270,9 +263,9 @@ class TestStateSanitization:
         assert event.scores["h1"] == 3
 
     def test_make_phase_changed_event(self):
-        state, _ = make_standard_game(phase=GamePhase.REVIEW)
+        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
         event = make_phase_changed_event(state, seq=5)
-        assert event.phase == "review"
+        assert event.phase == "matchup"
         assert event.round_number == 1
         assert event.seq == 5
 
@@ -290,7 +283,6 @@ class TestTaskPrompts:
 
         result = transition_to_task_matchup_prompt(state, 25)
         assert len(result.used_task_prompt_indices) >= 1
-        assert len(result.used_prompt_indices) == 0  # regular prompts untouched
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +295,6 @@ def _mock_settings(**overrides):
         "prompt_duration": 45,
         "task_prompt_duration": 25,
         "prompt_reading_duration": 10,
-        "review_duration": 40,
         "brain_test_duration": 85,
         "brain_test_results_duration": 15,
         "matchup_duration": 30,
@@ -324,10 +315,6 @@ class TestGetPhaseDuration:
     def test_brain_test(self):
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.BRAIN_TEST) == 85
-
-    def test_review(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.REVIEW) == 40
 
     def test_matchup(self):
         s = _mock_settings()

@@ -28,7 +28,7 @@ Human or Not (AI21 Labs, 2023) proved 15 million people wanted to play "spot the
 
 Phase transitions are voiced by a robot narrator persona — not a game UI label. `PhaseInterstitial` rotates through 5 robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that shift per round. Each archetype issues directives for the incoming phase ("SUBMIT YOUR RESPONSE WITHIN THE ALLOTTED WINDOW.") rather than describing it neutrally. Situation lines reference cumulative game state ("round 3 of 5. scores are close.").
 
-The cold open ("N UNITS ASSEMBLED / some are not what they seem") fires once when the game starts, before round 1. The landing page copy uses the same register: "a reverse turing test", "enter test →", "isolated examination".
+The cold open ("N SUBJECTS DETECTED / some are not what they seem") fires once when the game starts, before round 1. The landing page copy uses the same register: "a reverse turing test", "enter test →", "isolated examination".
 
 ## Typography
 

@@ -66,8 +66,6 @@ def make_game_state(
     total_rounds: int = 5,
     round_types: list[RoundType] | None = None,
     current_round: RoundState | None = "auto",
-    used_prompt_indices: list[int] | None = None,
-    last_prompt_category: str | None = None,
     winner: str | None = None,
 ) -> TellGameState:
     if current_round == "auto":
@@ -81,8 +79,6 @@ def make_game_state(
         round_number=round_number,
         total_rounds=total_rounds,
         round_types=round_types or [],
-        used_prompt_indices=used_prompt_indices or [],
-        last_prompt_category=last_prompt_category,
         winner=winner,
     )
 

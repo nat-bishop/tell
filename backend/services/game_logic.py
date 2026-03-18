@@ -90,7 +90,6 @@ _INTERSTITIAL_HOLD: dict[GamePhase, int] = {
     GamePhase.PROMPT: 5,  # round start — staggered visual beats
     GamePhase.BRAIN_TEST: 5,  # round start
     GamePhase.BRAIN_TEST_RESULTS: 2,
-    GamePhase.REVIEW: 2,
     GamePhase.MATCHUP: 3,
 }
 
@@ -115,10 +114,7 @@ def get_phase_duration(
         return settings.brain_test_results_duration
     if phase == GamePhase.MATCHUP:
         return settings.matchup_duration
-    durations = {
-        GamePhase.REVIEW: settings.review_duration,
-    }
-    return durations.get(phase)
+    return None
 
 
 def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) -> TellGameState:
@@ -127,36 +123,6 @@ def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) 
     state.phase_deadline = datetime.now(UTC) + timedelta(
         seconds=duration + get_interstitial_hold(phase)
     )
-    return state
-
-
-def transition_to_task_prompt(
-    state: TellGameState, duration: int, reading_duration: int = 0
-) -> TellGameState:
-    """Start a new Task round with a constrained prompt."""
-    from schemas.prompts import select_task_prompt
-
-    state.round_number += 1
-    idx, prompt = select_task_prompt(
-        state.used_task_prompt_indices,
-        state.last_task_prompt_category,
-    )
-    state.used_task_prompt_indices.append(idx)
-    state.last_task_prompt_category = prompt.category.value
-
-    now = datetime.now(UTC)
-    state.current_round = RoundState(
-        round_number=state.round_number,
-        prompt_text=prompt.text,
-        prompt_category=prompt.category.value,
-        round_type=RoundType.TASK,
-        writing_begins_at=(
-            now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
-        ),
-    )
-    state.phase = GamePhase.PROMPT
-    hold = get_interstitial_hold(GamePhase.PROMPT)
-    state.phase_deadline = now + timedelta(seconds=duration + hold)
     return state
 
 
@@ -194,10 +160,6 @@ def transition_to_brain_test(
 
 def transition_to_brain_test_results(state: TellGameState, duration: int) -> TellGameState:
     return _transition_to_phase(state, GamePhase.BRAIN_TEST_RESULTS, duration)
-
-
-def transition_to_review(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.REVIEW, duration)
 
 
 def transition_to_matchup(state: TellGameState, duration: int) -> TellGameState:
@@ -304,16 +266,18 @@ def resolve_matchup_votes(
         elif right_votes > left_votes and right_player:
             right_player.score += 1
 
-        matchup_results_list.append({
-            "matchup_index": i,
-            "left_player_id": left_id,
-            "left_alias": left_player.alias if left_player else left_id,
-            "left_votes": left_votes,
-            "right_player_id": right_id,
-            "right_alias": right_player.alias if right_player else right_id,
-            "right_votes": right_votes,
-            "prompt_text": m.prompt_text,
-        })
+        matchup_results_list.append(
+            {
+                "matchup_index": i,
+                "left_player_id": left_id,
+                "left_alias": left_player.alias if left_player else left_id,
+                "left_votes": left_votes,
+                "right_player_id": right_id,
+                "right_alias": right_player.alias if right_player else right_id,
+                "right_votes": right_votes,
+                "prompt_text": m.prompt_text,
+            }
+        )
 
     # Build scores dict: all players' current total scores
     scores = {p.id: p.score for p in state.players}
@@ -448,10 +412,7 @@ def build_state_sync(
         round_type = round_state.round_type
 
         # For matchup Task rounds, show the player's specific prompt during PROMPT
-        if (
-            round_state.matchups
-            and state.phase == GamePhase.PROMPT
-        ):
+        if round_state.matchups and state.phase == GamePhase.PROMPT:
             for m in round_state.matchups:
                 if player_id in m.pair:
                     prompt_text = m.prompt_text
@@ -462,13 +423,8 @@ def build_state_sync(
                 prompt_text = None
                 prompt_category = None
 
-        # Answers visible during review, game_over, matchup
-        visible_phases = (
-            GamePhase.REVIEW,
-            GamePhase.GAME_OVER,
-            GamePhase.MATCHUP,
-        )
-        if state.phase in visible_phases:
+        # Answers visible during game_over, matchup
+        if state.phase in (GamePhase.GAME_OVER, GamePhase.MATCHUP):
             answers = round_state.answers
 
         if state.phase == GamePhase.PROMPT and player_id in round_state.answers:

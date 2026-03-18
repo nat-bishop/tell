@@ -82,9 +82,9 @@ All transitions funnel through helper functions in `transitions.py` (shared by `
 
 ### Game-Over Conditions
 
-Checked in `game_logic.check_game_over()` after each round completes. Returns `None` until game ends, then `("highest_scorer", [winner_ids...])`:
+Checked in `game_logic.check_game_over()` after each round completes. Returns `None` until game ends, then `("winners", [winner_ids...])`:
 - `state.round_number >= state.total_rounds` → game ends; highest scorer wins; ties produce multiple `winner_ids`
-- `state.winner = "highest_scorer"`; `state.winner_ids` holds IDs of top-scoring players
+- `state.winner = "winners"`; `state.winner_ids` holds IDs of top-scoring players
 
 `GameOverEvent` and `StateSyncEvent` both carry `winner_ids` and `scores`.
 
@@ -133,7 +133,7 @@ Brain test and matchup challenges scheduled via `on_brain_test_challenge()` and 
 
 All tasks stored in `_ai_tasks[game_id]` and cancelled on phase change via `cancel_all()`.
 
-**Conversation history**: Each AI player has a `message_history` (PydanticAI `ModelMessage` list) stored in `_conversation_history`. History is threaded through `generate_answer` and `generate_vote` calls, giving AI players memory within a game.
+**Conversation history**: Each AI player has a `message_history` (PydanticAI `ModelMessage` list) stored in `_conversation_history`. History is threaded through `generate_answer` and `decide_vote` calls, giving AI players memory within a game.
 
 **Fallback**: If LLM fails, personality's `fallback_response` is used.
 
@@ -150,7 +150,7 @@ Two agent tiers:
 | Function | Phase | Notes |
 |---|---|---|
 | `generate_answer` | PROMPT | Responds to prompt trying to pass as human |
-| `generate_vote` | MATCHUP | Picks which answer sounds more human; structured output `VoteResponse` |
+| `decide_vote` | MATCHUP | Picks which answer sounds more human; structured output `VoteResponse` |
 | `generate_brain_test_answer` | BRAIN_TEST | Picks from 4 options. Uses stateless `brain_test_agent`. 3s timeout |
 | `generate_narration` | Transition hooks | Uses `narrator_agent` + message history; dry literary narrator voice. 3s timeout (5s for game_over) |
 
@@ -174,7 +174,7 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 **Interstitial holds**: Each phase start has a built-in hold period (`_INTERSTITIAL_HOLD` dict in `game_logic.py`). `PhaseChangedEvent` carries `action_starts_at` so the frontend knows when the actual action window begins. `PhaseInterstitial` component shows during the hold.
 
-**Phase interstitials**: `PhaseInterstitial` has 5 rotating robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that cycle per round. Each phase gets directive subtitle text. Situation lines ("round N of 5") derived from `totalRounds` in the store. On first game start, `game/[id]/page.tsx` shows a cold open sequence ("N UNITS ASSEMBLED / some are not what they seem") before round 1.
+**Phase interstitials**: `PhaseInterstitial` has 5 rotating robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that cycle per round. Each phase gets directive subtitle text. Situation lines ("round N of 5") derived from `totalRounds` in the store. On first game start, `game/[id]/page.tsx` shows a cold open sequence ("N SUBJECTS DETECTED / some are not what they seem") before round 1.
 
 **Narrator**: `Narration` component receives `narrationText`/`narrationTrigger` from the store. Fades in, holds, then auto-dismisses after 6s. `game_over` trigger persists. `NarrationInline` used on the game over screen.
 

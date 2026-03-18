@@ -7,7 +7,6 @@ ai_retries = 2
 prompt_duration = 60
 task_prompt_duration = 45
 prompt_reading_duration = 10
-review_duration = 55
 brain_test_duration = 85
 brain_test_challenge_duration = 15
 brain_test_challenges = 5

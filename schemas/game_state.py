@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class GamePhase(enum.StrEnum):
     LOBBY = "lobby"
     PROMPT = "prompt"
-    REVIEW = "review"
     GAME_OVER = "game_over"
     BRAIN_TEST = "brain_test"
     BRAIN_TEST_RESULTS = "brain_test_results"
@@ -95,9 +94,7 @@ class TellGameState(BaseModel):
     round_number: int = 0
     total_rounds: int = 5
     round_types: list[RoundType] = Field(default_factory=list)
-    used_prompt_indices: list[int] = Field(default_factory=list)
     used_task_prompt_indices: list[int] = Field(default_factory=list)
-    last_prompt_category: str | None = None
     last_task_prompt_category: str | None = None
     winner: str | None = None
     winner_ids: list[str] = Field(default_factory=list)

@@ -18,41 +18,7 @@ from schemas.game_state import (
     RoundType,
     TellGameState,
 )
-from schemas.prompts import PROMPTS, TASK_PROMPTS, PromptCategory, select_prompt, select_task_prompt
-
-# ---------------------------------------------------------------------------
-# Prompt selection
-# ---------------------------------------------------------------------------
-
-
-class TestSelectPrompt:
-    def test_no_repeats(self):
-        used = []
-        seen_indices = set()
-        for _ in range(10):
-            idx, _prompt = select_prompt(used, None, round_number=5)
-            assert idx not in seen_indices
-            seen_indices.add(idx)
-            used.append(idx)
-
-    def test_avoids_same_category(self):
-        # With last_category set, should avoid that category
-        _idx, prompt = select_prompt([], "emotional", round_number=5)
-        assert prompt.category.value != "emotional"
-
-    def test_min_round_filtering(self):
-        # Round 1 should exclude social prompts (min_round=2)
-        for _ in range(20):
-            _idx, prompt = select_prompt([], None, round_number=1)
-            assert prompt.min_round <= 1
-
-    def test_fallback_when_constrained(self):
-        # Use all non-social prompts, force round 1 (no social allowed)
-        non_social = [i for i, p in enumerate(PROMPTS) if p.category != PromptCategory.SOCIAL]
-        _idx, prompt = select_prompt(non_social, None, round_number=1)
-        # Should still return something (fallback: any unused)
-        assert prompt is not None
-
+from schemas.prompts import TASK_PROMPTS, select_task_prompt
 
 # ---------------------------------------------------------------------------
 # Alias generation

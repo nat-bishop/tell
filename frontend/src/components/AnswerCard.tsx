@@ -38,7 +38,6 @@ export function AnswerCard({
         </div>
       )}
 
-      {/* Children slot — Q&A exchange in ReviewPhase */}
       {children}
 
       {/* Attribution — name pinned to bottom */}

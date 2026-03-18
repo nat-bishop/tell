@@ -17,7 +17,7 @@ This project has layered documentation:
 - **CLAUDE.md** (project root): The authoritative quick-reference for developers/AI. Contains architecture overview, running instructions, code conventions, critical patterns, gotchas, and pointers to detailed docs. This is the primary source of truth for how things work.
 - **docs/ARCHITECTURE.md**: System architecture deep-dive — real-time SSE system, state machine, AI scheduling, frontend architecture. Covers the *how* of implementation.
 - **docs/GAME_DESIGN.md**: Game design document organized around the three self-contained game types (Task, Interrogation, Word Chain). Each section covers flow, prompt categories, what makes it fun, and what skill it tests. Also covers aesthetics, shared mechanics (voting, elimination, AI personalities), and edge cases.
-- **docs/GAME_IDEAS.md**: Curated shortlist of future ideas ranked by impact (Post-Game Debrief, Autocomplete, Rapid Fire, The Dossier, The Oracle). Not a wishlist — a prioritized design backlog with implementation notes.
+- **docs/RESEARCH.md**: Compiled research for game design — pacing, social deduction, information asymmetry, humor, AI detection, cultural context, the Jack Principles, design principles, and game ideas for future round types.
 
 ## Key Principles
 
@@ -57,12 +57,6 @@ This project has layered documentation:
 - Update when: round types change, prompts/categories change, timers change, design decisions made
 - Remove mockups or designs for features that shipped differently than planned
 - Don't duplicate mechanical details already in CLAUDE.md — reference them
-
-### docs/GAME_IDEAS.md
-- Curated shortlist of future ideas, ranked by impact, with implementation notes
-- Update when: an idea is implemented (move to GAME_DESIGN.md or remove), a new strong idea emerges
-- Keep the list tight — 5-7 ideas max. Cut weak ideas aggressively.
-- Don't add ideas that duplicate existing round types or prompt categories
 
 ## Workflow
 

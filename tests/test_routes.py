@@ -104,7 +104,7 @@ class TestStartGame:
 
 class TestSubmitAnswer:
     async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.REVIEW)
+        game_id, _, _ = seed_game(GamePhase.MATCHUP)
         resp = await client.post(
             f"/games/{game_id}/answer",
             json={"player_id": "h1", "answer": "test"},

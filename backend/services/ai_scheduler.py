@@ -135,7 +135,7 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
         player_alias=player.alias,
         current_prompt=current_prompt,
         all_answers=all_answers,
-        alive_players=all_aliases,
+        players=all_aliases,
         round_number=state.round_number,
         round_type=round_type,
         my_answer=my_answer,
@@ -391,10 +391,7 @@ async def on_matchup_challenge(game_id: str, matchup_index: int) -> None:
     pair_ids = set(matchup.pair)
 
     # AI players not in the pair can vote
-    ai_voters = [
-        p for p in state.players
-        if p.role == PlayerRole.AI and p.id not in pair_ids
-    ]
+    ai_voters = [p for p in state.players if p.role == PlayerRole.AI and p.id not in pair_ids]
     if not ai_voters:
         return
 
@@ -402,9 +399,7 @@ async def on_matchup_challenge(game_id: str, matchup_index: int) -> None:
     for player in ai_voters:
         delay = random.uniform(2, 8)
         tasks.append(
-            asyncio.create_task(
-                _ai_matchup_vote_task(game_id, player.id, matchup_index, delay)
-            )
+            asyncio.create_task(_ai_matchup_vote_task(game_id, player.id, matchup_index, delay))
         )
 
     _ai_tasks.setdefault(game_id, []).extend(tasks)

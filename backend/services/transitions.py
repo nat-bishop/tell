@@ -194,11 +194,6 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             fill_missing_answers(session.state)
             await do_prompt_complete(game_id, session)
 
-        elif expired_phase == GamePhase.REVIEW:
-            # REVIEW timer expired — no votes to resolve in score-based model
-            # (review is informational only between matchup rounds)
-            pass
-
         elif expired_phase == GamePhase.MATCHUP:
             # Safety timer — resolve matchup votes
             await do_matchup_complete(game_id, session)

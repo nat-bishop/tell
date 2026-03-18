@@ -43,7 +43,7 @@ class AIPlayerDeps:
     player_alias: str
     current_prompt: str
     all_answers: dict[str, str]  # alias -> answer text
-    alive_players: list[str]  # list of aliases
+    players: list[str]  # list of aliases
     round_number: int
     round_type: RoundType = RoundType.TASK
     my_answer: str | None = None
@@ -82,9 +82,7 @@ ai_agent: Agent[AIPlayerDeps, str] = Agent(
     deps_type=AIPlayerDeps,
     retries=2,
     model_settings={"max_tokens": 200},
-    validation_context=lambda ctx: [
-        a for a in ctx.deps.alive_players if a != ctx.deps.player_alias
-    ],
+    validation_context=lambda ctx: [a for a in ctx.deps.players if a != ctx.deps.player_alias],
 )
 
 narrator_agent: Agent[None, str] = Agent(
@@ -210,7 +208,7 @@ async def decide_vote(
     message_history: list[ModelMessage] | None = None,
 ) -> tuple[list[str], list[ModelMessage]]:
     """Decide who to vote for in a matchup. Returns list of target aliases."""
-    other_players = [a for a in deps.alive_players if a != deps.player_alias]
+    other_players = [a for a in deps.players if a != deps.player_alias]
     if not other_players:
         return [], message_history or []
 

@@ -30,8 +30,7 @@ def save_recording(game_id: str, state: TellGameState, events: list[GameEvent]) 
             "total_rounds": state.total_rounds,
             "round_count": state.round_number,
             "players": [
-                {"alias": p.alias, "role": p.role.value, "score": p.score}
-                for p in state.players
+                {"alias": p.alias, "role": p.role.value, "score": p.score} for p in state.players
             ],
             "final_state": state.model_dump(mode="json"),
             "events": [e.model_dump(mode="json") for e in events],

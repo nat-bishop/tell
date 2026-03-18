@@ -4,23 +4,30 @@ description: Documentation drift patterns, sync conventions, and common stale sp
 type: project
 ---
 
-Round type history: Probe → Task/Interrogation/Word Chain (3-type) → Task/Word Chain/Brain Test/Interrogation (4-type, current). Always check `game_logic.py::select_round_types()` for the authoritative cycle order — docs lag the code.
+Round type history: Probe → Task/Interrogation/Word Chain (3-type) → Task/Brain Test/Interrogation (3-type) → **Task (Matchup) + Brain Test (Quick Draw) only (v2, current)**. Always check `game_logic.py::select_next_round_type()` and `MINIGAMES` registry for the authoritative list — docs lag the code.
 
-**Why:** Each major feature push has changed the cycle. The order and count are load-bearing for timing tables in CLAUDE.md and GAME_DESIGN.md.
+**Why:** Each major feature push has changed the cycle. The count and names are load-bearing for timing tables in CLAUDE.md and GAME_DESIGN.md.
 
-**How to apply:** When syncing docs, start with `select_round_types()` in `game_logic.py`. If the cycle doesn't match docs, update all timing tables and "round types" prose in CLAUDE.md, ARCHITECTURE.md, and GAME_DESIGN.md together.
+**How to apply:** When syncing docs, start with `MINIGAMES` in `game_logic.py`. If the round types don't match docs, update all timing tables and "round types" prose in CLAUDE.md, ARCHITECTURE.md, and GAME_DESIGN.md together.
 
-Common drift sources:
-- Phase durations: `config.toml` is authoritative. `config.py` default fallbacks may lag (e.g. `elimination_duration` was 8 in Python fallback, 12 in `config.toml`). When docs say a timer value, verify in `config.toml`.
-- `schemas/constants.py` is minimal — just three constants. Not where durations or limits live.
-- New round types always require: schema models (`game_state.py`), `game_logic.py` (phases, transitions), `transitions.py` (sub-round loop + do_* helpers), `ai_scheduler.py` (on_* handler), frontend component, SSE events, `config.py`/`config.toml` settings. All must be documented.
-- AI scheduler conversation history feature: `_conversation_history` dict in `ai_scheduler.py`. Easy to miss.
-- `initialize_and_start_game` is in `transitions.py` (not `actions.py`) — shared by host-start and matchmaking.
-- Word Chain: `CHAIN` is the `GamePhase` value; `WORD_CHAIN` is the `RoundType`. Brain Test: `BRAIN_TEST` is both `GamePhase` and `RoundType`.
-- Narrator fires in `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking, uses generate-then-lock pattern same as AI players.
-- Comedy Cup adds a second vote track: `comedy_votes` on `RoundState`, `ComedyWinnerEvent` SSE, `castComedyVote()` action, winner shown at Elimination step 5.
-- Brain Test results live on `RoundState.brain_challenges` (not a `TellGameState` field). They are not injected into AI prompts for subsequent rounds — only displayed to players via `BrainTestResultsEvent`.
-- Brain Test now scores challenges: `trick`/`pattern` → fuzzy match; `estimation`/`common_knowledge` → uniqueness. Winner earns PARTIAL SCAN or DOUBLE VOTE stored in `state.active_ability`. Cleared in `_start_next_round()`.
-- REVIEW has 3 server-driven sub-phases (REVEAL/DISCUSS/VOTE) — no new `GamePhase` values. Timestamps `discuss_starts_at` and `vote_starts_at` in `PhaseChangedEvent`. Frontend `useSubPhase()` drives local transitions.
-- Discussion messages: `POST /{game_id}/discussion-message`, 3 msgs/player/round, 120 chars. Rate-limited via `discussion_counts` on `RoundState`. AI uses `_ai_discussion_task()` + `generate_discussion_message()`.
-- PARTIAL SCAN triggered by `_trigger_ability_on_review()` in `transitions.py` at REVIEW start. DOUBLE VOTE applied in `resolve_votes()` in `game_logic.py`.
+## v2 Key Changes (score-based, no elimination)
+
+The game was completely redesigned from elimination-based to score-based in 2026:
+- Frame flip: "Be yourself, find the AI" — humans play as themselves, AI tries to pass as human
+- No elimination. No spectator mode. Fixed 5 rounds. Big reveal at end.
+- Removed: Interrogation, Discussion chat, Comedy Cup, Abilities (PARTIAL SCAN + DOUBLE VOTE), multi-vote, ELIMINATION phase
+- Added: Matchup sub-round loop (1v1 head-to-head), FinalRevealEvent, scoring on Player model
+
+## Common drift sources (v2)
+
+- **Round types**: Only `TASK` and `BRAIN_TEST` in `MINIGAMES`. Selection rule: no consecutive repeat only (no player count restrictions).
+- **Phase durations**: `config.toml` is authoritative. `config.py` default fallbacks may lag.
+- **schemas/constants.py** is minimal — just three constants. Not where durations or limits live.
+- **Matchup sub-round loop**: `_start_matchup_loop` in `transitions.py`, analogous to `_start_brain_test_loop`. Uses `MatchupChallengeEvent` SSE. AI votes via generate-then-lock pattern.
+- **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` then `GameOverEvent`. Frontend handles reveal-first, score-second sequence.
+- **`total_rounds = 5`** is the game length (not a safety cap). `check_game_over()` returns winner when `round_number >= total_rounds`.
+- **`initialize_and_start_game`** is in `transitions.py` (not `actions.py`) — shared by host-start and matchmaking.
+- **Narrator fires in** `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking, generate-then-lock pattern.
+- **AI conversation history**: `_conversation_history` dict in `ai_scheduler.py`. Easy to miss in architecture docs.
+- **`StateSyncEvent` carries `scores` dict** — player_id → score. Also on `MatchupResultsEvent`, `BrainTestResultsEvent`, `GameOverEvent`.
+- **Bye player**: Odd player out in matchup rounds stored as `bye_player_id` on `RoundState`. They don't appear in a head-to-head but still accumulate score from other rounds.

@@ -23,6 +23,8 @@ while not (_project_root / "schemas").is_dir():
         sys.exit("Error: Cannot find project root (looking for schemas/ directory)")
 sys.path.insert(0, str(_project_root))
 
+from schemas.word_chain import select_seed_word  # noqa: E402
+
 from schemas.aliases import generate_aliases, generate_game_id, generate_player_id  # noqa: E402
 from schemas.game_state import (  # noqa: E402
     ChainRound,
@@ -35,7 +37,6 @@ from schemas.game_state import (  # noqa: E402
     TellGameState,
 )
 from schemas.prompts import select_prompt, select_task_prompt  # noqa: E402
-from schemas.word_chain import select_seed_word  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Round type cycle (inlined from game_logic.py to avoid backend dependencies)

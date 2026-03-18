@@ -5,7 +5,6 @@ import { create } from "zustand";
 export type GamePhase =
   | "lobby"
   | "prompt"
-  | "review"
   | "game_over"
   | "brain_test"
   | "brain_test_results"

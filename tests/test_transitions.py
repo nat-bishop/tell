@@ -278,7 +278,7 @@ class TestStartNextRound:
     async def test_advances_round_number(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import _start_next_round
 
-        _state, session, _ = _make_session(GamePhase.REVIEW, round_type=RoundType.TASK)
+        _state, session, _ = _make_session(GamePhase.MATCHUP, round_type=RoundType.TASK)
         session.state.round_types = [RoundType.TASK]
         session.state.round_number = 1
         game_id = _store_session(session)
