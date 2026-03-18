@@ -293,6 +293,8 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
       if (!gameId || !playerId) return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
+        const deadline = useGameStore.getState().phaseDeadline;
+        if (deadline && Date.now() > new Date(deadline).getTime()) return;
         castVote(gameId, playerId, targets).catch(() => {});
       }, 500);
     },
@@ -304,6 +306,13 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!isVotePhase && debounceRef.current) {
+      clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+  }, [isVotePhase]);
 
   const toggleVote = (pid: string) => {
     if (!isVotePhase) return;
@@ -327,6 +336,8 @@ export function ReviewPhase({ spectator = false }: { spectator?: boolean }) {
   const toggleComedyVote = (pid: string) => {
     if (!isVotePhase || !gameId || !playerId) return;
     if (comedyVote === pid) return;
+    const deadline = useGameStore.getState().phaseDeadline;
+    if (deadline && Date.now() > new Date(deadline).getTime()) return;
     setComedyVote(pid);
     castComedyVote(gameId, playerId, pid).catch(() => {});
     useGameStore.setState({ myComedyVote: pid });

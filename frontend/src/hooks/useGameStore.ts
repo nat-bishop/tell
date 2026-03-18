@@ -571,6 +571,16 @@ export const useGameStore = create<GameState>((set) => ({
       voteStartsAt: data.vote_starts_at ?? null,
       // Scan reset per round
       scanResults: null,
+      // Brain test reset
+      brainTestQuestion: null,
+      brainTestChallengeIndex: 0,
+      brainTestChallengeType: null,
+      brainTestOptions: [],
+      brainTestResults: null,
+      brainTestScores: null,
+      brainTestWinnerId: null,
+      brainTestWinnerAlias: null,
+      brainTestAbilityAwarded: null,
     })),
 
   onAnswerSubmitted: (data) =>
