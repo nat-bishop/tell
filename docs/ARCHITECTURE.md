@@ -13,7 +13,7 @@ AI Player       ── internal asyncio task ──────────┘  
 GET /games/{id}/events     →  persistent EventSource per client
 POST /games/{id}/*         →  actions (join, start, answer, question, respond,
                                nominate, vote, comedy-vote,
-                               brain-test-answer, discussion-message)
+                               brain-test-answer, discussion-message, matchup-vote)
 POST /matchmaking/join|leave  →  matchmaking queue
 GET /matchmaking/events    →  matchmaking SSE (lobby_status, game_assigned)
 GET /matchmaking/status    →  current lobby state
@@ -43,10 +43,11 @@ Each connected client gets an `asyncio.Queue[GameEvent | None]`. The `Connection
 
 Three round types: **Task, Quick Draw (Brain Test), Interrogation**. Selected dynamically at the start of each round via `select_next_round_type(last_round_type, alive_count)` — not pre-generated. `state.round_types` is a growing list (appended per round). `MinigameMeta` / `MINIGAMES` in `game_logic.py` stores `min_players` and `has_elimination` per type. Selection rules: no consecutive repeat, Interrogation requires ≥4 alive, no consecutive non-eliminating rounds.
 
-**Task** (constrained creative prompt, no Q&A):
+**Task** (constrained creative prompt, 1v1 matchup voting):
 ```
-PROMPT (25s) → REVIEW (40s) → ELIMINATION (12s) → next round
+PROMPT (45s) → MATCHUP (120s safety, N pairs × 12s) → ELIMINATION (15s) → next round
 ```
+`transition_to_task_matchup_prompt()` shuffles alive players into pairs via `generate_matchup_pairs()`, assigns each pair a unique prompt from the task pool. Odd player count → one bye player (`round_state.bye_player_id`), excluded from voting. `_start_matchup_loop` sequences through pairs: each iteration broadcasts `MatchupChallengeEvent`, collects LEFT/RIGHT votes via `POST /{game_id}/matchup-vote`. Paired players cannot vote on their own matchup. After all pairs, `do_matchup_complete()` calls `resolve_matchup_votes()` — eliminates widest-margin loser (random tiebreak if all margins equal zero).
 
 **Quick Draw / Brain Test** (multiple-choice speed quiz, no voting or elimination):
 ```
@@ -56,39 +57,40 @@ BRAIN_TEST runs 5 challenges at 15s each via `_start_brain_test_loop`. Each chal
 
 **Interrogation** (hot seat with LLM question synthesis):
 ```
-PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (12s) → next round
+PROMPT (60s) → NOMINATE (20s) → QUESTION (30s) → RESPOND (35s) → REVIEW (55s) → ELIMINATION (15s) → next round
 ```
 
-**REVIEW sub-phases** (all round types with REVIEW): No new `GamePhase` enum values. `PhaseChangedEvent` carries `discuss_starts_at` and `vote_starts_at` ISO timestamps. Frontend `useSubPhase()` hook in `ReviewPhase.tsx` transitions locally:
+**REVIEW sub-phases** (Interrogation only): No new `GamePhase` enum values. `PhaseChangedEvent` carries `discuss_starts_at` and `vote_starts_at` ISO timestamps. Frontend `useSubPhase()` hook in `ReviewPhase.tsx` transitions locally:
 ```
-REVEAL (0-8s) → DISCUSS (8-26s) → VOTE (26-40s)
+REVEAL (0-10s) → DISCUSS (10-33s) → VOTE (33-55s)
 ```
-PARTIAL SCAN ability (if active) triggers in `_trigger_ability_on_review()` at REVIEW start — picks 2 random alive players (not holder), one with true role, one randomized (50/50). Results broadcast via `ScanResultEvent`, shown in `ScanResults` component during DISCUSS. During DISCUSS, players send up to 3 messages (`POST /{game_id}/discussion-message`, 120 char max) broadcast as `DiscussionMessageEvent`. Rate-limited via `discussion_counts` on `RoundState`.
+PARTIAL SCAN ability (if active) triggers in `_trigger_ability_on_review()` at REVIEW start (Interrogation) or MATCHUP start (Task) — sends results only to the holder via `cm.send_to()`, not broadcast. Picks 2 random alive players (not holder): one true role, one randomized (50/50). Results shown in `ScanResults` component during DISCUSS. During DISCUSS, players send up to 3 messages (`POST /{game_id}/discussion-message`, 120 char max) broadcast as `DiscussionMessageEvent`. Rate-limited via `discussion_counts` on `RoundState`.
 
 ### Phase Transitions
 
-The canonical valid phase sequences are defined in `PHASE_SEQUENCES` (a dict keyed by `RoundType`) in `game_logic.py`. `next_phase()` consults this table; `transitions.py` helper functions drive the actual async work.
-
-All transitions funnel through helper functions in `transitions.py` (shared by `actions.py` routes and `ai_scheduler.py`):
+Phase routing logic lives in the `do_*_complete` functions in `transitions.py`. Each function knows its next phase based on the current round type. Helper functions in `transitions.py` are shared by `actions.py` routes and `ai_scheduler.py`:
 
 | Function | Trigger | What it does |
 |---|---|---|
 | `start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps then calls `handle_phase_expiry` |
 | `handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to `do_*_complete` |
-| `do_prompt_complete` | All answers in | TASK → REVIEW; INTERROGATION → NOMINATE |
+| `do_prompt_complete` | All answers in | TASK → MATCHUP (starts `_start_matchup_loop`); INTERROGATION → NOMINATE |
+| `do_matchup_complete` | All pairs done or safety timer | Resolves matchup votes, generates verdict, → ELIMINATION |
 | `do_question_complete` | All questions in | Interrogation: calls LLM synthesis, broadcasts `synthesis_ready`, → RESPOND |
 | `do_vote_resolution` | REVIEW timer expires | Tallies multi-votes + comedy votes, generates LLM verdict, → ELIMINATION |
 | `do_after_elimination` | ELIMINATION timer | Checks game-over; branches on next round type |
 | `do_brain_test_complete` | BRAIN_TEST safety timer or challenges done | Scores challenges, assigns ability, → BRAIN_TEST_RESULTS |
 | `do_after_brain_test` | BRAIN_TEST_RESULTS timer | No elimination — starts next round directly |
-| `_trigger_ability_on_review` | REVIEW phase start | Executes PARTIAL SCAN if active; clears DOUBLE VOTE on round end |
+| `_trigger_ability_on_review` | REVIEW start (Interrogation) or MATCHUP start (Task) | Executes PARTIAL SCAN if active (sends to holder only); DOUBLE VOTE applied at vote resolution |
 | `initialize_and_start_game` | Host start or matchmaking fire | Spawns AI, assigns personalities, delegates to `_start_next_round()` |
 
-**Early completion**: When all players submit (answers, nominations, questions, responses), the timer is cancelled and the transition happens immediately. Exception: **REVIEW never early-completes**.
+**Early completion**: When all players submit (answers, nominations, questions, responses), the timer is cancelled and the transition happens immediately. Exceptions: **REVIEW never early-completes**; **MATCHUP sub-rounds run on fixed 12s timers** regardless of vote submission.
 
 **Interrogation NOMINATE resolution**: plurality vote among all nominations; ties broken randomly.
 
 **Interrogation QUESTION → synthesis**: when all non-nominated players submit questions, `synthesize_questions()` (LLM, 5s timeout) weaves them into one cross-examination paragraph. Fallback: numbered list.
+
+**Matchup sub-round loop**: `_start_matchup_loop` runs as a background `asyncio.Task`. Each iteration sets `rs.current_matchup`, broadcasts `MatchupChallengeEvent` with both players' answers, calls `on_matchup_challenge()` to schedule AI random votes (2-8s delay). After all pairs, cancels safety timer and calls `do_matchup_complete`.
 
 **Brain Test sub-round loop**: `_start_brain_test_loop` runs as a background `asyncio.Task`. Each iteration broadcasts `BrainTestChallengeEvent` (including `options` array) with the current challenge, then calls `on_brain_test_challenge()` to schedule AI option selection (via `_ai_brain_test_task()`, generate-then-lock pattern). After all challenges, cancels safety timer and calls `do_brain_test_complete`.
 
@@ -135,11 +137,12 @@ The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game
 | NOMINATE | Each AI nominates (Interrogation only) | 2-8s |
 | QUESTION | Each AI submits a question (except hot-seated) | 3-12s |
 | RESPOND | AI targets respond to their question | 2-8s |
-| REVIEW (DISCUSS) | Each AI sends 1-2 discussion messages | 10-22s |
-| REVIEW (VOTE) | Each AI casts votes | 28-37s |
+| REVIEW (DISCUSS) | Each AI sends 1-2 discussion messages | 10-17s |
+| REVIEW (VOTE) | Each AI casts votes | 36-50s |
 | BRAIN_TEST (each challenge) | Each AI selects an option | 2-8s |
+| MATCHUP (each pair) | Each non-paired AI votes LEFT/RIGHT randomly | 2-8s |
 
-Brain test challenges scheduled via `on_brain_test_challenge()` called by `_start_brain_test_loop`. Uses the same generate-then-lock pattern and registers via `register_task()`.
+Brain test challenges scheduled via `on_brain_test_challenge()` called by `_start_brain_test_loop`. Matchup votes scheduled via `on_matchup_challenge()` called by `_start_matchup_loop`. Both use the generate-then-lock pattern and register via `register_task()`. Matchup AI votes are random (no LLM call).
 
 All tasks stored in `_ai_tasks[game_id]` and cancelled on phase change via `cancel_all()`.
 
@@ -196,10 +199,10 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 |---|---|---|
 | `AnswerCard` | Shared | Answer-first card; alias + role label pinned to bottom; renders as `button` or `div` |
 | `PlayerBar` | All gameplay phases | Persistent strip showing alive players and connection status |
-| `VoteOverlay` | REVIEW | Multi-select vote UI (up to 3, changeable) |
 | `PhaseInterstitial` | Phase transitions | Robot voice archetype overlay with directive subtitles and situation lines |
 | `Narration` | Async narrator events | Floating overlay, auto-dismiss 6s; `NarrationInline` for game over |
 | `BrainTestPhase` | BRAIN_TEST / BRAIN_TEST_RESULTS | 4-option buttons + scored results grid with winner + ability awarded |
+| `MatchupPhase` | MATCHUP | Sequential 1v1 split-screen voting; paired players cannot vote; progress indicator |
 | `QuestionPhase` | QUESTION | Shows target's answer, write anonymous follow-up question |
 | `RespondPhase` | RESPOND | Answer received question (or synthesis in Interrogation) |
 | `NominatePhase` | NOMINATE | Pick player for hot seat |

@@ -66,13 +66,20 @@ Each creates different pressure. Task exposes format fluency. Quick Draw is comp
 
 ### Task — The Robots' Challenge
 
-A constrained creative prompt. Write a haiku, a one-liner, a corporate memo. Everyone answers simultaneously. No questions, no interrogation. Straight to voting.
+A constrained creative prompt. Write a haiku, a one-liner, a corporate memo. Players are shuffled into 1v1 pairs — each pair gets their own prompt. Spectators and non-paired players vote on each matchup sequentially.
 
 ```
-PROMPT (25s) → REVIEW (40s) → ELIMINATION (12s)
+PROMPT (45s) → MATCHUP (N pairs × 12s each) → ELIMINATION (15s)
 ```
 
-~77 seconds per round. The fastest game. Short answers leave nowhere to hide — every word is evidence.
+~75-120 seconds per round (scales with player count). The fastest game. Short answers leave nowhere to hide — every word is evidence.
+
+#### How It Works
+
+1. **PROMPT**: Players are split into pairs. Each pair gets a unique prompt from the task pool. Players write their answer independently.
+2. **MATCHUP**: Pairs appear one at a time in split-screen. Spectators and non-paired players vote LEFT or RIGHT — who sounds more human? The paired players see their matchup but cannot vote on it.
+3. **Odd player count**: One player sits out as a bye — no prompt, no matchup.
+4. **ELIMINATION**: The player with the widest vote margin across all matchups is eliminated. All-tie → random.
 
 #### The 7 Prompt Categories
 
@@ -92,7 +99,9 @@ Each category exploits a different AI blindspot or strength:
 
 #### What Makes It Fun
 
-The constraint is the detector. When you only get 5 words or 17 syllables, there's nowhere for AI to hide behind qualifications and hedging. The review phase — a grid of everyone's answers side-by-side — produces the best screenshots: a haiku grid where one haiku is clearly from a person who has actually experienced Monday mornings.
+The 1v1 format changes the social dynamic. Voting becomes comparative — not "does this answer seem AI?" but "which of these two sounds more human?" The side-by-side reveal makes the tell obvious even when neither answer is obviously AI. When a human faces a strong AI, the juxtaposition does the comedy work.
+
+The sequential pacing — one pair at a time — creates moments of anticipation ("when do I appear?") and relief ("I'm next to the glitchy one").
 
 **Skill tested**: Format fluency, creative economy, knowing when imperfection is authentic.
 
@@ -103,10 +112,10 @@ The constraint is the detector. When you only get 5 words or 17 syllables, there
 The group answers a prompt, then nominates one player for cross-examination. Everyone writes questions. An LLM narrator synthesizes all questions into one pointed paragraph. The nominated player responds. Then everyone votes.
 
 ```
-PROMPT (45s) → NOMINATE (15s) → QUESTION (25s) → RESPOND (30s) → REVIEW (40s) → ELIMINATION (12s)
+PROMPT (60s) → NOMINATE (20s) → QUESTION (30s) → RESPOND (35s) → REVIEW (55s) → ELIMINATION (15s)
 ```
 
-~167 seconds per round. The longest game. The pressure builds across five distinct phases.
+~215 seconds per round. The longest game. The pressure builds across five distinct phases.
 
 #### How It Works
 
@@ -149,12 +158,12 @@ No writing, no voting, no elimination. A rapid sequence of multiple-choice chall
 BRAIN_TEST (5 challenges × 15s each, 85s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
 ```
 
-~100 seconds per round. The only round with a right answer.
+~100 seconds per round. The only round with a right answer. No voting, no elimination.
 
 #### How It Works
 
 1. Five challenges appear one at a time, 15 seconds each. A new `BrainTestChallengeEvent` fires for each, with 4 option buttons.
-2. All players tap one of the 4 options. AI selects an option via LLM.
+2. All players tap one of the 4 options. AI selects an option (LLM-driven) via `_ai_brain_test_task()`.
 3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's selections with correct/incorrect indicators and scores.
 4. The highest scorer wins a random ability (PARTIAL SCAN or DOUBLE VOTE) announced in the interstitial before the next round.
 5. No vote. No elimination. `do_after_brain_test()` starts the next round directly.
@@ -201,9 +210,9 @@ Contrast-based intensity — never sustain maximum tension. The three round type
 
 | Round | Duration | Pressure type | Agency |
 |-------|----------|---------------|--------|
-| Task | ~77s | Low — fast, everyone equal | High (writing) then low (voting) |
+| Task | ~75-120s | Low — fast, pairwise | High (writing) then spectating (matchups) |
 | Quick Draw | ~100s | Low — competitive, no elimination | Pure performance (tapping) |
-| Interrogation | ~167s | High — one player in the spotlight | Mixed (writing, questioning, defending) |
+| Interrogation | ~215s | High — one player in the spotlight | Mixed (writing, questioning, defending) |
 
 Quick Draw sits between Task and Interrogation as a deliberate release valve. It accumulates evidence without demanding a verdict — the pressure deferred makes the following Interrogation hit harder.
 
@@ -213,7 +222,7 @@ This maps to the Among Us insight: alternate between high-agency/low-communicati
 
 Total game: variable — continues until ≤2 players remain (safety cap: 10 rounds). Typical games run 4-6 rounds, ~15-20 minutes. This is the party game sweet spot (15-45 minutes total, individual rounds 30s-3m).
 
-Timer pressure for creative tasks: 25-45 seconds. Enough to think, not enough to overthink. Research shows moderate time pressure is the sweet spot — it bypasses self-censorship, which means imperfect answers under pressure are both funnier and more human. This is a feature, not a constraint.
+Timer pressure for creative tasks: 45-60 seconds (Task prompt 45s, Interrogation prompt 60s). Enough to think, not enough to overthink. Research shows moderate time pressure is the sweet spot — it bypasses self-censorship, which means imperfect answers under pressure are both funnier and more human. This is a feature, not a constraint.
 
 ### Late-Game Acceleration
 
@@ -271,23 +280,27 @@ Players join via URL, receive robot aliases (UNIT-7, BOT-42 — assigned, not ch
 
 ### Voting
 
-REVIEW runs 40 seconds split into three server-driven sub-phases:
+Two systems depending on round type:
 
-1. **REVEAL** (0-8s): All answers visible. Absorb the evidence.
-2. **DISCUSS** (8-26s): Live chat — players send short messages (120 chars, 3 max). Screenplay aesthetic: alias + message, no chat bubbles. AI players participate. If PARTIAL SCAN is active, scan results appear here.
-3. **VOTE** (26-40s): Multi-vote UI + Comedy Cup row.
+**Interrogation — REVIEW sub-phases** (55 seconds total):
 
-Players get `min(3, alive_count - 1)` votes. Votes are changeable until the timer expires. No early completion — the full window is always available.
+1. **REVEAL** (0-10s): All answers visible. Absorb the evidence.
+2. **DISCUSS** (10-33s): Live chat — players send short messages (120 chars, 3 max). Screenplay aesthetic: alias + message, no chat bubbles. AI players participate. If PARTIAL SCAN is active, scan results appear here.
+3. **VOTE** (33-55s): Multi-vote UI + Comedy Cup row.
 
-Multi-vote means a coordinated group can focus suspicion. The discussion window gives that coordination a place to happen — or to be performed.
+Players get `min(3, alive_count - 1)` votes. Votes changeable until timer expires. No early completion. Multi-vote means a coordinated group can focus suspicion — the discussion window gives that coordination a place to happen, or to be performed.
 
-**Comedy Cup**: A secondary vote row in REVIEW lets players mark the funniest answer. One vote, changeable, can vote for yourself. The winner is announced during Elimination alongside the verdict.
+**Comedy Cup**: During VOTE, players mark the funniest answer. One vote, changeable, can vote for yourself. Winner announced during Elimination alongside the verdict. Interrogation rounds only.
+
+**Task — MATCHUP voting** (12s per pair):
+
+Each pair's answers appear side-by-side. Spectators and non-paired players vote LEFT or RIGHT. No discussion, no comedy cup. The player with the widest margin across all matchups is eliminated.
 
 ### Abilities
 
 The Brain Test winner earns one of two abilities that activates in the next REVIEW:
 
-**PARTIAL SCAN**: At REVIEW start, the holder gets scan results on 2 players — one true role, one randomized (50/50 correct). Results are shuffled and broadcast to all players during DISCUSS. Nobody knows which result is verified — the uncertainty is the mechanic.
+**PARTIAL SCAN**: At REVIEW start (Interrogation) or MATCHUP start (Task), the holder receives private scan results on 2 players — one true role, one randomized (50/50 correct). Results are shuffled. Only the holder sees them — sent directly, not broadcast. Nobody knows which result is verified — the uncertainty is the mechanic.
 
 **DOUBLE VOTE**: The holder's votes count 2× during resolution. Announced in the phase interstitial; badge shown in PlayerBar. Simple, transparent, high-stakes.
 
@@ -295,9 +308,9 @@ Abilities clear after each round. Only one ability is active at a time.
 
 ### Elimination & Verdict
 
-The elimination reveal is 12 seconds — long enough for a 5-step sequence with a dramatic beat before the role reveal. The stepped reveal:
+The elimination reveal is 15 seconds — long enough for a 5-step sequence with a dramatic beat before the role reveal. The stepped reveal:
 
-1. **Vote map** — who voted for whom, voter aliases linking to target alias. The social graph becomes visible. Eliminated target highlighted in warm.
+1. **Vote map** (Interrogation) or **Matchup results grid** (Task) — who voted for whom / per-pair margins. Eliminated target highlighted in warm.
 2. **Identity reveal** — "`NODE-3` was human." The moment of truth.
 3. **Role context** — "N units remain."
 4. **LLM verdict** — one sentence of literary commentary. Dry wit, referencing the eliminated player's actual answer. The verdict reframes the entire round — it's the punchline.
@@ -350,6 +363,8 @@ The narrator is the only character in the game who knows everyone's role. It nev
 - **All humans eliminated**: AI wins. `state.winner = "ai"`, `winner_ids = []`.
 - **<=2 players left**: Game ends — survivors win if any remain.
 - **Brain Test: no responses to a challenge**: Shown as blank in results grid.
+- **Task matchup: odd player count**: Bye player sits out — no prompt, not shown in any matchup, excluded from elimination (cannot be the widest-margin loser).
+- **Task matchup: all zero margins**: Every matchup tied — random player eliminated from all paired players.
 - **Matchmaking queue drop**: Player disconnecting from SSE auto-removes them from the queue.
 
 ## Explicitly Cut
