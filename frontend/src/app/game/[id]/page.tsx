@@ -7,13 +7,8 @@ import { PlayerBar } from "@/components/PlayerBar";
 import { PhaseInterstitial } from "@/components/PhaseInterstitial";
 import { Lobby } from "@/components/Lobby";
 import { Prompt } from "@/components/Prompt";
-import { QuestionPhase } from "@/components/QuestionPhase";
-import { RespondPhase } from "@/components/RespondPhase";
-import { NominatePhase } from "@/components/NominatePhase";
-import { ReviewPhase } from "@/components/ReviewPhase";
 import { BrainTestPhase } from "@/components/BrainTestPhase";
 import { MatchupPhase } from "@/components/MatchupPhase";
-import { Elimination } from "@/components/Elimination";
 import { GameOver } from "@/components/GameOver";
 import { Narration } from "@/components/Narration";
 import { SystemText } from "@/components/SystemText";
@@ -74,31 +69,14 @@ function JoinScreen({
   );
 }
 
-function EliminatedBanner() {
-  const { myAlias } = useGameStore();
-  return (
-    <div className="mb-6 text-center">
-      <p className="font-literary text-[1rem] text-dim">
-        {myAlias} was voted off. watching the game unfold.
-      </p>
-    </div>
-  );
-}
-
 const INTERSTITIAL_PHASES = new Set<GamePhase>([
-  "prompt", "nominate", "question", "respond", "review", "elimination",
-  "brain_test", "brain_test_results", "matchup",
+  "prompt", "brain_test", "brain_test_results", "matchup",
 ]);
 
 const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
 
 const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   prompt: 45,
-  nominate: 15,
-  question: 25,
-  respond: 30,
-  review: 40,
-  elimination: 12,
   brain_test: 12,
   brain_test_results: 15,
   matchup: 12,
@@ -119,7 +97,7 @@ function ColdOpen({ playerCount }: { playerCount: number }) {
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6">
       {step >= 0 && (
         <p className="animate-fade-in font-system text-[1.2rem] text-ink tracking-[0.2em] uppercase">
-          {playerCount} UNITS ASSEMBLED
+          {playerCount} SUBJECTS DETECTED
         </p>
       )}
       {step >= 1 && (
@@ -136,20 +114,9 @@ function ColdOpen({ playerCount }: { playerCount: number }) {
 function GameContent() {
   const {
     phase, phaseDeadline, phaseDuration, playerId, players,
-    roundNumber, roundType, nominatedId, actionStartsAt,
-    totalRounds, humansEliminated, aisEliminated, lastEliminationWasHuman,
-    activeAbilityHolderAlias, activeAbilityType,
+    roundNumber, roundType, actionStartsAt, totalRounds, scores,
   } = useGameStore();
   const remaining = useTimer(phaseDeadline);
-
-  const myPlayer = players.find((p) => p.id === playerId);
-  const isAlive = myPlayer?.is_alive ?? true;
-  const alivePlayers = players.filter((p) => p.is_alive).length;
-
-  // Resolve nominated alias for interstitial subtitles
-  const nominatedAlias = nominatedId
-    ? players.find((p) => p.id === nominatedId)?.alias ?? null
-    : null;
 
   // Cold open state — show once when game transitions from lobby to first round
   const [showColdOpen, setShowColdOpen] = useState(false);
@@ -227,32 +194,18 @@ function GameContent() {
             roundType={roundType}
             fading={interstitialFading}
             isRoundStart={isRoundStart}
-            spectator={!isAlive}
-            nominatedAlias={nominatedAlias}
             totalRounds={totalRounds}
-            alivePlayers={alivePlayers}
-            humansEliminated={humansEliminated}
-            aisEliminated={aisEliminated}
-            lastEliminationWasHuman={lastEliminationWasHuman}
-            abilityHolderAlias={activeAbilityHolderAlias}
-            abilityType={activeAbilityType}
+            scores={scores}
+            players={players}
           />
         ) : (
           <>
-            {!isAlive && phase !== "game_over" && phase !== "elimination" && (
-              <EliminatedBanner />
-            )}
             {phase === "lobby" && <Lobby />}
-            {phase === "prompt" && <Prompt readOnly={!isAlive} />}
-            {phase === "nominate" && <NominatePhase spectator={!isAlive} />}
-            {phase === "question" && <QuestionPhase spectator={!isAlive} />}
-            {phase === "respond" && <RespondPhase spectator={!isAlive} />}
+            {phase === "prompt" && <Prompt />}
             {(phase === "brain_test" || phase === "brain_test_results") && (
-              <BrainTestPhase spectator={!isAlive} />
+              <BrainTestPhase />
             )}
-            {phase === "matchup" && <MatchupPhase spectator={!isAlive} />}
-            {phase === "review" && <ReviewPhase spectator={!isAlive} />}
-            {phase === "elimination" && <Elimination />}
+            {phase === "matchup" && <MatchupPhase />}
             {phase === "game_over" && <GameOver />}
           </>
         )}

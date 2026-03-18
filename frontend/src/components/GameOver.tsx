@@ -6,7 +6,7 @@ import { createGame } from "@/api/actions";
 import { useRouter } from "next/navigation";
 
 export function GameOver() {
-  const { winner, winnerIds, revealedPlayers, playerId } = useGameStore();
+  const { winner, winnerIds, revealedPlayers, playerId, scores } = useGameStore();
   const router = useRouter();
 
   const handlePlayAgain = async () => {
@@ -14,32 +14,34 @@ export function GameOver() {
     router.push(`/game/${res.game_id}`);
   };
 
-  const isMachineWin = winner === "ai";
   const iAmWinner = winnerIds.includes(playerId ?? "");
 
-  // Sort: survivors (winners) first, then eliminated by round
+  // Sort by score descending
   const sorted = [...(revealedPlayers || [])].sort(
-    (a, b) => {
-      if (a.is_alive && !b.is_alive) return -1;
-      if (!a.is_alive && b.is_alive) return 1;
-      if (!a.is_alive && !b.is_alive)
-        return (a.eliminated_round || 0) - (b.eliminated_round || 0);
-      return 0;
-    },
+    (a, b) => (b.score ?? 0) - (a.score ?? 0),
   );
 
   const totalPlayers = sorted.length;
+  const topScore = sorted[0]?.score ?? 0;
 
-  // Headline
+  // Headline based on score
   let headline: string;
-  if (isMachineWin) {
-    headline = "THE MACHINES WIN";
+  if (winnerIds.length === 0) {
+    headline = "GAME OVER";
+  } else if (iAmWinner) {
+    headline = "YOU WIN";
   } else if (winnerIds.length === 1) {
     const winnerPlayer = revealedPlayers?.find(p => p.id === winnerIds[0]);
-    headline = iAmWinner ? "YOU SURVIVE" : `${winnerPlayer?.alias ?? "UNKNOWN"} SURVIVES`;
+    headline = `${winnerPlayer?.alias ?? "UNKNOWN"} WINS`;
   } else {
-    headline = iAmWinner ? "YOU SURVIVE" : "SURVIVORS";
+    headline = "TIE";
   }
+
+  // Check if the winner is AI for dramatic effect
+  const winnerPlayer = winnerIds.length === 1
+    ? revealedPlayers?.find(p => p.id === winnerIds[0])
+    : null;
+  const isMachineWin = winnerPlayer?.role === "ai";
 
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-10">
@@ -54,22 +56,32 @@ export function GameOver() {
         {headline}
       </p>
 
-      <div className="flex flex-col gap-3">
+      {/* Scoreboard with role reveal */}
+      <div className="flex flex-col gap-3 w-full max-w-md">
         {sorted.map((p, i) => {
           const isWinner = winnerIds.includes(p.id);
+          const playerScore = p.score ?? scores[p.id] ?? 0;
           return (
             <div
               key={p.id}
               className="flex items-center gap-4 min-h-[44px] animate-fade-in"
               style={{ animationDelay: `${(i * 400) + 1000}ms` }}
             >
+              {/* Rank */}
+              <span className="font-system text-[0.7rem] text-dim w-6 text-right">
+                {i + 1}.
+              </span>
+
+              {/* Alias */}
               <span
                 className={`w-28 font-system text-[0.8rem] tracking-[0.1em] uppercase ${
-                  isWinner ? 'text-warm' : p.is_alive ? 'text-ink' : 'text-dim line-through'
+                  isWinner ? 'text-warm' : 'text-ink'
                 }`}
               >
                 {p.alias}
               </span>
+
+              {/* Role */}
               <span
                 className={`font-system text-[0.8rem] tracking-wider uppercase ${
                   p.role === 'human' ? 'text-warm glow-warm' : 'text-cold glow-cold'
@@ -77,16 +89,13 @@ export function GameOver() {
               >
                 {p.role}
               </span>
-              {!p.is_alive && (
-                <span className="font-system text-[0.65rem] text-dim tracking-wide">
-                  R{p.eliminated_round}
-                </span>
-              )}
-              {isWinner && (
-                <span className="font-system text-[0.65rem] text-warm tracking-wide uppercase">
-                  survived
-                </span>
-              )}
+
+              {/* Score */}
+              <span className={`ml-auto font-system text-[0.8rem] tracking-wider ${
+                isWinner ? 'text-warm' : 'text-ink'
+              }`}>
+                {playerScore} pt{playerScore !== 1 ? "s" : ""}
+              </span>
             </div>
           );
         })}

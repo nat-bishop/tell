@@ -7,8 +7,8 @@ import { SystemText } from "./SystemText";
 
 export function Lobby() {
   const { gameId, playerId, players, isHost } = useGameStore();
-  const playerCount = players.filter((p) => p.is_alive).length;
-  const canStart = playerCount >= 2;
+  const playerCount = players.length;
+  const canStart = playerCount >= 1;
 
   const [aiCount, setAiCount] = useState(2);
   const [copied, setCopied] = useState(false);

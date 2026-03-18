@@ -16,7 +16,7 @@ const robotJustification: Record<string, string> = {
   emotional_task: "emotional response templates loaded.",
 };
 
-export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
+export function Prompt() {
   const {
     gameId,
     playerId,
@@ -103,11 +103,7 @@ export function Prompt({ readOnly = false }: { readOnly?: boolean }) {
         </div>
       )}
 
-      {readOnly ? (
-        <SystemText>
-          {answerCount} of {totalCount} answered
-        </SystemText>
-      ) : isReading ? (
+      {isReading ? (
         /* Reading period — prompt visible, no input */
         null
       ) : !hasSubmitted ? (

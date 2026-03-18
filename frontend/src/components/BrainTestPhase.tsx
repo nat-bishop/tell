@@ -5,7 +5,7 @@ import { useGameStore } from "@/hooks/useGameStore";
 import { submitBrainTestAnswer } from "@/api/actions";
 import { SystemText } from "./SystemText";
 
-export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
+export function BrainTestPhase() {
   const {
     gameId,
     playerId,
@@ -16,6 +16,7 @@ export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
     brainTestResults,
     players,
     phase,
+    scores,
   } = useGameStore();
 
   const [submitted, setSubmitted] = useState<Record<number, number>>({});
@@ -38,17 +39,15 @@ export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
   }
 
   const brainTestScores = useGameStore((s) => s.brainTestScores);
-  const brainTestWinnerId = useGameStore((s) => s.brainTestWinnerId);
-  const brainTestWinnerAlias = useGameStore((s) => s.brainTestWinnerAlias);
-  const brainTestAbilityAwarded = useGameStore((s) => s.brainTestAbilityAwarded);
 
   // Results view (brain_test_results phase)
   if (phase === "brain_test_results" && brainTestResults) {
-    const abilityLabel = brainTestAbilityAwarded === "partial_scan"
-      ? "PARTIAL SCAN"
-      : brainTestAbilityAwarded === "double_vote"
-        ? "DOUBLE VOTE"
-        : brainTestAbilityAwarded;
+    // Sort by score descending
+    const sortedEntries = Object.entries(brainTestResults).sort(([aId], [bId]) => {
+      const aScore = brainTestScores?.[aId] ?? 0;
+      const bScore = brainTestScores?.[bId] ?? 0;
+      return bScore - aScore;
+    });
 
     return (
       <div className="flex flex-col gap-6 pt-4">
@@ -57,19 +56,17 @@ export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
         </p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {Object.entries(brainTestResults).map(([pid, answers]) => {
-            const isWinner = pid === brainTestWinnerId;
+          {sortedEntries.map(([pid, answers]) => {
             const score = brainTestScores?.[pid] ?? 0;
+            const runningScore = scores[pid] ?? 0;
             return (
-              <div key={pid} className={`card p-4 ${isWinner ? "border-warm/50" : ""}`}>
+              <div key={pid} className="card p-4">
                 <div className="flex items-baseline justify-between mb-3">
                   <p className="font-literary-sc text-[0.8rem] text-dim tracking-wide uppercase">
                     {aliasById[pid] || pid}
                   </p>
-                  <span className={`font-system text-[0.7rem] tracking-wider ${
-                    isWinner ? "text-warm" : "text-cold"
-                  }`}>
-                    {score} pt{score !== 1 ? "s" : ""}
+                  <span className="font-system text-[0.7rem] tracking-wider text-cold">
+                    +{score} ({runningScore} total)
                   </span>
                 </div>
                 <div className="flex flex-col gap-2">
@@ -92,26 +89,13 @@ export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
                     );
                   })}
                 </div>
-                {isWinner && (
-                  <p className="mt-2 font-system text-[0.6rem] text-warm tracking-wider uppercase">
-                    winner
-                  </p>
-                )}
               </div>
             );
           })}
         </div>
 
-        {brainTestWinnerAlias && abilityLabel && (
-          <div className="animate-fade-in text-center">
-            <p className="font-system text-[0.7rem] text-cold tracking-[0.15em] uppercase">
-              {brainTestWinnerAlias} earns {abilityLabel}
-            </p>
-          </div>
-        )}
-
         <SystemText>
-          this evidence carries forward to the next vote
+          scores updated
         </SystemText>
       </div>
     );
@@ -138,7 +122,7 @@ export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
         </p>
       )}
 
-      {!spectator && brainTestQuestion && brainTestOptions.length > 0 && (
+      {brainTestQuestion && brainTestOptions.length > 0 && (
         <>
           {alreadySubmitted ? (
             <div className="w-full max-w-sm flex flex-col gap-2">
@@ -172,10 +156,6 @@ export function BrainTestPhase({ spectator = false }: { spectator?: boolean }) {
             </div>
           )}
         </>
-      )}
-
-      {spectator && brainTestQuestion && (
-        <SystemText>challenge in progress</SystemText>
       )}
     </div>
   );

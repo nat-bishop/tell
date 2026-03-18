@@ -97,24 +97,12 @@ def mock_llm():
     """Patch LLM agent functions used in transitions."""
     with (
         patch(
-            "backend.llm.agents.synthesize_questions",
-            new_callable=AsyncMock,
-            return_value="Synthesized question paragraph",
-        ) as mock_synth,
-        patch(
-            "backend.llm.agents.generate_verdict",
-            new_callable=AsyncMock,
-            return_value="A dramatic verdict.",
-        ) as mock_verdict,
-        patch(
             "backend.llm.agents.generate_narration",
             new_callable=AsyncMock,
             return_value=(None, []),
         ) as mock_narration,
     ):
         yield {
-            "synthesize_questions": mock_synth,
-            "generate_verdict": mock_verdict,
             "generate_narration": mock_narration,
         }
 

@@ -46,20 +46,8 @@ class Settings:
         self.prompt_reading_duration: int = int(
             os.environ.get("TELL_PROMPT_READING_DURATION", game.get("prompt_reading_duration", 10))
         )
-        self.question_duration: int = int(
-            os.environ.get("TELL_QUESTION_DURATION", game.get("question_duration", 25))
-        )
-        self.respond_duration: int = int(
-            os.environ.get("TELL_RESPOND_DURATION", game.get("respond_duration", 30))
-        )
         self.review_duration: int = int(
             os.environ.get("TELL_REVIEW_DURATION", game.get("review_duration", 40))
-        )
-        self.nominate_duration: int = int(
-            os.environ.get("TELL_NOMINATE_DURATION", game.get("nominate_duration", 15))
-        )
-        self.elimination_duration: int = int(
-            os.environ.get("TELL_ELIMINATION_DURATION", game.get("elimination_duration", 8))
         )
         self.brain_test_duration: int = int(
             os.environ.get("TELL_BRAIN_TEST_DURATION", game.get("brain_test_duration", 75))
@@ -96,19 +84,14 @@ class Settings:
         )
 
         # Player limits
-        self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))
+        self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 1)))
         self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 10)))
         self.min_ai: int = int(os.environ.get("TELL_MIN_AI", game.get("min_ai", 1)))
         self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 3)))
 
-        # Discussion AI
-        self.discussion_buffer_delay: float = float(
-            os.environ.get("TELL_DISCUSSION_BUFFER_DELAY", game.get("discussion_buffer_delay", 1.5))
-        )
-        self.discussion_react_cooldown: float = float(
-            os.environ.get(
-                "TELL_DISCUSSION_REACT_COOLDOWN", game.get("discussion_react_cooldown", 5.0)
-            )
+        # Game length
+        self.total_rounds: int = int(
+            os.environ.get("TELL_TOTAL_ROUNDS", game.get("total_rounds", 5))
         )
 
         # Recording

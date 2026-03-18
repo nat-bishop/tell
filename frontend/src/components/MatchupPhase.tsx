@@ -5,7 +5,7 @@ import { useGameStore } from "@/hooks/useGameStore";
 import { submitMatchupVote } from "@/api/actions";
 import { SystemText } from "./SystemText";
 
-export function MatchupPhase({ spectator = false }: { spectator?: boolean }) {
+export function MatchupPhase() {
   const {
     gameId,
     playerId,
@@ -35,13 +35,13 @@ export function MatchupPhase({ spectator = false }: { spectator?: boolean }) {
 
   // Am I in this matchup pair?
   const isInPair = playerId === matchupLeftId || playerId === matchupRightId;
-  const canVote = !spectator && !isInPair;
+  const canVote = !isInPair;
 
   const totalMatchups = matchups?.length ?? 0;
 
   const handleVote = useCallback(
     (choice: number) => {
-      if (!gameId || !playerId || isInPair || spectator) return;
+      if (!gameId || !playerId || isInPair) return;
 
       setVoted((prev) => ({ ...prev, [matchupIndex]: choice }));
       useGameStore.setState({ matchupMyVote: choice });
@@ -51,7 +51,7 @@ export function MatchupPhase({ spectator = false }: { spectator?: boolean }) {
         submitMatchupVote(gameId, playerId, matchupIndex, choice).catch(() => {});
       }, 300);
     },
-    [gameId, playerId, matchupIndex, isInPair, spectator],
+    [gameId, playerId, matchupIndex, isInPair],
   );
 
   useEffect(() => {
@@ -154,9 +154,6 @@ export function MatchupPhase({ spectator = false }: { spectator?: boolean }) {
         <p className="font-system text-[0.65rem] text-dim tracking-wider uppercase">
           your matchup &mdash; others are voting
         </p>
-      )}
-      {spectator && (
-        <SystemText>matchup in progress</SystemText>
       )}
     </div>
   );

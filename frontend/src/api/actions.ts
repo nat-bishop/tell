@@ -47,61 +47,6 @@ export function submitAnswer(
   });
 }
 
-export function submitQuestion(
-  gameId: string,
-  playerId: string,
-  question: string,
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/question`, {
-    method: "POST",
-    body: JSON.stringify({ player_id: playerId, question }),
-  });
-}
-
-export function submitResponse(
-  gameId: string,
-  playerId: string,
-  response: string,
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/respond`, {
-    method: "POST",
-    body: JSON.stringify({ player_id: playerId, response }),
-  });
-}
-
-export function nominate(
-  gameId: string,
-  playerId: string,
-  targetId: string,
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/nominate`, {
-    method: "POST",
-    body: JSON.stringify({ player_id: playerId, target_id: targetId }),
-  });
-}
-
-export function castVote(
-  gameId: string,
-  playerId: string,
-  targetIds: string[],
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/vote`, {
-    method: "POST",
-    body: JSON.stringify({ player_id: playerId, target_ids: targetIds }),
-  });
-}
-
-export function castComedyVote(
-  gameId: string,
-  playerId: string,
-  targetId: string,
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/comedy-vote`, {
-    method: "POST",
-    body: JSON.stringify({ player_id: playerId, target_id: targetId }),
-  });
-}
-
 export function submitBrainTestAnswer(
   gameId: string,
   playerId: string,
@@ -131,17 +76,6 @@ export function submitMatchupVote(
       matchup_index: matchupIndex,
       choice,
     }),
-  });
-}
-
-export function sendDiscussionMessage(
-  gameId: string,
-  playerId: string,
-  message: string,
-): Promise<void> {
-  return apiFetch(`/games/${gameId}/discussion-message`, {
-    method: "POST",
-    body: JSON.stringify({ player_id: playerId, message }),
   });
 }
 

@@ -3,9 +3,9 @@
 import { useGameStore } from "@/hooks/useGameStore";
 
 export function PlayerBar() {
-  const { players, phase, myVotes, roundNumber, activeAbilityHolder, activeAbilityType } = useGameStore();
+  const { players, phase, roundNumber, scores } = useGameStore();
 
-  if (phase === "lobby" || phase === "game_over" || phase === "elimination") return null;
+  if (phase === "lobby" || phase === "game_over") return null;
 
   return (
     <div
@@ -19,33 +19,22 @@ export function PlayerBar() {
         r{roundNumber}
       </span>
 
-      {players.map((p) => (
-        <div key={p.id} className="flex items-center gap-1.5">
-          <span
-            className={`inline-block w-1.5 h-1.5 rounded-full transition-all duration-300 ${
-              p.is_alive ? "bg-cold" : "bg-rule"
-            }`}
-          />
-          <span
-            className={`font-system text-[0.65rem] tracking-[0.1em] uppercase transition-all duration-300 ${
-              p.is_alive ? "text-ink" : "text-dim line-through"
-            }`}
-          >
-            {p.alias}
-          </span>
-          {phase === "review" && myVotes.includes(p.id) && (
-            <span
-              className="inline-block w-1.5 h-1.5 rounded-full bg-warm"
-              style={{ boxShadow: '0 0 6px var(--warm)' }}
-            />
-          )}
-          {activeAbilityHolder === p.id && activeAbilityType === "double_vote" && (
-            <span className="font-system text-[0.5rem] text-cold tracking-wider" title="Double Vote">
-              2x
+      {players.map((p) => {
+        const playerScore = scores[p.id] ?? 0;
+        return (
+          <div key={p.id} className="flex items-center gap-1.5">
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-cold" />
+            <span className="font-system text-[0.65rem] tracking-[0.1em] uppercase text-ink">
+              {p.alias}
             </span>
-          )}
-        </div>
-      ))}
+            {playerScore > 0 && (
+              <span className="font-system text-[0.55rem] text-warm tracking-wider">
+                {playerScore}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

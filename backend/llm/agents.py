@@ -1,11 +1,9 @@
-"""AI player agent — generates answers, questions, responses,
-votes, nominations, synthesis, and verdicts.
+"""AI player agent — generates answers, votes, brain test answers, and narration.
 
 Two agent tiers:
   Character agents (ai_agent, narrator_agent) — personality-driven, maintain
   message history across a game.
-  Utility agents (synthesis, verdict, association, brain_test) — stateless
-  one-shot calls with fixed purpose.
+  Utility agents (brain_test) — stateless one-shot calls with fixed purpose.
 """
 
 from __future__ import annotations
@@ -24,11 +22,7 @@ from pydantic_ai.messages import ModelMessage
 from backend.api.deps import get_settings
 from backend.llm.personalities import Personality
 from backend.llm.prompts import (
-    COORDINATOR_SYSTEM_PROMPT,
     NARRATOR_SYSTEM_PROMPT,
-    SYNTHESIS_SYSTEM_PROMPT,
-    VERDICT_SYSTEM_PROMPT,
-    build_coordinator_prompt,
     build_system_prompt,
 )
 from schemas.game_state import RoundType
@@ -52,13 +46,7 @@ class AIPlayerDeps:
     alive_players: list[str]  # list of aliases
     round_number: int
     round_type: RoundType = RoundType.TASK
-    assigned_target: str | None = None  # alias of assigned target
     my_answer: str | None = None
-    questions: list[dict] | None = None  # [{target_alias, question, response}]
-    # Interrogation-specific
-    nominated_alias: str | None = None
-    synthesis: str | None = None
-    hot_seat_response: str | None = None
     # Action-specific context injected by the caller
     action_prompt: str = ""
 
@@ -68,25 +56,10 @@ class AIPlayerDeps:
 # ---------------------------------------------------------------------------
 
 
-class NominationResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    target_alias: str = Field(description="Alias of the player you nominate (e.g. UNIT-7)")
-    reasoning: str = Field(description="Brief reasoning (1 sentence)")
-
-    @field_validator("target_alias")
-    @classmethod
-    def check_alias(cls, v: str, info: ValidationInfo) -> str:
-        valid = info.context
-        if valid and v not in valid:
-            raise ValueError(f"'{v}' not valid. Choose from: {', '.join(valid)}")
-        return v
-
-
 class VoteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    targets: list[str] = Field(description="Player aliases you suspect are human")
+    targets: list[str] = Field(description="Player aliases you think sound most human")
     reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
     @field_validator("targets")
@@ -132,31 +105,11 @@ def _build_instructions(ctx: RunContext[AIPlayerDeps]) -> str:
 # Utility agents — stateless one-shot calls
 # ---------------------------------------------------------------------------
 
-synthesis_agent: Agent[None, str] = Agent(
-    output_type=str,
-    retries=1,
-    instructions=SYNTHESIS_SYSTEM_PROMPT,
-    model_settings={"max_tokens": 300},
-)
-
-verdict_agent: Agent[None, str] = Agent(
-    output_type=str,
-    retries=1,
-    instructions=VERDICT_SYSTEM_PROMPT,
-    model_settings={"max_tokens": 100},
-)
-
 brain_test_agent: Agent[None, str] = Agent(
     output_type=str,
     retries=1,
     instructions="Pick the best option. Reply with ONLY the number (0, 1, 2, or 3).",
     model_settings={"max_tokens": 10},
-)
-
-discussion_coordinator: Agent[None, str] = Agent(
-    output_type=str,
-    retries=1,
-    model_settings={"max_tokens": 20},
 )
 
 
@@ -252,62 +205,15 @@ async def generate_answer(
         return deps.personality.fallback_response, message_history or []
 
 
-async def generate_question(
-    deps: AIPlayerDeps,
-    message_history: list[ModelMessage] | None = None,
-) -> tuple[str, list[ModelMessage]]:
-    """Generate a follow-up question about another player's answer."""
-    try:
-        return await _run_ai_agent(deps, "question", message_history)
-    except Exception:
-        return deps.personality.fallback_response, message_history or []
-
-
-async def generate_question_response(
-    deps: AIPlayerDeps,
-    question: str,
-    message_history: list[ModelMessage] | None = None,
-) -> tuple[str, list[ModelMessage]]:
-    """Respond to an anonymous question about your answer."""
-    try:
-        return await _run_ai_agent(deps, "response", message_history)
-    except Exception:
-        return deps.personality.fallback_response, message_history or []
-
-
-async def generate_nomination(
-    deps: AIPlayerDeps,
-    message_history: list[ModelMessage] | None = None,
-) -> tuple[str, list[ModelMessage]]:
-    """Pick a player to nominate for the hot seat (Interrogation)."""
-    other_players = [a for a in deps.alive_players if a != deps.player_alias]
-    if not other_players:
-        alias = deps.alive_players[0] if deps.alive_players else ""
-        return alias, message_history or []
-    try:
-        output, messages = await _run_ai_agent(
-            deps,
-            "nomination",
-            message_history,
-            output_type=NominationResponse,
-        )
-        return output.target_alias, messages
-    except Exception:
-        return random.choice(other_players), message_history or []
-
-
 async def decide_vote(
     deps: AIPlayerDeps,
     message_history: list[ModelMessage] | None = None,
 ) -> tuple[list[str], list[ModelMessage]]:
-    """Decide who to vote for. Returns list of target aliases (up to max_votes)."""
+    """Decide who to vote for in a matchup. Returns list of target aliases."""
     other_players = [a for a in deps.alive_players if a != deps.player_alias]
     if not other_players:
         return [], message_history or []
 
-    from backend.services.game_logic import max_votes_for_player
-
-    max_v = max_votes_for_player(len(deps.alive_players))
     try:
         output, messages = await _run_ai_agent(
             deps,
@@ -315,77 +221,15 @@ async def decide_vote(
             message_history,
             output_type=VoteResponse,
         )
-        return output.targets[:max_v], messages
+        return output.targets, messages
     except Exception:
-        picks = random.sample(other_players, min(max_v, len(other_players)))
+        picks = random.sample(other_players, min(1, len(other_players)))
         return picks, message_history or []
-
-
-async def generate_discussion_message(
-    deps: AIPlayerDeps,
-    message_history: list[ModelMessage] | None = None,
-) -> tuple[str, list[ModelMessage]]:
-    """Generate a discussion chat message in character."""
-    try:
-        output, messages = await _run_ai_agent(deps, "discussion", message_history)
-        return output[:100], messages
-    except Exception:
-        return "", message_history or []
 
 
 # ---------------------------------------------------------------------------
 # Utility-agent generators (no personality, no history)
 # ---------------------------------------------------------------------------
-
-
-async def synthesize_questions(
-    questions: list[str],
-    target_alias: str,
-    target_answer: str,
-    prompt_text: str,
-    *,
-    game_id: str | None = None,
-) -> str:
-    """Synthesize multiple questions into one cross-examination paragraph."""
-    if not questions:
-        return f"The group had no questions for {target_alias}."
-
-    questions_formatted = "\n".join(f"- {q}" for q in questions)
-    user_prompt = (
-        f'The prompt was: "{prompt_text}"\n'
-        f'{target_alias} answered: "{target_answer}"\n\n'
-        f"Questions from the group:\n{questions_formatted}"
-    )
-
-    result = await _run_system_call(synthesis_agent, user_prompt, timeout=5.0, game_id=game_id)
-    if result:
-        return result
-
-    # Fallback: numbered list
-    return "The group asks:\n" + "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
-
-
-async def generate_verdict(
-    alias: str,
-    was_human: bool,
-    prompt_text: str,
-    answer: str,
-    vote_count: int,
-    round_number: int,
-    *,
-    game_id: str | None = None,
-) -> str | None:
-    """Generate a one-line dramatic verdict summary after elimination."""
-    role = "human" if was_human else "AI"
-
-    user_prompt = (
-        f"{alias} was revealed as {role}.\n"
-        f'The prompt was: "{prompt_text}"\n'
-        f'Their answer: "{answer}"\n'
-        f"They received {vote_count} votes in round {round_number}."
-    )
-
-    return await _run_system_call(verdict_agent, user_prompt, timeout=3.0, game_id=game_id)
 
 
 async def generate_brain_test_answer(
@@ -413,31 +257,6 @@ async def generate_brain_test_answer(
     return random.randint(0, len(options) - 1)
 
 
-async def decide_discussion_responder(
-    chat_so_far: list[dict],
-    eligible_characters: list[dict],
-    latest_message: dict,
-    *,
-    game_id: str | None = None,
-) -> str | None:
-    """Decide which AI character should respond. Returns alias or None."""
-    prompt = build_coordinator_prompt(chat_so_far, eligible_characters, latest_message)
-    result = await _run_system_call(
-        discussion_coordinator,
-        prompt,
-        timeout=1.0,
-        game_id=game_id,
-        instructions=COORDINATOR_SYSTEM_PROMPT,
-    )
-    if not result:
-        return None
-    alias = result.strip()
-    valid_aliases = {c["alias"] for c in eligible_characters}
-    if alias in valid_aliases:
-        return alias
-    return None
-
-
 async def generate_narration(
     trigger: str,
     context: str,
@@ -450,7 +269,7 @@ async def generate_narration(
     Returns (text, updated_history). Text is None on timeout/failure.
     """
     settings = get_settings()
-    timeout = 5.0 if trigger in ("game_over", "verdict") else 3.0
+    timeout = 5.0 if trigger == "game_over" else 3.0
     log.info("llm_narrator_call_start", trigger=trigger, game_id=game_id)
     try:
         result = await asyncio.wait_for(

@@ -4,24 +4,15 @@ import type {
   PlayerEventData,
   PhaseChangedData,
   CountData,
-  VoteResultsData,
-  EliminationData,
   GameOverData,
   SeqData,
   HostChangedData,
-  NominatedData,
-  ResponseSubmittedData,
-  SynthesisReadyData,
-  VerdictData,
   NarrationData,
-  ComedyWinnerData,
   BrainTestChallengeData,
   BrainTestResultsData,
-  DiscussionMessageData,
-  AbilityAwardedData,
-  ScanResultData,
   MatchupChallengeData,
   MatchupResultsData,
+  FinalRevealData,
 } from "@/hooks/useGameStore";
 
 export interface GameEventCallbacks {
@@ -31,27 +22,15 @@ export interface GameEventCallbacks {
   onPlayerReconnected: (data: PlayerEventData) => void;
   onPhaseChanged: (data: PhaseChangedData) => void;
   onAnswerSubmitted: (data: CountData) => void;
-  onVoteCast: (data: CountData) => void;
-  onVoteResults: (data: VoteResultsData) => void;
-  onElimination: (data: EliminationData) => void;
   onGameOver: (data: GameOverData) => void;
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
-  onNominationCast: (data: CountData) => void;
-  onNominated: (data: NominatedData) => void;
-  onQuestionSubmitted: (data: CountData) => void;
-  onResponseSubmitted: (data: ResponseSubmittedData) => void;
-  onSynthesisReady: (data: SynthesisReadyData) => void;
-  onVerdict: (data: VerdictData) => void;
   onNarration: (data: NarrationData) => void;
-  onComedyWinner: (data: ComedyWinnerData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
   onBrainTestResults: (data: BrainTestResultsData) => void;
-  onDiscussionMessage: (data: DiscussionMessageData) => void;
-  onAbilityAwarded: (data: AbilityAwardedData) => void;
-  onScanResult: (data: ScanResultData) => void;
   onMatchupChallenge: (data: MatchupChallengeData) => void;
   onMatchupResults: (data: MatchupResultsData) => void;
+  onFinalReveal: (data: FinalRevealData) => void;
   onOpen: () => void;
   onError: () => void;
 }
@@ -73,27 +52,15 @@ export function connectGameEvents(
     player_reconnected: callbacks.onPlayerReconnected,
     phase_changed: callbacks.onPhaseChanged,
     answer_submitted: callbacks.onAnswerSubmitted,
-    vote_cast: callbacks.onVoteCast,
-    vote_results: callbacks.onVoteResults,
-    elimination: callbacks.onElimination,
     game_over: callbacks.onGameOver,
     timer_tick: callbacks.onTimerTick,
     host_changed: callbacks.onHostChanged,
-    nomination_cast: callbacks.onNominationCast,
-    nominated: callbacks.onNominated,
-    question_submitted: callbacks.onQuestionSubmitted,
-    response_submitted: callbacks.onResponseSubmitted,
-    synthesis_ready: callbacks.onSynthesisReady,
-    verdict: callbacks.onVerdict,
     narration: callbacks.onNarration,
-    comedy_winner: callbacks.onComedyWinner,
     brain_test_challenge: callbacks.onBrainTestChallenge,
     brain_test_results: callbacks.onBrainTestResults,
-    discussion_message: callbacks.onDiscussionMessage,
-    ability_awarded: callbacks.onAbilityAwarded,
-    scan_result: callbacks.onScanResult,
     matchup_challenge: callbacks.onMatchupChallenge,
     matchup_results: callbacks.onMatchupResults,
+    final_reveal: callbacks.onFinalReveal,
   };
 
   for (const [eventType, handler] of Object.entries(eventMap)) {

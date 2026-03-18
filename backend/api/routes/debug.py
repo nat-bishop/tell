@@ -54,7 +54,7 @@ async def seed_game(req: SeedGameRequest):
     if req.trigger_ai and active_phase:
         from backend.services.ai_scheduler import assign_personalities, on_phase_change
 
-        ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI and p.is_alive]
+        ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI]
         if ai_player_ids:
             assign_personalities(game_id, ai_player_ids)
             await on_phase_change(game_id, state.phase)

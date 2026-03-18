@@ -6,8 +6,9 @@ import pytest
 
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
-    CastVoteRequest,
+    FinalRevealEvent,
     PlayerJoinedEvent,
+    SubmitMatchupVoteRequest,
 )
 from schemas.game_state import (
     GamePhase,
@@ -86,14 +87,13 @@ class TestModelDefaults:
         assert state.players == []
         assert state.current_round is None
         assert state.round_number == 0
-        assert state.max_rounds == 10
+        assert state.total_rounds == 5
 
     def test_player_defaults(self):
         player = Player(id="p1", alias="UNIT-1", role=PlayerRole.HUMAN)
-        assert player.is_alive is True
         assert player.is_connected is True
         assert player.is_host is False
-        assert player.eliminated_round is None
+        assert player.score == 0
 
     def test_round_state_defaults(self):
         rs = RoundState(
@@ -101,9 +101,7 @@ class TestModelDefaults:
         )
         assert rs.round_type == RoundType.TASK
         assert rs.answers == {}
-        assert rs.questions == []
-        assert rs.votes == {}
-        assert rs.nominated_id is None
+        assert rs.matchups == []
         assert rs.current_sub_round == 0
 
 
@@ -144,10 +142,33 @@ class TestEventSerialization:
         assert restored.event_type == "player_joined"
         assert restored.seq == 1
 
-    def test_request_validation(self):
-        req = CastVoteRequest(player_id="p1", target_ids=["t1", "t2"])
-        assert req.target_ids == ["t1", "t2"]
+    def test_matchup_vote_request_validation(self):
+        req = SubmitMatchupVoteRequest(player_id="p1", matchup_index=0, choice=1)
+        assert req.choice == 1
 
         with pytest.raises(ValueError):
             # Missing required field
-            CastVoteRequest(target_ids=["t1"])
+            SubmitMatchupVoteRequest(matchup_index=0, choice=1)
+
+    def test_final_reveal_event(self):
+        event = FinalRevealEvent(
+            seq=1,
+            players=[
+                {"id": "h1", "alias": "UNIT-01", "role": "human", "score": 3},
+                {"id": "a1", "alias": "CORE-07", "role": "ai", "score": 1},
+            ],
+            winner_ids=["h1"],
+            narrator_text="A dramatic conclusion.",
+        )
+        assert event.event_type == "final_reveal"
+        assert len(event.players) == 2
+        assert event.winner_ids == ["h1"]
+        assert event.narrator_text == "A dramatic conclusion."
+
+    def test_final_reveal_event_no_narrator(self):
+        event = FinalRevealEvent(
+            seq=1,
+            players=[],
+            winner_ids=[],
+        )
+        assert event.narrator_text is None

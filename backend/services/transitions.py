@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-import random
 import uuid
 
 import structlog
@@ -17,49 +16,30 @@ from backend.api.deps import (
 )
 from backend.services.game_logic import (
     check_game_over,
-    determine_challenge_winner,
     fill_missing_answers,
-    fill_missing_responses,
-    get_alive_players,
     get_interstitial_hold,
     get_next_round_type,
     get_phase_duration,
     get_player_by_id,
     make_game_over_event,
     make_phase_changed_event,
-    resolve_comedy_votes,
     resolve_matchup_votes,
-    resolve_nominations,
-    resolve_votes,
     score_brain_test,
     transition_to_brain_test,
     transition_to_brain_test_results,
-    transition_to_elimination,
     transition_to_matchup,
-    transition_to_nominate,
-    transition_to_prompt,
-    transition_to_question,
-    transition_to_respond,
-    transition_to_review,
     transition_to_task_matchup_prompt,
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
-    AbilityAwardedEvent,
     BrainTestChallengeEvent,
     BrainTestResultsEvent,
-    ComedyWinnerEvent,
+    FinalRevealEvent,
     MatchupChallengeEvent,
     NarrationEvent,
-    NominatedEvent,
     PlayerJoinedEvent,
-    ScanResultEvent,
-    SynthesisReadyEvent,
-    VerdictEvent,
 )
-from schemas.constants import MISSING_ALIAS
 from schemas.game_state import (
-    ActiveAbility,
     GamePhase,
     NarratorEntry,
     Player,
@@ -75,16 +55,11 @@ def _build_narrator_context(state) -> str:
     parts: list[str] = []
     n_players = len(state.players)
     rnd = state.round_number
-    parts.append(f"Game: {n_players} players, round {rnd}.")
+    parts.append(f"Game: {n_players} players, round {rnd} of {state.total_rounds}.")
 
-    alive = [p for p in state.players if p.is_alive]
-    eliminated = [p for p in state.players if not p.is_alive]
-    parts.append(f"Alive: {', '.join(p.alias for p in alive)} ({len(alive)} total).")
-
-    if eliminated:
-        for p in eliminated:
-            role = p.role.value
-            parts.append(f"Eliminated R{p.eliminated_round}: {p.alias} ({role}).")
+    # Score context
+    score_parts = [f"{p.alias}: {p.score}" for p in state.players]
+    parts.append(f"Scores: {', '.join(score_parts)}.")
 
     rs = state.current_round
     if rs:
@@ -182,23 +157,6 @@ def _make_event(state, session, settings, **extra):
     return make_phase_changed_event(state, session.next_seq(), phase_duration=pd, **extra)
 
 
-def _compute_review_timestamps(
-    state,
-    review_duration: int,
-) -> dict[str, str]:
-    """Compute discuss_starts_at and vote_starts_at for REVIEW sub-phases."""
-    if not state.phase_deadline:
-        return {}
-    # Interstitial eats ~2s, then reveal 0-10s, discuss 10-33s, vote 33-55s
-    action_start = state.phase_deadline - dt.timedelta(seconds=review_duration)
-    discuss_starts_at = action_start + dt.timedelta(seconds=10)
-    vote_starts_at = action_start + dt.timedelta(seconds=33)
-    return {
-        "discuss_starts_at": discuss_starts_at.isoformat(),
-        "vote_starts_at": vote_starts_at.isoformat(),
-    }
-
-
 async def start_phase_timer(
     game_id: str, phase: GamePhase, round_type: RoundType | None = None
 ) -> None:
@@ -236,21 +194,10 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             fill_missing_answers(session.state)
             await do_prompt_complete(game_id, session)
 
-        elif expired_phase == GamePhase.NOMINATE:
-            await do_nominate_complete(game_id, session)
-
-        elif expired_phase == GamePhase.QUESTION:
-            await do_question_complete(game_id, session)
-
-        elif expired_phase == GamePhase.RESPOND:
-            fill_missing_responses(session.state)
-            await do_respond_complete(game_id, session)
-
         elif expired_phase == GamePhase.REVIEW:
-            await do_vote_resolution(game_id, session)
-
-        elif expired_phase == GamePhase.ELIMINATION:
-            await do_after_elimination(game_id, session)
+            # REVIEW timer expired — no votes to resolve in score-based model
+            # (review is informational only between matchup rounds)
+            pass
 
         elif expired_phase == GamePhase.MATCHUP:
             # Safety timer — resolve matchup votes
@@ -261,14 +208,12 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             await do_brain_test_complete(game_id, session)
 
         elif expired_phase == GamePhase.BRAIN_TEST_RESULTS:
-            # Results done — next round (no elimination)
+            # Results done — check game over or next round
             await do_after_brain_test(game_id, session)
 
 
 async def do_prompt_complete(game_id: str, session) -> None:
-    """PROMPT complete → depends on round type:
-    - TASK: straight to REVIEW
-    - INTERROGATION: NOMINATE
+    """PROMPT complete → TASK rounds go to MATCHUP.
 
     Assumes caller holds the game lock and has called fill_missing_answers.
     """
@@ -284,303 +229,209 @@ async def do_prompt_complete(game_id: str, session) -> None:
         "All answers are in. Comment briefly on what you notice.",
     )
 
-    if round_state and round_state.round_type == RoundType.TASK:
-        # Task rounds → MATCHUP (1v1 pair voting)
-        transition_to_matchup(state, settings.matchup_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                answers=round_state.answers,
-                round_type=round_state.round_type,
-            ),
-        )
-        await _trigger_ability_on_review(game_id, session)
-        next_phase = GamePhase.MATCHUP
-        # Start the matchup sub-round loop
-        await _start_matchup_loop(game_id, session)
-    else:
-        # Interrogation — proceed to nomination
-        assert round_state, "No active round in PROMPT phase"
-        transition_to_nominate(state, settings.nominate_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                answers=round_state.answers,
-                round_type=round_state.round_type,
-            ),
-        )
-        next_phase = GamePhase.NOMINATE
+    assert round_state, "No active round in PROMPT phase"
 
-    await start_phase_timer(game_id, next_phase)
-    await _notify_ai(game_id, next_phase)
-
-
-async def do_nominate_complete(game_id: str, session) -> None:
-    """NOMINATE complete → resolve nominations → QUESTION.
-
-    Assumes caller holds the game lock.
-    """
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-    round_state = state.current_round
-
-    if not round_state:
-        return
-
-    nominated_id = resolve_nominations(state)
-    round_state.nominated_id = nominated_id
-    nominated_player = get_player_by_id(state, nominated_id)
-    nominated_alias = nominated_player.alias if nominated_player else MISSING_ALIAS
-
-    await cm.broadcast(
-        game_id,
-        NominatedEvent(
-            seq=session.next_seq(),
-            nominated_id=nominated_id,
-            nominated_alias=nominated_alias,
-        ),
-    )
-
-    transition_to_question(state, settings.question_duration)
+    # Task rounds → MATCHUP (1v1 pair voting)
+    transition_to_matchup(state, settings.matchup_duration)
     await cm.broadcast(
         game_id,
         _make_event(
             state,
             session,
             settings,
+            answers=round_state.answers,
             round_type=round_state.round_type,
-            nominated_id=nominated_id,
         ),
     )
+    next_phase = GamePhase.MATCHUP
+    await start_phase_timer(game_id, next_phase)
+    # Notify AI *before* starting the matchup loop — on_phase_change calls
+    # cancel_all() which would kill the loop task if it were already registered.
+    await _notify_ai(game_id, next_phase)
+    # Start the matchup sub-round loop (registers its own task)
+    await _start_matchup_loop(game_id, session)
 
-    await start_phase_timer(game_id, GamePhase.QUESTION)
-    await _notify_ai(game_id, GamePhase.QUESTION)
 
-
-async def do_question_complete(game_id: str, session) -> None:
-    """QUESTION complete → RESPOND (with optional synthesis for interrogation).
+async def _do_game_over(game_id: str, session, state, winner, winner_ids) -> None:
+    """Shared game-over flow: narration → FinalRevealEvent → GameOverEvent.
 
     Assumes caller holds the game lock.
     """
     cm = get_connection_manager()
     settings = get_settings()
-    state = session.state
-    round_state = state.current_round
 
-    if round_state:
-        # Synthesize questions for the nominee
-        synthesis = None
-        if round_state.questions:
-            try:
-                from backend.llm.agents import synthesize_questions
+    log.info("game_over", winner=winner, winner_ids=winner_ids)
 
-                questions_text = [q.question for q in round_state.questions]
-                target_player = get_player_by_id(state, round_state.nominated_id)
-                target_alias = target_player.alias if target_player else MISSING_ALIAS
-                target_answer = round_state.answers.get(round_state.nominated_id, "")
-                synthesis = await synthesize_questions(
-                    questions_text,
-                    target_alias,
-                    target_answer,
-                    round_state.prompt_text,
-                    game_id=game_id,
-                )
-            except Exception:
-                log.exception("synthesis_failed", game_id=game_id)
-                questions_text = [q.question for q in round_state.questions]
-                synthesis = "The group asks:\n" + "\n".join(
-                    f"{i + 1}. {q}" for i, q in enumerate(questions_text)
-                )
+    # Fire narrator: game over wrap-up (non-blocking background task)
+    top_aliases = [p.alias for p in state.players if p.id in winner_ids]
+    narr_msg = (
+        f"The game is over. Winners: {', '.join(top_aliases)}. "
+        "Write a knockout wrap-up — "
+        "the story of this game in 1-2 sentences. Reference specific moments."
+    )
+    await _fire_narration(game_id, "game_over", narr_msg)
 
-        round_state.synthesis = synthesis
+    # Brief wait for narration to potentially resolve
+    await asyncio.sleep(1.5)
 
-        if synthesis:
-            await cm.broadcast(
-                game_id,
-                SynthesisReadyEvent(
-                    seq=session.next_seq(),
-                    synthesis=synthesis,
-                ),
-            )
+    # Grab latest narrator text (if narration resolved in time)
+    narrator_text = None
+    if state.narrator_context:
+        last_entry = state.narrator_context[-1]
+        if last_entry.trigger == "game_over":
+            narrator_text = last_entry.text
 
-        transition_to_respond(state, settings.respond_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                round_type=round_state.round_type,
-                synthesis=synthesis,
-                nominated_id=round_state.nominated_id,
-            ),
-        )
-
-    await start_phase_timer(game_id, GamePhase.RESPOND)
-    await _notify_ai(game_id, GamePhase.RESPOND)
-
-
-async def do_respond_complete(game_id: str, session) -> None:
-    """RESPOND complete → REVIEW.
-
-    Assumes caller holds the game lock and has called fill_missing_responses.
-    """
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-    round_state = state.current_round
-
-    transition_to_review(state, settings.review_duration)
-    review_ts = _compute_review_timestamps(state, settings.review_duration)
+    # Broadcast FinalRevealEvent with all players revealed
+    final_players = [
+        {
+            "id": p.id,
+            "alias": p.alias,
+            "role": p.role.value,
+            "score": p.score,
+        }
+        for p in state.players
+    ]
     await cm.broadcast(
         game_id,
-        _make_event(
-            state,
-            session,
-            settings,
-            round_type=round_state.round_type if round_state else None,
-            questions=[q.model_dump() for q in round_state.questions] if round_state else [],
-            synthesis=round_state.synthesis if round_state else None,
-            **review_ts,
+        FinalRevealEvent(
+            seq=session.next_seq(),
+            players=final_players,
+            winner_ids=winner_ids,
+            narrator_text=narrator_text,
         ),
     )
-    await _trigger_ability_on_review(game_id, session)
 
-    await start_phase_timer(game_id, GamePhase.REVIEW)
-    await _notify_ai(game_id, GamePhase.REVIEW)
+    # Set game over state
+    state.phase = GamePhase.GAME_OVER
+    state.winner = winner
+    state.winner_ids = winner_ids
+    state.phase_deadline = None
+    event = make_game_over_event(state, winner, winner_ids, session.next_seq)
+    await cm.broadcast(game_id, event)
+
+    if settings.record_games:
+        from backend.services.recorder import save_recording
+
+        save_recording(game_id, state, cm.pop_recording(game_id))
+    from backend.services.ai_scheduler import cleanup_game as ai_cleanup
+
+    ai_cleanup(game_id)
+    cm.cleanup_game(game_id)
 
 
-async def do_vote_resolution(game_id: str, session) -> None:
-    """REVIEW complete → resolve votes → generate verdict → ELIMINATION.
+async def do_matchup_complete(game_id: str, session) -> None:
+    """All matchup sub-rounds done → resolve votes → check game over or next round.
 
     Assumes caller holds the game lock.
     """
+    cm = get_connection_manager()
+    state = session.state
+
+    state, matchup_results_event = resolve_matchup_votes(state, session.next_seq)
+    await cm.broadcast(game_id, matchup_results_event)
+    log.info(
+        "matchup_resolved",
+        scores={p.id: p.score for p in state.players},
+    )
+
+    # Check game over
+    result = check_game_over(state)
+    if result:
+        winner, winner_ids = result
+        await _do_game_over(game_id, session, state, winner, winner_ids)
+        return
+
+    # Fire narrator: between rounds
+    await _fire_narration(
+        game_id,
+        "between_rounds",
+        "A round just ended. Comment on the state of play — scores, standout moments.",
+    )
+
+    await _start_next_round(game_id, session)
+
+
+async def do_brain_test_complete(game_id: str, session) -> None:
+    """Brain test challenges done → score, update player scores, show results."""
     cm = get_connection_manager()
     settings = get_settings()
     state = session.state
+    rs = state.current_round
+    if not rs:
+        return
 
-    state, vote_results, elimination = resolve_votes(state, session.next_seq)
-    await cm.broadcast(game_id, vote_results)
-    log.info(
-        "vote_resolved",
-        eliminated_alias=elimination.eliminated_alias,
-        was_human=elimination.was_human,
-    )
-
-    # Generate verdict
-    if elimination.eliminated_id and state.current_round:
-        try:
-            from backend.llm.agents import generate_verdict
-
-            round_state = state.current_round
-            verdict = await generate_verdict(
-                alias=elimination.eliminated_alias or MISSING_ALIAS,
-                was_human=elimination.was_human or False,
-                prompt_text=round_state.prompt_text,
-                answer=round_state.answers.get(elimination.eliminated_id, ""),
-                vote_count=elimination.vote_count,
-                round_number=round_state.round_number,
-                game_id=game_id,
+    # Build results: player_id -> list of {question, options, selected_index, correct_index, ...}
+    results: dict[str, list[dict]] = {}
+    for p in state.players:
+        player_results = []
+        for ch in rs.brain_challenges:
+            player_results.append(
+                {
+                    "question": ch.question,
+                    "options": ch.options,
+                    "selected_index": ch.responses.get(p.id, -1),
+                    "correct_index": ch.correct_index,
+                    "challenge_type": ch.challenge_type,
+                }
             )
-            if verdict:
-                round_state.verdict = verdict
-                await cm.broadcast(
-                    game_id,
-                    VerdictEvent(
-                        seq=session.next_seq(),
-                        verdict=verdict,
-                    ),
-                )
-        except Exception:
-            log.exception("verdict_generation_failed", game_id=game_id)
+        results[p.id] = player_results
 
-    # Resolve comedy votes
-    comedy_id, comedy_alias, comedy_count = resolve_comedy_votes(state)
-    if comedy_id and comedy_alias:
-        await cm.broadcast(
-            game_id,
-            ComedyWinnerEvent(
-                seq=session.next_seq(),
-                winner_id=comedy_id,
-                winner_alias=comedy_alias,
-                vote_count=comedy_count,
-            ),
-        )
+    # Score brain test
+    bt_scores = score_brain_test(rs.brain_challenges)
 
-    transition_to_elimination(state, settings.elimination_duration)
-    await cm.broadcast(game_id, elimination)
-    await start_phase_timer(game_id, GamePhase.ELIMINATION)
+    # Add brain test scores to each player's running total
+    for p in state.players:
+        p.score += bt_scores.get(p.id, 0)
 
+    # Build running total scores for the event
+    scores = {p.id: p.score for p in state.players}
 
-async def _trigger_ability_on_review(game_id: str, session) -> None:
-    """Fire passive ability when REVIEW or MATCHUP starts. Currently: PARTIAL SCAN.
-
-    Assumes caller holds the game lock.
-    """
-    cm = get_connection_manager()
-    state = session.state
-
-    if not state.active_ability or state.active_ability.ability_type != "partial_scan":
-        return
-
-    holder_id = state.active_ability.holder_id
-    alive = get_alive_players(state)
-    candidates = [p for p in alive if p.id != holder_id]
-
-    if len(candidates) < 2:
-        return
-
-    picked = random.sample(candidates, 2)
-    # Player A: true role. Player B: random role (50/50 correct).
-    result_a = {
-        "player_id": picked[0].id,
-        "alias": picked[0].alias,
-        "claimed_role": picked[0].role.value,
-    }
-    if random.random() < 0.5:
-        result_b_role = picked[1].role.value
-    else:
-        result_b_role = "human" if picked[1].role.value == "ai" else "ai"
-    result_b = {
-        "player_id": picked[1].id,
-        "alias": picked[1].alias,
-        "claimed_role": result_b_role,
-    }
-
-    # Shuffle so nobody knows which is verified
-    scan_results = [result_a, result_b]
-    random.shuffle(scan_results)
-
-    # Send only to the ability holder — not broadcast to all players
-    await cm.send_to(
+    await cm.broadcast(
         game_id,
-        holder_id,
-        ScanResultEvent(
+        BrainTestResultsEvent(
             seq=session.next_seq(),
-            results=scan_results,
+            results=results,
+            scores=scores,
         ),
     )
-    log.info("scan_triggered", game_id=game_id, holder=state.active_ability.holder_alias)
+
+    transition_to_brain_test_results(state, settings.brain_test_results_duration)
+    await cm.broadcast(
+        game_id,
+        _make_event(state, session, settings, round_type=RoundType.BRAIN_TEST),
+    )
+    await start_phase_timer(game_id, GamePhase.BRAIN_TEST_RESULTS)
+
+    # Fire narrator
+    await _fire_narration(
+        game_id,
+        "post_submissions",
+        "Brain test results are in. Comment on notable performances.",
+    )
+
+
+async def do_after_brain_test(game_id: str, session) -> None:
+    """Brain test results done → check game over or next round."""
+    state = session.state
+
+    # Check game over
+    result = check_game_over(state)
+    if result:
+        winner, winner_ids = result
+        await _do_game_over(game_id, session, state, winner, winner_ids)
+        return
+
+    await _start_next_round(game_id, session)
 
 
 async def _start_next_round(game_id: str, session) -> None:
-    """Route to the next round type — shared by post-elimination and post-brain-test.
+    """Route to the next round type — TASK or BRAIN_TEST.
 
     Assumes caller holds the game lock.
     """
     cm = get_connection_manager()
     settings = get_settings()
     state = session.state
-
-    # Clear ability from previous round
-    state.active_ability = None
 
     next_round_type = get_next_round_type(state)
     state.round_types.append(next_round_type)
@@ -629,231 +480,6 @@ async def _start_next_round(game_id: str, session) -> None:
         )
         await start_phase_timer(game_id, GamePhase.BRAIN_TEST)
         await _start_brain_test_loop(game_id, session)
-
-    else:
-        # INTERROGATION (default)
-        total = get_phase_duration(settings, GamePhase.PROMPT) or 55
-        transition_to_prompt(state, total, settings.prompt_reading_duration)
-        round_state = state.current_round
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                prompt_text=round_state.prompt_text if round_state else None,
-                prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else None,
-            ),
-        )
-        await start_phase_timer(game_id, GamePhase.PROMPT)
-        await _notify_ai(game_id, GamePhase.PROMPT)
-
-
-async def do_after_elimination(game_id: str, session) -> None:
-    """ELIMINATION complete → next round or GAME_OVER.
-
-    Assumes caller holds the game lock.
-    """
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-
-    result = check_game_over(state)
-    if result:
-        winner, winner_ids = result
-        log.info("game_over", winner=winner, winner_ids=winner_ids)
-        state.phase = GamePhase.GAME_OVER
-        state.winner = winner
-        state.winner_ids = winner_ids
-        state.phase_deadline = None
-        event = make_game_over_event(state, winner, winner_ids, session.next_seq)
-        await cm.broadcast(game_id, event)
-
-        # Fire narrator: game over wrap-up
-        if winner == "ai":
-            narr_msg = "The game is over. THE MACHINES WIN. Write a knockout wrap-up — "
-        else:
-            survivor_aliases = [p.alias for p in state.players if p.id in winner_ids]
-            narr_msg = (
-                f"The game is over. {', '.join(survivor_aliases)} survive. "
-                "Write a knockout wrap-up — "
-            )
-        await _fire_narration(
-            game_id,
-            "game_over",
-            narr_msg + "the story of this game in 1-2 sentences. Reference specific moments.",
-        )
-
-        if settings.record_games:
-            from backend.services.recorder import save_recording
-
-            save_recording(game_id, state, cm.pop_recording(game_id))
-        from backend.services.ai_scheduler import cleanup_game as ai_cleanup
-
-        ai_cleanup(game_id)
-        cm.cleanup_game(game_id)
-        return
-
-    # Fire narrator: between rounds
-    await _fire_narration(
-        game_id,
-        "between_rounds",
-        "A round just ended. Comment on the state of play — who's left, what happened.",
-    )
-
-    await _start_next_round(game_id, session)
-
-
-async def do_brain_test_complete(game_id: str, session) -> None:
-    """Brain test challenges done → score, pick winner, assign ability, show results."""
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-    rs = state.current_round
-    if not rs:
-        return
-
-    # Build results: player_id -> list of {question, options, selected_index, correct_index, ...}
-    results: dict[str, list[dict]] = {}
-    for p in state.players:
-        if p.is_alive:
-            player_results = []
-            for ch in rs.brain_challenges:
-                player_results.append(
-                    {
-                        "question": ch.question,
-                        "options": ch.options,
-                        "selected_index": ch.responses.get(p.id, -1),
-                        "correct_index": ch.correct_index,
-                        "challenge_type": ch.challenge_type,
-                    }
-                )
-            results[p.id] = player_results
-
-    # Score brain test
-    scores = score_brain_test(rs.brain_challenges)
-    winner_result = determine_challenge_winner(scores)
-    winner_id = None
-    winner_alias = None
-    ability_awarded = None
-
-    if winner_result:
-        winner_id = winner_result[0]
-        winner_player = get_player_by_id(state, winner_id)
-        winner_alias = winner_player.alias if winner_player else None
-
-        # Assign random ability
-        ability_awarded = random.choice(["partial_scan", "double_vote"])
-        if winner_alias:
-            state.active_ability = ActiveAbility(
-                holder_id=winner_id,
-                holder_alias=winner_alias,
-                ability_type=ability_awarded,
-            )
-            log.info(
-                "ability_awarded",
-                game_id=game_id,
-                holder=winner_alias,
-                ability=ability_awarded,
-            )
-
-    await cm.broadcast(
-        game_id,
-        BrainTestResultsEvent(
-            seq=session.next_seq(),
-            results=results,
-            scores=scores if scores else None,
-            winner_id=winner_id,
-            winner_alias=winner_alias,
-            ability_awarded=ability_awarded,
-        ),
-    )
-
-    # Broadcast ability awarded event
-    if winner_id and winner_alias and ability_awarded:
-        await cm.broadcast(
-            game_id,
-            AbilityAwardedEvent(
-                seq=session.next_seq(),
-                holder_id=winner_id,
-                holder_alias=winner_alias,
-                ability_type=ability_awarded,
-            ),
-        )
-
-    transition_to_brain_test_results(state, settings.brain_test_results_duration)
-    await cm.broadcast(
-        game_id,
-        _make_event(state, session, settings, round_type=RoundType.BRAIN_TEST),
-    )
-    await start_phase_timer(game_id, GamePhase.BRAIN_TEST_RESULTS)
-
-    # Fire narrator
-    await _fire_narration(
-        game_id,
-        "post_submissions",
-        "Brain test results are in. Comment on notable performances.",
-    )
-
-
-async def do_after_brain_test(game_id: str, session) -> None:
-    """Brain test results done → next round (no elimination)."""
-    await _start_next_round(game_id, session)
-
-
-async def do_matchup_complete(game_id: str, session) -> None:
-    """All matchup sub-rounds done → resolve votes → verdict → ELIMINATION.
-
-    Assumes caller holds the game lock.
-    """
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-
-    state, matchup_results, elimination = resolve_matchup_votes(state, session.next_seq)
-    await cm.broadcast(game_id, matchup_results)
-    log.info(
-        "matchup_resolved",
-        eliminated_alias=elimination.eliminated_alias,
-        was_human=elimination.was_human,
-    )
-
-    # Generate verdict
-    if elimination.eliminated_id and state.current_round:
-        try:
-            from backend.llm.agents import generate_verdict
-
-            round_state = state.current_round
-            # Find the prompt the eliminated player had
-            elim_prompt = round_state.prompt_text
-            elim_answer = round_state.answers.get(elimination.eliminated_id, "")
-            for m in round_state.matchups:
-                if elimination.eliminated_id in m.pair:
-                    elim_prompt = m.prompt_text
-                    break
-
-            verdict = await generate_verdict(
-                alias=elimination.eliminated_alias or "",
-                was_human=elimination.was_human or False,
-                prompt_text=elim_prompt,
-                answer=elim_answer,
-                vote_count=elimination.vote_count,
-                round_number=round_state.round_number,
-                game_id=game_id,
-            )
-            if verdict:
-                round_state.verdict = verdict
-                await cm.broadcast(
-                    game_id,
-                    VerdictEvent(seq=session.next_seq(), verdict=verdict),
-                )
-        except Exception:
-            log.exception("verdict_generation_failed", game_id=game_id)
-
-    transition_to_elimination(state, settings.elimination_duration)
-    await cm.broadcast(game_id, elimination)
-    await start_phase_timer(game_id, GamePhase.ELIMINATION)
 
 
 async def _start_matchup_loop(game_id: str, session) -> None:
@@ -1059,9 +685,6 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
         ai_player_ids = [p.id for p in state.players if p.role == PlayerRole.AI]
         assign_personalities(game_id, ai_player_ids)
 
-        # Dynamic round selection — no pre-generated cycle
-        state.max_rounds = 10  # safety cap
-
         # Capture for logging after lock release
         player_count = len(state.players)
 
@@ -1080,9 +703,10 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     )
 
     # Fire narrator: game start
+    human_count = player_count - ai_count
     await _fire_narration(
         game_id,
         "game_start",
-        f"{player_count} units assembled. {ai_count} are AI. "
-        "The rest are human, pretending to be robots.",
+        f"{player_count} players assembled. {human_count} humans, {ai_count} AI. "
+        "The humans must find the AI. The AI must blend in.",
     )

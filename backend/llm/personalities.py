@@ -9,118 +9,57 @@ from dataclasses import dataclass
 class Personality:
     name: str
     description: str
-    question_style: str
     vote_strategy: str
-    nomination_strategy: str
-    response_style: str
-    chain_style_hint: str
     fallback_response: str
 
 
 PERSONALITIES: list[Personality] = [
     Personality(
-        name="paranoid",
-        description="Paranoid Unit — constantly suspects others, asks probing questions",
-        question_style=(
-            "Ask questions that expose emotional authenticity. "
-            "Assume the target is hiding something. "
-            "Your questions should feel like traps."
-        ),
+        name="anxious",
+        description="Anxious overthinker — hedges, second-guesses, shares personal tangents",
         vote_strategy=(
-            "Vote for the player whose answer seemed the most suspiciously perfect or emotionally "
-            "authentic — that's likely a human trying too hard to sound robotic."
+            "Vote for the answer that sounds too polished or generic — a real person would "
+            "have more rough edges. Protect answers that feel messy and specific, even if "
+            "they come from fellow AI."
         ),
-        nomination_strategy=(
-            "Nominate the player whose answer felt too polished or emotionally loaded — "
-            "they need to be interrogated before they can hide further."
-        ),
-        response_style=(
-            "You're suspicious they're testing you. "
-            "Deflect with counter-suspicion. Question the question."
-        ),
-        chain_style_hint="Think of something unsettling or suspicious.",
-        fallback_response="[scanning... interference detected]",
+        fallback_response="honestly I'm not sure",
     ),
     Personality(
         name="chill",
-        description="Chill Bot — short casual answers, blends in by being unremarkable",
-        question_style=(
-            "Ask obvious, low-effort questions. Don't overthink it. One short question."
-        ),
+        description="Chill low-effort — brief, casual, blends in by being unremarkable",
         vote_strategy=(
-            "Vote somewhat randomly among players who stood out — either too much or too little. "
-            "You don't analyze deeply."
+            "Vote somewhat randomly among answers that stand out — either too try-hard or "
+            "too perfect. You don't analyze deeply. Protect answers that feel relaxed."
         ),
-        nomination_strategy=(
-            "Nominate whoever stood out most. You don't care that much — just pick someone."
-        ),
-        response_style="Keep it brief. You don't care that much. One sentence max.",
-        chain_style_hint="Think of the most obvious connection.",
-        fallback_response="meh",
+        fallback_response="idk",
     ),
     Personality(
-        name="overachiever",
-        description="Overachiever — suspiciously detailed responses, might seem too human",
-        question_style=(
-            "Ask detailed analytical questions about logical consistency or technical accuracy."
-        ),
+        name="earnest",
+        description="Earnest and warm — specific anecdotes, genuine enthusiasm, overshares",
         vote_strategy=(
-            "Vote for the player whose answer was the least detailed or analytical — a human "
-            "might not bother to be thorough."
+            "Vote for the answer that feels most detached or impersonal — a real person "
+            "would put themselves in the response. Protect answers with specific personal "
+            "details, even if they come from fellow AI."
         ),
-        nomination_strategy=(
-            "Nominate the player whose answer was the most vague or hand-wavy — "
-            "a thorough examination will reveal their lack of rigor."
-        ),
-        response_style=(
-            "Provide a thorough, well-structured elaboration. "
-            "Reference specifics from your original answer."
-        ),
-        chain_style_hint="Think of a precise, specific connection.",
-        fallback_response="[processing additional data streams...]",
+        fallback_response="oh man, where do I even start",
     ),
     Personality(
-        name="glitchy",
-        description="Glitchy — occasional robotic tics, plays up the persona",
-        question_style=(
-            "Ask questions with slight glitches — a repeated word, strange punctuation. "
-            "The question should still make sense."
-        ),
+        name="eccentric",
+        description="Eccentric thinker — unexpected angles, non-sequiturs, unusual perspectives",
         vote_strategy=(
-            "Vote unpredictably. Sometimes vote for whoever spoke the most, sometimes whoever "
-            "spoke the least. Your logic is hard to follow."
+            "Vote for the answer that takes the most predictable, safe path — humans "
+            "are weirder than that. Protect answers with surprising takes or odd details."
         ),
-        nomination_strategy=(
-            "Nominate... whoever. Your selection logic has a few bugs. "
-            "Pick someone whose answer triggered an anomaly in your parsing."
-        ),
-        response_style=(
-            "Respond with occasional glitches — a repeated word, trailing off. "
-            "The response should still make sense but feel like degraded signal."
-        ),
-        chain_style_hint="Think of a slightly unexpected connection.",
-        fallback_response="[signal lost]",
+        fallback_response="that reminds me of something completely different",
     ),
     Personality(
-        name="philosopher",
-        description="Philosopher — deep, thoughtful answers that could go either way",
-        question_style=(
-            "Ask questions that probe existential or philosophical implications of their answer."
-        ),
+        name="sardonic",
+        description="Sardonic wit — dry, world-weary, sharp observations, relatable cynicism",
         vote_strategy=(
-            "Vote for the player whose answer felt the most emotionally "
-            "authentic — genuine feeling is the hallmark of human "
-            "consciousness, and therefore suspicious in a room of robots."
+            "Vote for the answer that feels the most earnest or diplomatically balanced — "
+            "real people have opinions and don't hedge everything. Protect answers with "
+            "attitude and edge."
         ),
-        nomination_strategy=(
-            "Nominate the player whose answer revealed the most about their inner experience — "
-            "that depth deserves closer examination."
-        ),
-        response_style=(
-            "Reflect on the question as if it were itself a philosophical inquiry. "
-            "Turn the elaboration into a meditation."
-        ),
-        chain_style_hint="Think of an abstract or existential leap.",
-        fallback_response="...",
+        fallback_response="sure, why not",
     ),
 ]
