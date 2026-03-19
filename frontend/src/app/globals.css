@@ -350,8 +350,8 @@ input:focus, textarea:focus {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(rgba(42, 45, 53, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(42, 45, 53, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(42, 45, 53, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(42, 45, 53, 0.12) 1px, transparent 1px);
   background-size: 40px 40px;
   pointer-events: none;
 }
@@ -365,7 +365,7 @@ input:focus, textarea:focus {
 }
 
 .facility-panel {
-  background: rgba(15, 17, 20, 0.92);
+  background: rgba(15, 17, 20, 0.75);
   backdrop-filter: blur(16px) saturate(1.2);
   border: 1px solid rgba(42, 45, 53, 0.5);
   border-radius: 3px;
@@ -384,8 +384,8 @@ input:focus, textarea:focus {
     0deg,
     transparent,
     transparent 2px,
-    rgba(0,0,0,0.04) 2px,
-    rgba(0,0,0,0.04) 4px
+    rgba(0,0,0,0.12) 2px,
+    rgba(0,0,0,0.12) 4px
   );
   pointer-events: none;
   border-radius: inherit;
@@ -393,7 +393,7 @@ input:focus, textarea:focus {
 
 @supports not (backdrop-filter: blur(1px)) {
   .facility-panel {
-    background: rgba(15, 17, 20, 0.98);
+    background: rgba(15, 17, 20, 0.88);
   }
 }
 
