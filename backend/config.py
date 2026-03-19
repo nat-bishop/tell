@@ -40,11 +40,11 @@ class Settings:
         self.prompt_duration: int = int(
             os.environ.get("TELL_PROMPT_DURATION", game.get("prompt_duration", 45))
         )
-        self.task_prompt_duration: int = int(
-            os.environ.get("TELL_TASK_PROMPT_DURATION", game.get("task_prompt_duration", 25))
+        self.vote_duration: int = int(
+            os.environ.get("TELL_VOTE_DURATION", game.get("vote_duration", 25))
         )
-        self.prompt_reading_duration: int = int(
-            os.environ.get("TELL_PROMPT_READING_DURATION", game.get("prompt_reading_duration", 10))
+        self.vote_results_duration: int = int(
+            os.environ.get("TELL_VOTE_RESULTS_DURATION", game.get("vote_results_duration", 8))
         )
         self.brain_test_duration: int = int(
             os.environ.get("TELL_BRAIN_TEST_DURATION", game.get("brain_test_duration", 75))
@@ -67,24 +67,12 @@ class Settings:
                 game.get("brain_test_results_duration", 15),
             )
         )
-        self.matchup_duration: int = int(
-            os.environ.get(
-                "TELL_MATCHUP_DURATION",
-                game.get("matchup_duration", 120),
-            )
-        )
-        self.matchup_challenge_duration: int = int(
-            os.environ.get(
-                "TELL_MATCHUP_CHALLENGE_DURATION",
-                game.get("matchup_challenge_duration", 12),
-            )
-        )
 
         # Player limits
-        self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 1)))
-        self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 10)))
-        self.min_ai: int = int(os.environ.get("TELL_MIN_AI", game.get("min_ai", 1)))
-        self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 3)))
+        self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))
+        self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 2)))
+        self.min_ai: int = int(os.environ.get("TELL_MIN_AI", game.get("min_ai", 6)))
+        self.max_ai: int = int(os.environ.get("TELL_MAX_AI", game.get("max_ai", 6)))
 
         # Game length
         self.total_rounds: int = int(
@@ -111,12 +99,9 @@ class Settings:
         # Matchmaking
         mm = toml.get("matchmaking", {})
         self.mm_min_humans: int = int(os.environ.get("TELL_MM_MIN_HUMANS", mm.get("min_humans", 2)))
-        self.mm_max_humans: int = int(os.environ.get("TELL_MM_MAX_HUMANS", mm.get("max_humans", 5)))
+        self.mm_max_humans: int = int(os.environ.get("TELL_MM_MAX_HUMANS", mm.get("max_humans", 2)))
         self.mm_countdown_seconds: int = int(
             os.environ.get("TELL_MM_COUNTDOWN", mm.get("countdown_seconds", 20))
         )
-        self.mm_solo_timeout_seconds: int = int(
-            os.environ.get("TELL_MM_SOLO_TIMEOUT", mm.get("solo_timeout_seconds", 45))
-        )
-        self.mm_min_total: int = int(os.environ.get("TELL_MM_MIN_TOTAL", mm.get("min_total", 5)))
-        self.mm_max_total: int = int(os.environ.get("TELL_MM_MAX_TOTAL", mm.get("max_total", 7)))
+        self.mm_min_total: int = int(os.environ.get("TELL_MM_MIN_TOTAL", mm.get("min_total", 8)))
+        self.mm_max_total: int = int(os.environ.get("TELL_MM_MAX_TOTAL", mm.get("max_total", 8)))

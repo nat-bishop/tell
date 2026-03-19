@@ -28,11 +28,10 @@ export function joinGame(
 export function startGame(
   gameId: string,
   playerId: string,
-  aiCount: number = 2,
 ): Promise<void> {
   return apiFetch(`/games/${gameId}/start`, {
     method: "POST",
-    body: JSON.stringify({ player_id: playerId, ai_count: aiCount }),
+    body: JSON.stringify({ player_id: playerId }),
   });
 }
 
@@ -63,18 +62,16 @@ export function submitBrainTestAnswer(
   });
 }
 
-export function submitMatchupVote(
+export function submitVote(
   gameId: string,
   playerId: string,
-  matchupIndex: number,
-  choice: number,
+  votedForPlayerId: string,
 ): Promise<void> {
-  return apiFetch(`/games/${gameId}/matchup-vote`, {
+  return apiFetch(`/games/${gameId}/vote`, {
     method: "POST",
     body: JSON.stringify({
       player_id: playerId,
-      matchup_index: matchupIndex,
-      choice,
+      voted_for_player_id: votedForPlayerId,
     }),
   });
 }

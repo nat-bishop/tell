@@ -3,8 +3,9 @@
 import { useGameStore } from "@/hooks/useGameStore";
 import { useFacilityContext } from "@/facility/FacilityProvider";
 import { FacilityLobby } from "@/facility/phases/FacilityLobby";
-import { FacilityMatchup } from "@/facility/phases/FacilityMatchup";
 import { FacilityPrompt } from "@/facility/phases/FacilityPrompt";
+import { FacilityVote } from "@/facility/phases/FacilityVote";
+import { FacilityVoteResults } from "@/facility/phases/FacilityVoteResults";
 import { FacilityGameOver } from "@/facility/phases/FacilityGameOver";
 import { FacilityBrainTest } from "@/facility/phases/FacilityBrainTest";
 
@@ -18,7 +19,8 @@ export function FacilityScene() {
     <>
       {phase === "lobby" && <FacilityLobby />}
       {phase === "prompt" && <FacilityPrompt />}
-      {phase === "matchup" && <FacilityMatchup />}
+      {phase === "vote" && <FacilityVote />}
+      {phase === "vote_results" && <FacilityVoteResults />}
       {(phase === "brain_test" || phase === "brain_test_results") && <FacilityBrainTest />}
       {phase === "game_over" && <FacilityGameOver />}
     </>

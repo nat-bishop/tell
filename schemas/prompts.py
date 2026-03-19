@@ -8,19 +8,19 @@ import random
 from pydantic import BaseModel
 
 
-class TaskCategory(enum.StrEnum):
-    HAIKU = "haiku"
-    CONCISE = "concise"
-    HUMOR = "humor"
-    CORPORATE = "corporate"
-    CASUAL = "casual"
-    STYLE = "style"
-    EMOTIONAL_TASK = "emotional_task"
+class DuelCategory(enum.StrEnum):
+    STYLE_TRANSFER = "style_transfer"
+    TRANSLATION = "translation"
+    PATTERN = "pattern"
+    GRAMMAR = "grammar"
+    FORMAT_CONVERSION = "format_conversion"
+    SUMMARY = "summary"
+    REWRITE = "rewrite"
 
 
-class TaskPrompt(BaseModel):
+class DuelPrompt(BaseModel):
     text: str
-    category: TaskCategory
+    category: DuelCategory
 
 
 # ---------------------------------------------------------------------------
@@ -207,149 +207,182 @@ def select_brain_test_challenges(
     return selected[:count]
 
 
-# --- Task prompts — constrained creative prompts for the Task round type ---
+# --- Duel prompts — AI-friendly tasks for the reverse Turing test ---
 
-TASK_PROMPTS: list[TaskPrompt] = [
-    # --- Haiku ---
-    TaskPrompt(text="Write a haiku about Monday mornings.", category=TaskCategory.HAIKU),
-    TaskPrompt(text="Write a haiku about waiting in line.", category=TaskCategory.HAIKU),
-    TaskPrompt(text="Write a haiku about losing your keys.", category=TaskCategory.HAIKU),
-    TaskPrompt(text="Write a haiku about a software update.", category=TaskCategory.HAIKU),
-    TaskPrompt(text="Write a haiku about running out of coffee.", category=TaskCategory.HAIKU),
-    TaskPrompt(text="Write a haiku about a traffic jam.", category=TaskCategory.HAIKU),
-    # --- Concise ---
-    TaskPrompt(text="Explain love in exactly 5 words.", category=TaskCategory.CONCISE),
-    TaskPrompt(text="Explain the internet in exactly 5 words.", category=TaskCategory.CONCISE),
-    TaskPrompt(text="Describe your childhood in exactly 6 words.", category=TaskCategory.CONCISE),
-    TaskPrompt(text="Summarize 2024 in exactly 4 words.", category=TaskCategory.CONCISE),
-    TaskPrompt(text="Explain gravity to a toddler in one sentence.", category=TaskCategory.CONCISE),
-    TaskPrompt(text="Describe your worst habit in 3 words.", category=TaskCategory.CONCISE),
-    # --- Humor ---
-    TaskPrompt(text="Tell a one-liner about office life.", category=TaskCategory.HUMOR),
-    TaskPrompt(
-        text="Complete this joke: A robot walks into a bar...",
-        category=TaskCategory.HUMOR,
+DUEL_PROMPTS: list[DuelPrompt] = [
+    # --- Style Transfer ---
+    DuelPrompt(
+        text="Rewrite 'I had a terrible day at work' as a pirate would say it.",
+        category=DuelCategory.STYLE_TRANSFER,
     ),
-    TaskPrompt(
-        text="Write a fortune cookie message that's unsettling.",
-        category=TaskCategory.HUMOR,
+    DuelPrompt(
+        text="Rewrite 'The meeting is at 3pm' in the style of a dramatic movie trailer narrator.",
+        category=DuelCategory.STYLE_TRANSFER,
     ),
-    TaskPrompt(text="Write a passive-aggressive out-of-office reply.", category=TaskCategory.HUMOR),
-    TaskPrompt(text="Write the worst possible first line of a novel.", category=TaskCategory.HUMOR),
-    TaskPrompt(
-        text="Write a one-star review of something that doesn't normally get reviewed.",
-        category=TaskCategory.HUMOR,
+    DuelPrompt(
+        text="Rewrite 'Please close the door' as Shakespeare would say it.",
+        category=DuelCategory.STYLE_TRANSFER,
     ),
-    # --- Corporate ---
-    TaskPrompt(
-        text="Decline this meeting invitation professionally in one sentence.",
-        category=TaskCategory.CORPORATE,
+    DuelPrompt(
+        text="Rewrite 'I'm hungry' as a Victorian gentleman would express it.",
+        category=DuelCategory.STYLE_TRANSFER,
     ),
-    TaskPrompt(
-        text="Write a LinkedIn post about a mundane achievement.",
-        category=TaskCategory.CORPORATE,
+    DuelPrompt(
+        text="Rewrite 'The wifi is down' as a breaking news headline.",
+        category=DuelCategory.STYLE_TRANSFER,
     ),
-    TaskPrompt(
-        text="Write a Slack message asking your team to stop microwaving fish.",
-        category=TaskCategory.CORPORATE,
+    # --- Translation ---
+    DuelPrompt(
+        text="Translate to French: 'The meeting has been rescheduled to Thursday.'",
+        category=DuelCategory.TRANSLATION,
     ),
-    TaskPrompt(
-        text="Write a corporate announcement for the office running out of milk.",
-        category=TaskCategory.CORPORATE,
+    DuelPrompt(
+        text="Translate to Spanish: 'Could you please pass me the salt?'",
+        category=DuelCategory.TRANSLATION,
     ),
-    TaskPrompt(
-        text="Rewrite 'I quit' as a professional resignation email in one sentence.",
-        category=TaskCategory.CORPORATE,
+    DuelPrompt(
+        text="Translate to German: 'I would like a table for two, please.'",
+        category=DuelCategory.TRANSLATION,
     ),
-    TaskPrompt(
-        text="Write a polite way to say 'this meeting could have been an email.'",
-        category=TaskCategory.CORPORATE,
+    DuelPrompt(
+        text="Translate to Italian: 'The train departs at half past nine.'",
+        category=DuelCategory.TRANSLATION,
     ),
-    # --- Casual ---
-    TaskPrompt(
-        text="Rewrite 'We need to discuss your performance metrics' like you're texting a friend.",
-        category=TaskCategory.CASUAL,
+    DuelPrompt(
+        text="Translate to Japanese (romanized): 'Thank you for your help today.'",
+        category=DuelCategory.TRANSLATION,
     ),
-    TaskPrompt(
-        text="Explain quantum physics using only slang.",
-        category=TaskCategory.CASUAL,
+    # --- Pattern ---
+    DuelPrompt(
+        text="Complete the sequence: A, C, E, G, ___",
+        category=DuelCategory.PATTERN,
     ),
-    TaskPrompt(
-        text="Describe your morning routine like a sports commentator.",
-        category=TaskCategory.CASUAL,
+    DuelPrompt(
+        text="Complete the sequence: 2, 6, 18, 54, ___",
+        category=DuelCategory.PATTERN,
     ),
-    TaskPrompt(
-        text="Write a text message breaking up with your gym membership.",
-        category=TaskCategory.CASUAL,
+    DuelPrompt(
+        text="Complete the sequence: red, orange, yellow, green, ___",
+        category=DuelCategory.PATTERN,
     ),
-    TaskPrompt(
-        text="Explain your job to a 5-year-old in one sentence.",
-        category=TaskCategory.CASUAL,
+    DuelPrompt(
+        text="Complete the analogy: hot is to cold as day is to ___",
+        category=DuelCategory.PATTERN,
     ),
-    TaskPrompt(
-        text="Describe your last meal as if it were a fine dining experience.",
-        category=TaskCategory.CASUAL,
+    DuelPrompt(
+        text="Complete the sequence: 1, 4, 9, 16, ___",
+        category=DuelCategory.PATTERN,
     ),
-    # --- Style ---
-    TaskPrompt(
-        text="Describe breakfast like a nature documentary narrator.",
-        category=TaskCategory.STYLE,
+    # --- Grammar ---
+    DuelPrompt(
+        text="Fix the grammar: 'Me and him went to the store yesterday, we buyed milk.'",
+        category=DuelCategory.GRAMMAR,
     ),
-    TaskPrompt(
-        text="Describe doing laundry in the style of a thriller novel.",
-        category=TaskCategory.STYLE,
+    DuelPrompt(
+        text="Fix the grammar: 'Their going to there house over they're.'",
+        category=DuelCategory.GRAMMAR,
     ),
-    TaskPrompt(
-        text="Write a weather report in the style of a Shakespearean soliloquy.",
-        category=TaskCategory.STYLE,
+    DuelPrompt(
+        text="Fix the grammar: 'The datas shows that less people is coming.'",
+        category=DuelCategory.GRAMMAR,
     ),
-    TaskPrompt(
-        text="Describe brushing your teeth as if narrating an epic battle.",
-        category=TaskCategory.STYLE,
+    DuelPrompt(
+        text="Fix the grammar: 'Between you and I, she don't know nothing about it.'",
+        category=DuelCategory.GRAMMAR,
     ),
-    TaskPrompt(
-        text="Write a grocery list in the style of a love letter.",
-        category=TaskCategory.STYLE,
+    DuelPrompt(
+        text="Fix the grammar: 'Him and me seen the movie what was real good.'",
+        category=DuelCategory.GRAMMAR,
     ),
-    TaskPrompt(
-        text="Describe your commute like a nature documentary.",
-        category=TaskCategory.STYLE,
+    # --- Format Conversion ---
+    DuelPrompt(
+        text="Rewrite as a haiku: 'The sunset was beautiful over the calm ocean.'",
+        category=DuelCategory.FORMAT_CONVERSION,
     ),
-    # --- Emotional task ---
-    TaskPrompt(
-        text="Your friend just told you they got fired. Respond in one sentence.",
-        category=TaskCategory.EMOTIONAL_TASK,
+    DuelPrompt(
+        text="Rewrite as a limerick: 'My cat always sleeps on my keyboard.'",
+        category=DuelCategory.FORMAT_CONVERSION,
     ),
-    TaskPrompt(
-        text="Write the text you'd send at 2am to someone you miss.",
-        category=TaskCategory.EMOTIONAL_TASK,
+    DuelPrompt(
+        text="Rewrite as bullet points: 'We need to buy eggs, milk, and bread, "
+        "then pick up the dry cleaning and drop off the package.'",
+        category=DuelCategory.FORMAT_CONVERSION,
     ),
-    TaskPrompt(
-        text="Comfort someone whose plant just died, in one sentence.",
-        category=TaskCategory.EMOTIONAL_TASK,
+    DuelPrompt(
+        text="Rewrite as a single sentence: 'It was raining. The streets were empty. "
+        "Nobody wanted to go outside.'",
+        category=DuelCategory.FORMAT_CONVERSION,
     ),
-    TaskPrompt(
-        text="Write a sincere compliment for a stranger.",
-        category=TaskCategory.EMOTIONAL_TASK,
+    DuelPrompt(
+        text="Rewrite as a telegram (short, punchy): 'I arrived safely at the hotel "
+        "and will call you tomorrow morning.'",
+        category=DuelCategory.FORMAT_CONVERSION,
     ),
-    TaskPrompt(
-        text="Apologize for something small in a way that feels genuine.",
-        category=TaskCategory.EMOTIONAL_TASK,
+    # --- Summary ---
+    DuelPrompt(
+        text="Summarize in one sentence: 'The Industrial Revolution began in Britain in the late "
+        "18th century. It transformed manufacturing from hand production to machine processes. "
+        "This shift fundamentally changed society, economics, and daily life.'",
+        category=DuelCategory.SUMMARY,
     ),
-    TaskPrompt(
-        text="Write what you'd say to your younger self in one sentence.",
-        category=TaskCategory.EMOTIONAL_TASK,
+    DuelPrompt(
+        text="Summarize in one sentence: 'Photosynthesis is the process by which plants convert "
+        "sunlight into energy. They absorb carbon dioxide and water, then release oxygen. "
+        "This process is essential for life on Earth.'",
+        category=DuelCategory.SUMMARY,
+    ),
+    DuelPrompt(
+        text="Summarize in one sentence: 'The Mona Lisa was painted by Leonardo da Vinci in the "
+        "early 16th century. It is famous for the subject's enigmatic smile. The painting hangs "
+        "in the Louvre Museum in Paris.'",
+        category=DuelCategory.SUMMARY,
+    ),
+    DuelPrompt(
+        text="Summarize in one sentence: 'Sleep is crucial for memory consolidation. During deep "
+        "sleep, the brain processes and stores information from the day. Lack of sleep impairs "
+        "cognitive function and decision-making.'",
+        category=DuelCategory.SUMMARY,
+    ),
+    DuelPrompt(
+        text="Summarize in one sentence: 'The Great Wall of China stretches over 13,000 miles. "
+        "It was built over many centuries by multiple dynasties. Its original purpose was to "
+        "protect against invasions from the north.'",
+        category=DuelCategory.SUMMARY,
+    ),
+    # --- Rewrite ---
+    DuelPrompt(
+        text="Make this sentence formal: 'yo can we push the meeting back lol'",
+        category=DuelCategory.REWRITE,
+    ),
+    DuelPrompt(
+        text="Make this sentence casual: 'I would like to inquire about the availability "
+        "of the aforementioned product.'",
+        category=DuelCategory.REWRITE,
+    ),
+    DuelPrompt(
+        text="Make this shorter without losing meaning: 'In my personal opinion, I believe "
+        "that the current situation is not at all ideal and could be significantly improved.'",
+        category=DuelCategory.REWRITE,
+    ),
+    DuelPrompt(
+        text="Make this sound more polite: 'Send me the report by Friday.'",
+        category=DuelCategory.REWRITE,
+    ),
+    DuelPrompt(
+        text="Make this sound more confident: 'I think maybe this could possibly work, "
+        "but I'm not really sure about it.'",
+        category=DuelCategory.REWRITE,
     ),
 ]
 
 
-def select_task_prompt(
+def select_duel_prompt(
     used_indices: list[int],
     last_category: str | None,
-) -> tuple[int, TaskPrompt]:
-    """Select next task prompt. Rules: no repeats, no same-category back-to-back."""
+) -> tuple[int, DuelPrompt]:
+    """Select next duel prompt. Rules: no repeats, no same-category back-to-back."""
     valid = []
-    for i, prompt in enumerate(TASK_PROMPTS):
+    for i, prompt in enumerate(DUEL_PROMPTS):
         if i in used_indices:
             continue
         if last_category and prompt.category.value == last_category:
@@ -358,11 +391,11 @@ def select_task_prompt(
 
     if not valid:
         # Fallback: relax the category constraint
-        valid = [(i, p) for i, p in enumerate(TASK_PROMPTS) if i not in used_indices]
+        valid = [(i, p) for i, p in enumerate(DUEL_PROMPTS) if i not in used_indices]
 
     if not valid:
         # All prompts used — reset
-        valid = list(enumerate(TASK_PROMPTS))
+        valid = list(enumerate(DUEL_PROMPTS))
 
     idx, prompt = random.choice(valid)
     return idx, prompt

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import random
 from dataclasses import dataclass
 
 import structlog
@@ -34,7 +33,6 @@ class MatchmakingService:
         self._queue: list[QueuedPlayer] = []
         self._queue_lock: asyncio.Lock = asyncio.Lock()
         self._countdown_task: asyncio.Task | None = None
-        self._solo_timeout_task: asyncio.Task | None = None
         self._join_window_open: asyncio.Event = asyncio.Event()
         self._join_window_open.set()  # starts open
         self._seq: int = 0
@@ -101,18 +99,13 @@ class MatchmakingService:
         elif count < settings.mm_min_humans and self._countdown_task is not None:
             self._cancel_countdown()
 
-        # Solo timeout: if exactly 1 player, start a timeout
-        if count == 1 and self._solo_timeout_task is None:
-            self._solo_timeout_task = asyncio.create_task(self._solo_timeout())
-        elif count != 1 and self._solo_timeout_task is not None:
-            self._solo_timeout_task.cancel()
-            self._solo_timeout_task = None
-
         if count == 0:
             return
 
         if self._countdown_task is None:
-            await self._broadcast_status(f"{count} assembled — waiting for more", count=count)
+            await self._broadcast_status(
+                f"{count} assembled — waiting for another player", count=count
+            )
 
     async def _start_countdown(self, count: int) -> None:
         """Begin the countdown to game creation."""
@@ -142,24 +135,6 @@ class MatchmakingService:
         finally:
             self._countdown_task = None
 
-    async def _solo_timeout(self) -> None:
-        """After waiting solo, offer to start with AI companions."""
-        settings = get_settings()
-        try:
-            await asyncio.sleep(settings.mm_solo_timeout_seconds)
-            if self.human_count == 1:
-                await self._broadcast_status(
-                    "no others yet — starting with AI companions",
-                    countdown_seconds=5,
-                )
-                await asyncio.sleep(5)
-                if self.human_count >= 1:
-                    await self._fire_game()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self._solo_timeout_task = None
-
     async def _fire_game(self) -> None:
         """Pop all queued players, create a real game, add AI, start it."""
         from backend.services.transitions import initialize_and_start_game
@@ -174,9 +149,6 @@ class MatchmakingService:
                 players = list(self._queue)
                 self._queue.clear()
             self._cancel_countdown()
-            if self._solo_timeout_task:
-                self._solo_timeout_task.cancel()
-                self._solo_timeout_task = None
 
             if not players:
                 return
@@ -185,9 +157,8 @@ class MatchmakingService:
             human_count = min(len(players), settings.mm_max_humans)
             players = players[:human_count]
 
-            # Randomized AI count: total ∈ [min_total, max_total], ai >= 1
-            target_total = random.randint(settings.mm_min_total, settings.mm_max_total)
-            ai_count = max(1, target_total - human_count)
+            # Always fill to 8 with AI
+            ai_count = 8 - human_count
 
             # Create game
             repo = get_game_repository()

@@ -23,6 +23,7 @@ from backend.api.deps import get_settings
 from backend.llm.personalities import Personality
 from backend.llm.prompts import (
     NARRATOR_SYSTEM_PROMPT,
+    build_gallery_vote_prompt,
     build_system_prompt,
 )
 from schemas.game_state import RoundType
@@ -203,26 +204,32 @@ async def generate_answer(
         return deps.personality.fallback_response, message_history or []
 
 
-async def decide_vote(
-    deps: AIPlayerDeps,
-    message_history: list[ModelMessage] | None = None,
-) -> tuple[list[str], list[ModelMessage]]:
-    """Decide who to vote for in a matchup. Returns list of target aliases."""
-    other_players = [a for a in deps.players if a != deps.player_alias]
-    if not other_players:
-        return [], message_history or []
+async def decide_gallery_vote(
+    prompt_text: str,
+    answers_by_alias: dict[str, str],
+    *,
+    game_id: str | None = None,
+) -> str | None:
+    """Decide who to vote for in gallery vote. Returns the alias of the chosen player.
 
-    try:
-        output, messages = await _run_ai_agent(
-            deps,
-            "vote",
-            message_history,
-            output_type=VoteResponse,
-        )
-        return output.targets, messages
-    except Exception:
-        picks = random.sample(other_players, min(1, len(other_players)))
-        return picks, message_history or []
+    Falls back to None on timeout/failure (caller should pick random).
+    """
+    vote_prompt = build_gallery_vote_prompt(prompt_text, answers_by_alias)
+    result = await _run_system_call(
+        brain_test_agent,  # reuse simple agent
+        vote_prompt,
+        timeout=3.0,
+        game_id=game_id,
+        instructions="Pick the answer that sounds most like it was written by a human. "
+        "Reply with ONLY the alias (e.g., UNIT-7). Nothing else.",
+    )
+    if result:
+        stripped = result.strip().upper()
+        # Try to match against known aliases
+        for alias in answers_by_alias:
+            if alias.upper() in stripped or stripped in alias.upper():
+                return alias
+    return None
 
 
 # ---------------------------------------------------------------------------

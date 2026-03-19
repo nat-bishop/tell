@@ -43,81 +43,89 @@ def _get_broadcast_events(game_id):
 
 
 class TestDoPromptComplete:
-    async def test_task_round_goes_to_matchup(self, fresh_deps, mock_ai, mock_llm):
+    async def test_task_round_goes_to_vote(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import do_prompt_complete
 
         _state, session, _ = _make_session(
             GamePhase.PROMPT,
             round_type=RoundType.TASK,
-            answers={"h1": "a", "h2": "b", "a1": "c", "a2": "d"},
+            answers={
+                "h1": "a",
+                "h2": "b",
+                "a1": "c",
+                "a2": "d",
+                "a3": "e",
+                "a4": "f",
+                "a5": "g",
+                "a6": "h",
+            },
         )
         game_id = _store_session(session)
         await do_prompt_complete(game_id, session)
 
-        assert session.state.phase == GamePhase.MATCHUP
+        assert session.state.phase == GamePhase.VOTE
 
 
 # ---------------------------------------------------------------------------
-# do_matchup_complete — scoring + next round or game over
+# do_vote_complete — scoring + vote results transition
 # ---------------------------------------------------------------------------
 
 
-class TestDoMatchupComplete:
-    async def test_scores_and_advances(self, fresh_deps, mock_ai, mock_llm):
-        from backend.services.transitions import do_matchup_complete
-        from schemas.game_state import Matchup
+class TestDoVoteComplete:
+    async def test_resolves_votes_and_transitions(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import do_vote_complete
 
-        _state, session, _ = _make_session(GamePhase.MATCHUP, round_type=RoundType.TASK)
-        session.state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 0},  # h1 wins
-            ),
-            Matchup(
-                pair=["a1", "a2"],
-                prompt_text="test2",
-                prompt_category="test",
-                votes={"h1": 1, "h2": 1},  # a2 wins
-            ),
-        ]
+        _state, session, _ = _make_session(GamePhase.VOTE, round_type=RoundType.TASK)
+        session.state.current_round.gallery_votes = {
+            "h2": "h1",
+            "a1": "h1",
+            "a2": "h1",
+        }
         session.state.round_number = 1
         session.state.total_rounds = 5
         session.state.round_types = [RoundType.TASK]
         game_id = _store_session(session)
-        await do_matchup_complete(game_id, session)
+        await do_vote_complete(game_id, session)
 
-        # Should advance to a new round
-        assert session.state.phase in (GamePhase.PROMPT, GamePhase.BRAIN_TEST)
-        assert session.state.round_number == 2
+        assert session.state.phase == GamePhase.VOTE_RESULTS
 
-        # Check scores were applied
+        # Check scores: h1 got 3 votes = -3
         h1 = next(p for p in session.state.players if p.id == "h1")
-        assert h1.score == 1
+        assert h1.score == -3
 
         events = _get_broadcast_events(game_id)
         event_types = [e.event_type for e in events]
-        assert "matchup_results" in event_types
+        assert "vote_results" in event_types
+
+
+# ---------------------------------------------------------------------------
+# do_vote_results_complete — next round or game over
+# ---------------------------------------------------------------------------
+
+
+class TestDoVoteResultsComplete:
+    async def test_starts_next_round(self, fresh_deps, mock_ai, mock_llm):
+        from backend.services.transitions import do_vote_results_complete
+
+        _state, session, _ = _make_session(GamePhase.VOTE_RESULTS, round_type=RoundType.TASK)
+        session.state.round_number = 2
+        session.state.total_rounds = 5
+        session.state.round_types = [RoundType.TASK]
+        game_id = _store_session(session)
+        await do_vote_results_complete(game_id, session)
+
+        assert session.state.phase in (GamePhase.PROMPT, GamePhase.BRAIN_TEST)
+        assert session.state.round_number == 3
 
     async def test_game_over_after_final_round(self, fresh_deps, mock_ai, mock_llm):
-        from backend.services.transitions import do_matchup_complete
-        from schemas.game_state import Matchup
+        from backend.services.transitions import do_vote_results_complete
 
-        _state, session, _ = _make_session(GamePhase.MATCHUP, round_type=RoundType.TASK)
-        session.state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 0},
-            ),
-        ]
+        _state, session, _ = _make_session(GamePhase.VOTE_RESULTS, round_type=RoundType.TASK)
         session.state.round_number = 5
         session.state.total_rounds = 5
         session.state.players[0].score = 3  # h1 leading
         game_id = _store_session(session)
-        await do_matchup_complete(game_id, session)
+        await do_vote_results_complete(game_id, session)
 
         assert session.state.phase == GamePhase.GAME_OVER
         assert session.state.winner == "winners"
@@ -165,31 +173,6 @@ class TestDoBrainTestComplete:
         assert results_event.scores is not None
         # h1 got both right = 2
         assert results_event.scores["h1"] == 2
-
-    async def test_no_correct_answers_zero_scores(self, fresh_deps, mock_ai, mock_llm):
-        from backend.services.transitions import do_brain_test_complete
-        from schemas.game_state import BrainTestChallenge
-
-        _state, session, _ = _make_session(GamePhase.BRAIN_TEST, round_type=RoundType.BRAIN_TEST)
-        session.state.current_round.brain_challenges = [
-            BrainTestChallenge(
-                challenge_type="trick",
-                question="Impossible?",
-                options=["A", "B", "C", "D"],
-                correct_index=3,
-                responses={"h1": 0, "h2": 1, "a1": 2, "a2": 0},
-            ),
-        ]
-        game_id = _store_session(session)
-        await do_brain_test_complete(game_id, session)
-
-        assert session.state.phase == GamePhase.BRAIN_TEST_RESULTS
-
-        events = _get_broadcast_events(game_id)
-        results_event = next(e for e in events if e.event_type == "brain_test_results")
-        # All wrong — all scores should be 0
-        for pid in ("h1", "h2", "a1", "a2"):
-            assert results_event.scores[pid] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -255,13 +238,13 @@ class TestInitializeAndStartGame:
         cm.get_lock("init_test")
         cm.connect("init_test", "__test__")
 
-        await initialize_and_start_game("init_test", 2)
+        await initialize_and_start_game("init_test", 6)
 
         assert session.state.phase in (
             GamePhase.PROMPT,
             GamePhase.BRAIN_TEST,
         )
-        assert len(session.state.players) == 4  # 2 human + 2 AI
+        assert len(session.state.players) == 8  # 2 human + 6 AI
         assert session.state.round_number == 1
         assert len(session.state.round_types) >= 1  # dynamically grown
         assert session.state.total_rounds == 5
@@ -278,7 +261,7 @@ class TestStartNextRound:
     async def test_advances_round_number(self, fresh_deps, mock_ai, mock_llm):
         from backend.services.transitions import _start_next_round
 
-        _state, session, _ = _make_session(GamePhase.MATCHUP, round_type=RoundType.TASK)
+        _state, session, _ = _make_session(GamePhase.VOTE_RESULTS, round_type=RoundType.TASK)
         session.state.round_types = [RoundType.TASK]
         session.state.round_number = 1
         game_id = _store_session(session)

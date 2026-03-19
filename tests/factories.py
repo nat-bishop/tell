@@ -6,7 +6,6 @@ import uuid
 
 from schemas.game_state import (
     GamePhase,
-    Matchup,
     Player,
     PlayerRole,
     RoundState,
@@ -42,8 +41,7 @@ def make_round_state(
     prompt_text: str = "Test prompt",
     prompt_category: str = "logical",
     answers: dict[str, str] | None = None,
-    matchups: list[Matchup] | None = None,
-    bye_player_id: str | None = None,
+    gallery_votes: dict[str, str] | None = None,
 ) -> RoundState:
     return RoundState(
         round_number=round_number,
@@ -51,8 +49,7 @@ def make_round_state(
         prompt_category=prompt_category,
         round_type=round_type,
         answers=answers or {},
-        matchups=matchups or [],
-        bye_player_id=bye_player_id,
+        gallery_votes=gallery_votes or {},
     )
 
 
@@ -88,12 +85,16 @@ def make_standard_game(
     phase: GamePhase = GamePhase.PROMPT,
     round_type: RoundType = RoundType.TASK,
 ) -> tuple[TellGameState, list[Player]]:
-    """4-player game: 2 human (first is host), 2 AI. Returns (state, players)."""
+    """8-player game: 2 human (first is host), 6 AI. Returns (state, players)."""
     h1 = make_player(role=PlayerRole.HUMAN, alias="UNIT-01", player_id="h1", is_host=True)
     h2 = make_player(role=PlayerRole.HUMAN, alias="BOT-42", player_id="h2")
     a1 = make_player(role=PlayerRole.AI, alias="CORE-07", player_id="a1")
     a2 = make_player(role=PlayerRole.AI, alias="WIRE-13", player_id="a2")
-    players = [h1, h2, a1, a2]
+    a3 = make_player(role=PlayerRole.AI, alias="NODE-05", player_id="a3")
+    a4 = make_player(role=PlayerRole.AI, alias="GRID-11", player_id="a4")
+    a5 = make_player(role=PlayerRole.AI, alias="BYTE-03", player_id="a5")
+    a6 = make_player(role=PlayerRole.AI, alias="FLUX-09", player_id="a6")
+    players = [h1, h2, a1, a2, a3, a4, a5, a6]
 
     state = make_game_state(
         phase=phase,

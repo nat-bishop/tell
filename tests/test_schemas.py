@@ -8,7 +8,7 @@ from schemas.aliases import generate_aliases
 from schemas.api_models import (
     FinalRevealEvent,
     PlayerJoinedEvent,
-    SubmitMatchupVoteRequest,
+    SubmitVoteRequest,
 )
 from schemas.game_state import (
     GamePhase,
@@ -18,7 +18,7 @@ from schemas.game_state import (
     RoundType,
     TellGameState,
 )
-from schemas.prompts import TASK_PROMPTS, select_task_prompt
+from schemas.prompts import DUEL_PROMPTS, select_duel_prompt
 
 # ---------------------------------------------------------------------------
 # Alias generation
@@ -67,31 +67,31 @@ class TestModelDefaults:
         )
         assert rs.round_type == RoundType.TASK
         assert rs.answers == {}
-        assert rs.matchups == []
+        assert rs.gallery_votes == {}
         assert rs.current_sub_round == 0
 
 
 # ---------------------------------------------------------------------------
-# Task prompt selection
+# Duel prompt selection
 # ---------------------------------------------------------------------------
 
 
-class TestTaskPromptSelection:
-    def test_task_prompts_exist(self):
-        assert len(TASK_PROMPTS) >= 40
+class TestDuelPromptSelection:
+    def test_duel_prompts_exist(self):
+        assert len(DUEL_PROMPTS) >= 35
 
     def test_no_repeats(self):
         used = []
         seen_indices = set()
         for _ in range(10):
-            idx, _prompt = select_task_prompt(used, None)
+            idx, _prompt = select_duel_prompt(used, None)
             assert idx not in seen_indices
             seen_indices.add(idx)
             used.append(idx)
 
     def test_avoids_same_category(self):
-        _idx, prompt = select_task_prompt([], "haiku")
-        assert prompt.category.value != "haiku"
+        _idx, prompt = select_duel_prompt([], "style_transfer")
+        assert prompt.category.value != "style_transfer"
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +108,13 @@ class TestEventSerialization:
         assert restored.event_type == "player_joined"
         assert restored.seq == 1
 
-    def test_matchup_vote_request_validation(self):
-        req = SubmitMatchupVoteRequest(player_id="p1", matchup_index=0, choice=1)
-        assert req.choice == 1
+    def test_vote_request_validation(self):
+        req = SubmitVoteRequest(player_id="p1", voted_for_player_id="p2")
+        assert req.voted_for_player_id == "p2"
 
         with pytest.raises(ValueError):
             # Missing required field
-            SubmitMatchupVoteRequest(matchup_index=0, choice=1)
+            SubmitVoteRequest(player_id="p1")
 
     def test_final_reveal_event(self):
         event = FinalRevealEvent(

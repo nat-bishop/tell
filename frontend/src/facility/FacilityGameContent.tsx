@@ -14,14 +14,15 @@ import { RiveScene } from "@/facility/RiveScene";
 import { useFacilityCharacters } from "@/facility/useFacilityCharacters";
 
 const INTERSTITIAL_PHASES = new Set<GamePhase>([
-  "prompt", "brain_test", "brain_test_results", "matchup",
+  "prompt", "brain_test", "brain_test_results", "vote",
 ]);
 
 const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   prompt: 45,
   brain_test: 12,
   brain_test_results: 15,
-  matchup: 12,
+  vote: 25,
+  vote_results: 8,
 };
 
 function ColdOpen({ playerCount }: { playerCount: number }) {

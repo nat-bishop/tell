@@ -48,8 +48,8 @@ class StateSyncEvent(GameEvent):
     my_answer: str | None = None
     scores: dict[str, int] = Field(default_factory=dict)
     total_rounds: int = 5
-    # Reading period
-    writing_begins_at: str | None = None
+    # Gallery vote state (reconnection)
+    my_vote: str | None = None
 
 
 class PlayerJoinedEvent(GameEvent):
@@ -79,10 +79,7 @@ class PhaseChangedEvent(GameEvent):
     phase_duration: int | None = None
     answers: dict[str, str] = Field(default_factory=dict)
     round_type: str | None = None
-    writing_begins_at: str | None = None
     action_starts_at: str | None = None
-    # Matchup data (Task rounds)
-    matchups: list[dict] | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):
@@ -134,24 +131,17 @@ class BrainTestResultsEvent(GameEvent):
     scores: dict[str, int] = Field(default_factory=dict)
 
 
-class MatchupChallengeEvent(GameEvent):
-    event_type: Literal["matchup_challenge"] = "matchup_challenge"
-    matchup_index: int
-    left_player_id: str
-    left_alias: str
-    left_answer: str
-    right_player_id: str
-    right_alias: str
-    right_answer: str
-    prompt_text: str
-    sub_deadline: str | None = None
-    phase_duration: int | None = None
+class VoteSubmittedEvent(GameEvent):
+    event_type: Literal["vote_submitted"] = "vote_submitted"
+    player_id: str
+    vote_count: int  # how many have voted so far
+    total: int  # total eligible voters
 
 
-class MatchupResultsEvent(GameEvent):
-    event_type: Literal["matchup_results"] = "matchup_results"
-    matchup_results: list[dict]  # per-matchup vote tallies
-    scores: dict[str, int] = Field(default_factory=dict)  # running totals
+class VoteResultsEvent(GameEvent):
+    event_type: Literal["vote_results"] = "vote_results"
+    vote_counts: dict[str, int] = Field(default_factory=dict)  # player_id → votes received
+    scores: dict[str, int] = Field(default_factory=dict)  # running total scores
 
 
 class FinalRevealEvent(GameEvent):
@@ -161,12 +151,11 @@ class FinalRevealEvent(GameEvent):
     narrator_text: str | None = None
 
 
-class SubmitMatchupVoteRequest(BaseModel):
+class SubmitVoteRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
-    matchup_index: int
-    choice: int  # 0=left, 1=right
+    voted_for_player_id: str
 
 
 class SubmitBrainTestAnswerRequest(BaseModel):
@@ -214,7 +203,6 @@ class StartGameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
-    ai_count: int = 2
 
 
 class SubmitAnswerRequest(BaseModel):

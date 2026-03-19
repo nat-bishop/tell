@@ -10,8 +10,8 @@ import type {
   NarrationData,
   BrainTestChallengeData,
   BrainTestResultsData,
-  MatchupChallengeData,
-  MatchupResultsData,
+  VoteSubmittedData,
+  VoteResultsData,
   FinalRevealData,
 } from "@/hooks/useGameStore";
 
@@ -28,8 +28,8 @@ export interface GameEventCallbacks {
   onNarration: (data: NarrationData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
   onBrainTestResults: (data: BrainTestResultsData) => void;
-  onMatchupChallenge: (data: MatchupChallengeData) => void;
-  onMatchupResults: (data: MatchupResultsData) => void;
+  onVoteSubmitted: (data: VoteSubmittedData) => void;
+  onVoteResults: (data: VoteResultsData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
   onOpen: () => void;
   onError: () => void;
@@ -58,8 +58,8 @@ export function connectGameEvents(
     narration: callbacks.onNarration,
     brain_test_challenge: callbacks.onBrainTestChallenge,
     brain_test_results: callbacks.onBrainTestResults,
-    matchup_challenge: callbacks.onMatchupChallenge,
-    matchup_results: callbacks.onMatchupResults,
+    vote_submitted: callbacks.onVoteSubmitted,
+    vote_results: callbacks.onVoteResults,
     final_reveal: callbacks.onFinalReveal,
   };
 

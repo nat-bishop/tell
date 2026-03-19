@@ -13,7 +13,6 @@ from pydantic_ai.messages import ModelMessage
 from backend.api.deps import (
     get_connection_manager,
     get_game_repository,
-    get_settings,
     get_timer_manager,
 )
 from backend.llm.agents import (
@@ -30,9 +29,11 @@ from backend.services.game_logic import (
 )
 from backend.services.transitions import (
     do_prompt_complete,
+    do_vote_complete,
 )
 from schemas.api_models import (
     AnswerSubmittedEvent,
+    VoteSubmittedEvent,
 )
 from schemas.game_state import GamePhase, PlayerRole, RoundType
 
@@ -115,13 +116,6 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
         current_prompt = rs.prompt_text
         round_type = rs.round_type
 
-        # For matchup Task rounds, use the player's specific matchup prompt
-        if rs.matchups:
-            for m in rs.matchups:
-                if player_id in m.pair:
-                    current_prompt = m.prompt_text
-                    break
-
         player_map = {p.id: p for p in state.players}
         for pid, answer in rs.answers.items():
             p = player_map.get(pid)
@@ -166,11 +160,14 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
     tasks: list[asyncio.Task] = []
 
     if phase == GamePhase.PROMPT:
-        # Offset AI answer delays past the reading period
-        reading = get_settings().prompt_reading_duration
         for player in ai_players:
-            delay = random.uniform(reading + 5, reading + 25)
+            delay = random.uniform(3, 20)
             tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
+
+    elif phase == GamePhase.VOTE:
+        for player in ai_players:
+            delay = random.uniform(2, 8)
+            tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
 
     _ai_tasks[game_id] = tasks
 
@@ -238,15 +235,6 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player answers a prompt after a delay."""
 
     async def generate() -> tuple[str, list[ModelMessage]] | None:
-        # Skip bye players — they don't answer in matchup rounds
-        repo = get_game_repository()
-        session = repo.get(game_id)
-        if (
-            session
-            and session.state.current_round
-            and session.state.current_round.bye_player_id == player_id
-        ):
-            return None
         history = _get_history(game_id, player_id)
         deps = _build_deps(game_id, player_id)
         if not deps:
@@ -265,9 +253,6 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
 
         answer_count = len(state.current_round.answers)
         total_count = len(state.players)
-        # Exclude bye player from total count in matchup rounds
-        if state.current_round.bye_player_id:
-            total_count -= 1
 
         await cm.broadcast(
             game_id,
@@ -292,6 +277,88 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     await _run_ai_task(
         game_id, player_id, delay, GamePhase.PROMPT, generate, apply, "ai_answer_task"
     )
+
+
+async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
+    """AI player votes in gallery vote phase after a delay."""
+
+    async def generate() -> str | None:
+        """Try LLM vote, fall back to random."""
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session:
+            return None
+        state = session.state
+        if not state.current_round:
+            return None
+
+        # Build lookups in a single pass
+        answers_by_alias: dict[str, str] = {}
+        alias_to_id: dict[str, str] = {}
+        other_ids: list[str] = []
+        for p in state.players:
+            alias_to_id[p.alias] = p.id
+            if p.id != player_id:
+                other_ids.append(p.id)
+                answer = state.current_round.answers.get(p.id)
+                if answer:
+                    answers_by_alias[p.alias] = answer
+
+        if not other_ids:
+            return None
+
+        # Try LLM vote
+        try:
+            from backend.llm.agents import decide_gallery_vote
+
+            voted_alias = await decide_gallery_vote(
+                state.current_round.prompt_text,
+                answers_by_alias,
+                game_id=game_id,
+            )
+            if voted_alias:
+                voted_id = alias_to_id.get(voted_alias)
+                if voted_id and voted_id != player_id:
+                    return voted_id
+        except Exception:
+            log.warning("ai_vote_llm_fallback", game_id=game_id, player_id=player_id)
+
+        # Fallback: random vote (any non-self player)
+        return random.choice(other_ids)
+
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        voted_for_id = result
+        state = session.state
+        if not state.current_round:
+            return
+
+        state.current_round.gallery_votes[player_id] = voted_for_id
+
+        vote_count = len(state.current_round.gallery_votes)
+        total = len(state.players)
+
+        await cm.broadcast(
+            game_id,
+            VoteSubmittedEvent(
+                seq=session.next_seq(),
+                player_id=player_id,
+                vote_count=vote_count,
+                total=total,
+            ),
+        )
+        log.info(
+            "ai_vote_cast",
+            game_id=game_id,
+            player_id=player_id,
+            voted_for=voted_for_id,
+        )
+
+        # Early complete: all voted
+        if vote_count >= total:
+            get_timer_manager().cancel_timer(game_id)
+            await do_vote_complete(game_id, session)
+
+    await _run_ai_task(game_id, player_id, delay, GamePhase.VOTE, generate, apply, "ai_vote_task")
 
 
 async def on_brain_test_challenge(game_id: str, challenge_index: int) -> None:
@@ -370,80 +437,6 @@ async def _ai_brain_test_task(
     except Exception:
         log.exception(
             "ai_brain_test_error",
-            game_id=game_id,
-            player_id=player_id,
-        )
-
-
-async def on_matchup_challenge(game_id: str, matchup_index: int) -> None:
-    """Schedule AI votes for a matchup challenge (non-pair AI players vote randomly)."""
-    repo = get_game_repository()
-    session = repo.get(game_id)
-    if not session:
-        return
-
-    state = session.state
-    rs = state.current_round
-    if not rs or matchup_index >= len(rs.matchups):
-        return
-
-    matchup = rs.matchups[matchup_index]
-    pair_ids = set(matchup.pair)
-
-    # AI players not in the pair can vote
-    ai_voters = [p for p in state.players if p.role == PlayerRole.AI and p.id not in pair_ids]
-    if not ai_voters:
-        return
-
-    tasks: list[asyncio.Task] = []
-    for player in ai_voters:
-        delay = random.uniform(2, 8)
-        tasks.append(
-            asyncio.create_task(_ai_matchup_vote_task(game_id, player.id, matchup_index, delay))
-        )
-
-    _ai_tasks.setdefault(game_id, []).extend(tasks)
-
-
-async def _ai_matchup_vote_task(
-    game_id: str, player_id: str, matchup_index: int, delay: float
-) -> None:
-    """AI player votes on a matchup after a delay."""
-    try:
-        await asyncio.sleep(delay)
-
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
-
-        async with lock:
-            repo = get_game_repository()
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.MATCHUP:
-                return
-            rs = session.state.current_round
-            if not rs or matchup_index >= len(rs.matchups):
-                return
-            matchup = rs.matchups[matchup_index]
-            if player_id in matchup.votes:
-                return
-
-            # Random choice: 0=left, 1=right
-            choice = random.randint(0, 1)
-            matchup.votes[player_id] = choice
-
-            log.info(
-                "ai_matchup_vote",
-                game_id=game_id,
-                player_id=player_id,
-                matchup_index=matchup_index,
-                choice=choice,
-            )
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception(
-            "ai_matchup_vote_error",
             game_id=game_id,
             player_id=player_id,
         )

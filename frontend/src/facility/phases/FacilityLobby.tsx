@@ -11,7 +11,6 @@ export function FacilityLobby() {
   const playerCount = players.length;
   const canStart = playerCount >= 1;
 
-  const [aiCount, setAiCount] = useState(2);
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -21,7 +20,7 @@ export function FacilityLobby() {
 
   const handleStart = async () => {
     if (gameId && playerId) {
-      await startGame(gameId, playerId, aiCount);
+      await startGame(gameId, playerId);
     }
   };
 
@@ -75,25 +74,7 @@ export function FacilityLobby() {
         <div className="flex flex-col items-center gap-4 h-full justify-center">
           {isHost && (
             <>
-              <div className="flex items-center gap-3">
-                <SystemText>ai players</SystemText>
-                <div className="flex items-center gap-1">
-                  {[1, 2, 3].map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => setAiCount(n)}
-                      className={`font-system text-[0.8rem] w-8 h-8 rounded transition-all duration-200 ${
-                        aiCount === n
-                          ? "text-ink border border-cold bg-raised"
-                          : "text-dim border border-rule"
-                      }`}
-                      style={aiCount === n ? { boxShadow: "0 0 8px var(--cold-glow)" } : undefined}
-                    >
-                      {n}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <SystemText>6 AI will join on start</SystemText>
 
               <button
                 onClick={handleStart}

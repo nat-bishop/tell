@@ -11,14 +11,13 @@ if TYPE_CHECKING:
 
 from schemas.api_models import (
     GameOverEvent,
-    MatchupResultsEvent,
     PhaseChangedEvent,
+    VoteResultsEvent,
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
     BrainTestChallenge,
     GamePhase,
-    Matchup,
     Player,
     RoundState,
     RoundType,
@@ -31,16 +30,11 @@ def get_player_by_id(state: TellGameState, player_id: str) -> Player | None:
 
 
 def fill_missing_answers(state: TellGameState) -> None:
-    """Fill NO_RESPONSE for players who haven't answered.
-
-    For matchup Task rounds, only paired players need answers (bye player excluded).
-    """
+    """Fill NO_RESPONSE for players who haven't answered."""
     rs = state.current_round
     if not rs:
         return
     for p in state.players:
-        if p.id == rs.bye_player_id:
-            continue
         if p.id not in rs.answers:
             rs.answers[p.id] = NO_RESPONSE
 
@@ -55,7 +49,7 @@ class MinigameMeta:
 
 
 MINIGAMES: dict[RoundType, MinigameMeta] = {
-    RoundType.TASK: MinigameMeta(min_players=3),
+    RoundType.TASK: MinigameMeta(min_players=2),
     RoundType.BRAIN_TEST: MinigameMeta(min_players=2),
 }
 
@@ -66,7 +60,6 @@ def select_next_round_type(
     """Pick the next round type dynamically.
 
     Rules:
-    - Exclude types where player count < min_players (not checked here — caller's job)
     - No repeat of previous round type
     - Random from remaining eligible types
     """
@@ -90,7 +83,8 @@ _INTERSTITIAL_HOLD: dict[GamePhase, int] = {
     GamePhase.PROMPT: 5,  # round start — staggered visual beats
     GamePhase.BRAIN_TEST: 5,  # round start
     GamePhase.BRAIN_TEST_RESULTS: 2,
-    GamePhase.MATCHUP: 3,
+    GamePhase.VOTE: 3,
+    GamePhase.VOTE_RESULTS: 2,
 }
 
 
@@ -102,18 +96,17 @@ def get_interstitial_hold(phase: GamePhase) -> int:
 def get_phase_duration(
     settings, phase: GamePhase, round_type: RoundType | None = None
 ) -> int | None:
-    """Get the duration for a given phase, accounting for round-type-specific overrides."""
+    """Get the duration for a given phase."""
     if phase == GamePhase.PROMPT:
-        reading = settings.prompt_reading_duration
-        if round_type == RoundType.TASK:
-            return settings.task_prompt_duration + reading
-        return settings.prompt_duration + reading
+        return settings.prompt_duration
+    if phase == GamePhase.VOTE:
+        return settings.vote_duration
+    if phase == GamePhase.VOTE_RESULTS:
+        return settings.vote_results_duration
     if phase == GamePhase.BRAIN_TEST:
         return settings.brain_test_duration
     if phase == GamePhase.BRAIN_TEST_RESULTS:
         return settings.brain_test_results_duration
-    if phase == GamePhase.MATCHUP:
-        return settings.matchup_duration
     return None
 
 
@@ -162,133 +155,52 @@ def transition_to_brain_test_results(state: TellGameState, duration: int) -> Tel
     return _transition_to_phase(state, GamePhase.BRAIN_TEST_RESULTS, duration)
 
 
-def transition_to_matchup(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.MATCHUP, duration)
-
-
-def generate_matchup_pairs(
-    state: TellGameState,
-) -> tuple[list[tuple[str, str]], str | None]:
-    """Shuffle players into pairs. Odd count -> one bye player.
-
-    Returns (pairs, bye_player_id).
-    """
-    ids = [p.id for p in state.players]
-    random.shuffle(ids)
-
-    bye_id: str | None = None
-    if len(ids) % 2 == 1:
-        bye_id = ids.pop()
-
-    pairs: list[tuple[str, str]] = []
-    for i in range(0, len(ids), 2):
-        pairs.append((ids[i], ids[i + 1]))
-
-    return pairs, bye_id
-
-
-def transition_to_task_matchup_prompt(
-    state: TellGameState, duration: int, reading_duration: int = 0
-) -> TellGameState:
-    """Start a new Task round with per-pair matchup prompts."""
-    from schemas.prompts import select_task_prompt
+def transition_to_task_prompt(state: TellGameState, duration: int) -> TellGameState:
+    """Start a new Task round — single prompt for all players."""
+    from schemas.prompts import select_duel_prompt
 
     state.round_number += 1
-
-    pairs, bye_id = generate_matchup_pairs(state)
-
-    matchups: list[Matchup] = []
-    for left_id, right_id in pairs:
-        idx, prompt = select_task_prompt(
-            state.used_task_prompt_indices,
-            state.last_task_prompt_category,
-        )
-        state.used_task_prompt_indices.append(idx)
-        state.last_task_prompt_category = prompt.category.value
-        matchups.append(
-            Matchup(
-                pair=[left_id, right_id],
-                prompt_text=prompt.text,
-                prompt_category=prompt.category.value,
-            )
-        )
-
-    # Use the first pair's prompt as the round-level prompt_text (for narrator context)
-    first_prompt = matchups[0].prompt_text if matchups else "matchup"
-    first_category = matchups[0].prompt_category if matchups else "task"
-
-    now = datetime.now(UTC)
+    idx, prompt = select_duel_prompt(state.used_prompt_indices, state.last_prompt_category)
+    state.used_prompt_indices.append(idx)
+    state.last_prompt_category = prompt.category.value
     state.current_round = RoundState(
         round_number=state.round_number,
-        prompt_text=first_prompt,
-        prompt_category=first_category,
+        prompt_text=prompt.text,
+        prompt_category=prompt.category.value,
         round_type=RoundType.TASK,
-        matchups=matchups,
-        current_matchup=0,
-        bye_player_id=bye_id,
-        writing_begins_at=(
-            now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
-        ),
     )
-    state.phase = GamePhase.PROMPT
-    hold = get_interstitial_hold(GamePhase.PROMPT)
-    state.phase_deadline = now + timedelta(seconds=duration + hold)
-    return state
+    return _transition_to_phase(state, GamePhase.PROMPT, duration)
 
 
-def resolve_matchup_votes(
-    state: TellGameState, seq_fn
-) -> tuple[TellGameState, MatchupResultsEvent]:
-    """Tally per-matchup LEFT/RIGHT votes. Award 1 point to the winner of each matchup."""
+def transition_to_vote(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.VOTE, duration)
+
+
+def transition_to_vote_results(state: TellGameState, duration: int) -> TellGameState:
+    return _transition_to_phase(state, GamePhase.VOTE_RESULTS, duration)
+
+
+def tally_gallery_votes(state: TellGameState) -> dict[str, int]:
+    """Count votes received per player. Returns player_id → vote count."""
+    vote_counts: dict[str, int] = {p.id: 0 for p in state.players}
     rs = state.current_round
-    matchups = rs.matchups if rs else []
+    if rs:
+        for target_id in rs.gallery_votes.values():
+            if target_id in vote_counts:
+                vote_counts[target_id] += 1
+    return vote_counts
 
+
+def resolve_gallery_votes(state: TellGameState, seq_fn) -> tuple[TellGameState, VoteResultsEvent]:
+    """Tally gallery votes. Each vote received = -1 point."""
+    vote_counts = tally_gallery_votes(state)
+    # Apply penalties
     player_map = {p.id: p for p in state.players}
-    matchup_results_list: list[dict] = []
-
-    for i, m in enumerate(matchups):
-        left_id, right_id = m.pair[0], m.pair[1]
-        left_votes = 0
-        right_votes = 0
-
-        for _voter_id, choice in m.votes.items():
-            if choice == 0:
-                left_votes += 1
-            else:
-                right_votes += 1
-
-        left_player = player_map.get(left_id)
-        right_player = player_map.get(right_id)
-
-        # Award point to winner (no point on tie)
-        if left_votes > right_votes and left_player:
-            left_player.score += 1
-        elif right_votes > left_votes and right_player:
-            right_player.score += 1
-
-        matchup_results_list.append(
-            {
-                "matchup_index": i,
-                "left_player_id": left_id,
-                "left_alias": left_player.alias if left_player else left_id,
-                "left_votes": left_votes,
-                "right_player_id": right_id,
-                "right_alias": right_player.alias if right_player else right_id,
-                "right_votes": right_votes,
-                "prompt_text": m.prompt_text,
-            }
-        )
-
-    # Build scores dict: all players' current total scores
+    for pid, count in vote_counts.items():
+        if count > 0 and pid in player_map:
+            player_map[pid].score -= count
     scores = {p.id: p.score for p in state.players}
-
-    results_event = MatchupResultsEvent(
-        seq=seq_fn(),
-        matchup_results=matchup_results_list,
-        scores=scores,
-    )
-
-    return state, results_event
+    return state, VoteResultsEvent(seq=seq_fn(), vote_counts=vote_counts, scores=scores)
 
 
 # ---------------------------------------------------------------------------
@@ -405,30 +317,23 @@ def build_state_sync(
     prompt_text: str | None = None
     prompt_category: str | None = None
     round_type: str | None = None
+    my_vote: str | None = None
 
     if round_state:
         prompt_text = round_state.prompt_text
         prompt_category = round_state.prompt_category
         round_type = round_state.round_type
 
-        # For matchup Task rounds, show the player's specific prompt during PROMPT
-        if round_state.matchups and state.phase == GamePhase.PROMPT:
-            for m in round_state.matchups:
-                if player_id in m.pair:
-                    prompt_text = m.prompt_text
-                    prompt_category = m.prompt_category
-                    break
-            else:
-                # Bye player
-                prompt_text = None
-                prompt_category = None
-
-        # Answers visible during game_over, matchup
-        if state.phase in (GamePhase.GAME_OVER, GamePhase.MATCHUP):
+        # Answers visible during VOTE, VOTE_RESULTS, and GAME_OVER
+        if state.phase in (GamePhase.VOTE, GamePhase.VOTE_RESULTS, GamePhase.GAME_OVER):
             answers = round_state.answers
 
         if state.phase == GamePhase.PROMPT and player_id in round_state.answers:
             my_answer = round_state.answers[player_id]
+
+        # Include player's own vote during VOTE phase
+        if state.phase == GamePhase.VOTE and player_id in round_state.gallery_votes:
+            my_vote = round_state.gallery_votes[player_id]
 
     player_obj = get_player_by_id(state, player_id)
     is_host = player_obj.is_host if player_obj else False
@@ -454,11 +359,7 @@ def build_state_sync(
         "winner_ids": state.winner_ids,
         "is_host": is_host,
         "my_answer": my_answer,
-        "writing_begins_at": (
-            round_state.writing_begins_at.isoformat()
-            if round_state and round_state.writing_begins_at
-            else None
-        ),
+        "my_vote": my_vote,
         "action_starts_at": (
             (state.phase_deadline - timedelta(seconds=phase_duration)).isoformat()
             if state.phase_deadline and phase_duration

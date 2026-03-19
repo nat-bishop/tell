@@ -8,17 +8,18 @@ from backend.services.game_logic import (
     build_state_sync,
     check_game_over,
     fill_missing_answers,
-    generate_matchup_pairs,
     get_final_rankings,
     get_next_round_type,
     get_phase_duration,
     make_game_over_event,
     make_phase_changed_event,
-    resolve_matchup_votes,
+    resolve_gallery_votes,
     sanitize_players_for_client,
     score_brain_test,
     select_next_round_type,
-    transition_to_task_matchup_prompt,
+    transition_to_task_prompt,
+    transition_to_vote,
+    transition_to_vote_results,
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
@@ -27,7 +28,7 @@ from schemas.game_state import (
     PlayerRole,
     RoundType,
 )
-from tests.factories import make_game_state, make_player, make_round_state, make_standard_game
+from tests.factories import make_game_state, make_player, make_standard_game
 
 # ---------------------------------------------------------------------------
 # Player queries
@@ -89,7 +90,7 @@ class TestCheckGameOver:
         assert result is not None
         assert result[0] == "winners"
         # All tied at 0 — everyone is a winner
-        assert len(result[1]) == 4
+        assert len(result[1]) == 8
 
 
 # ---------------------------------------------------------------------------
@@ -146,17 +147,28 @@ class TestPhaseTransitions:
             results.add(rt)
         assert results == {RoundType.TASK, RoundType.BRAIN_TEST}
 
-    def test_transition_to_task_matchup_prompt(self):
+    def test_transition_to_task_prompt(self):
         state, _ = make_standard_game()
         state.round_number = 0
-        result = transition_to_task_matchup_prompt(state, 25)
+        result = transition_to_task_prompt(state, 45)
         assert result.phase == GamePhase.PROMPT
         assert result.round_number == 1
         assert result.current_round is not None
         assert result.current_round.round_type == RoundType.TASK
         assert result.current_round.prompt_text is not None
-        # Should have matchups
-        assert len(result.current_round.matchups) > 0
+        assert len(result.used_prompt_indices) >= 1
+
+    def test_transition_to_vote(self):
+        state, _ = make_standard_game()
+        result = transition_to_vote(state, 25)
+        assert result.phase == GamePhase.VOTE
+        assert result.phase_deadline is not None
+
+    def test_transition_to_vote_results(self):
+        state, _ = make_standard_game()
+        result = transition_to_vote_results(state, 8)
+        assert result.phase == GamePhase.VOTE_RESULTS
+        assert result.phase_deadline is not None
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +186,8 @@ class TestFillFunctions:
         assert state.current_round.answers["h1"] == "my answer"
         assert state.current_round.answers["h2"] == NO_RESPONSE
         assert state.current_round.answers["a1"] == NO_RESPONSE
-        assert state.current_round.answers["a2"] == NO_RESPONSE
+        # All 8 players should have answers
+        assert len(state.current_round.answers) == 8
 
     def test_fill_noop_without_round(self):
         state = make_game_state(current_round=None)
@@ -183,9 +196,10 @@ class TestFillFunctions:
 
     def test_fill_missing_answers_noop_when_all_answered(self):
         state, _ = make_standard_game()
-        state.current_round.answers = {"h1": "a", "h2": "b", "a1": "c", "a2": "d"}
+        all_answers = {p.id: f"answer-{p.id}" for p in state.players}
+        state.current_round.answers = all_answers
         fill_missing_answers(state)
-        assert state.current_round.answers == {"h1": "a", "h2": "b", "a1": "c", "a2": "d"}
+        assert len(state.current_round.answers) == 8
 
 
 # ---------------------------------------------------------------------------
@@ -226,12 +240,19 @@ class TestStateSanitization:
         assert sync["answers"] == {}  # all answers hidden during PROMPT
         assert sync["my_answer"] == "my answer"  # own answer visible
 
-    def test_build_state_sync_shows_answers_in_matchup(self):
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+    def test_build_state_sync_shows_answers_in_vote(self):
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["answers"] == {"h1": "my answer", "h2": "other"}
+
+    def test_build_state_sync_includes_my_vote_during_vote(self):
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        state.current_round.gallery_votes = {"h1": "a1"}
+
+        sync = build_state_sync(state, "h1", seq=1)
+        assert sync["my_vote"] == "a1"
 
     def test_build_state_sync_includes_scores(self):
         state, _ = make_standard_game(phase=GamePhase.PROMPT)
@@ -263,26 +284,24 @@ class TestStateSanitization:
         assert event.scores["h1"] == 3
 
     def test_make_phase_changed_event(self):
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
         event = make_phase_changed_event(state, seq=5)
-        assert event.phase == "matchup"
+        assert event.phase == "vote"
         assert event.round_number == 1
         assert event.seq == 5
 
 
 # ---------------------------------------------------------------------------
-# Task prompt selection
+# Duel prompt selection
 # ---------------------------------------------------------------------------
 
 
-class TestTaskPrompts:
-    def test_task_prompt_indices_tracked(self):
-        """Task prompts track used indices separately."""
+class TestDuelPrompts:
+    def test_duel_prompt_indices_tracked(self):
         state, _ = make_standard_game()
         state.round_number = 0
-
-        result = transition_to_task_matchup_prompt(state, 25)
-        assert len(result.used_task_prompt_indices) >= 1
+        result = transition_to_task_prompt(state, 45)
+        assert len(result.used_prompt_indices) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -293,32 +312,31 @@ class TestTaskPrompts:
 def _mock_settings(**overrides):
     defaults = {
         "prompt_duration": 45,
-        "task_prompt_duration": 25,
-        "prompt_reading_duration": 10,
+        "vote_duration": 25,
+        "vote_results_duration": 8,
         "brain_test_duration": 85,
         "brain_test_results_duration": 15,
-        "matchup_duration": 30,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
 
 class TestGetPhaseDuration:
-    def test_prompt_default(self):
+    def test_prompt(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.PROMPT) == 55  # 45 + 10
+        assert get_phase_duration(s, GamePhase.PROMPT) == 45
 
-    def test_prompt_task(self):
+    def test_vote(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.PROMPT, RoundType.TASK) == 35  # 25 + 10
+        assert get_phase_duration(s, GamePhase.VOTE) == 25
+
+    def test_vote_results(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.VOTE_RESULTS) == 8
 
     def test_brain_test(self):
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.BRAIN_TEST) == 85
-
-    def test_matchup(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.MATCHUP) == 30
 
     def test_unknown_phase(self):
         s = _mock_settings()
@@ -400,147 +418,11 @@ class TestScoreBrainTest:
 
 
 # ---------------------------------------------------------------------------
-# Scoring calculation
+# Gallery vote scoring
 # ---------------------------------------------------------------------------
 
 
-class TestScoringCalculation:
-    def test_matchup_winner_gets_point(self):
-        from schemas.game_state import Matchup
-
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
-        state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 0},  # both vote left (h1)
-            ),
-        ]
-
-        def _seq_fn():
-            n = [0]
-
-            def fn():
-                n[0] += 1
-                return n[0]
-
-            return fn
-
-        state, results_event = resolve_matchup_votes(state, _seq_fn())
-        # h1 won (2-0), should get +1 score
-        h1 = next(p for p in state.players if p.id == "h1")
-        h2 = next(p for p in state.players if p.id == "h2")
-        assert h1.score == 1
-        assert h2.score == 0
-        assert results_event.scores["h1"] == 1
-
-    def test_tie_matchup_no_points(self):
-        from schemas.game_state import Matchup
-
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
-        state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 1},  # tie
-            ),
-        ]
-
-        def _seq_fn():
-            n = [0]
-
-            def fn():
-                n[0] += 1
-                return n[0]
-
-            return fn
-
-        state, _results_event = resolve_matchup_votes(state, _seq_fn())
-        h1 = next(p for p in state.players if p.id == "h1")
-        h2 = next(p for p in state.players if p.id == "h2")
-        assert h1.score == 0
-        assert h2.score == 0
-
-    def test_cumulative_scoring(self):
-        from schemas.game_state import Matchup
-
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
-        state.players[0].score = 2  # h1 already had 2 points
-
-        state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 0},  # h1 wins
-            ),
-        ]
-
-        def _seq_fn():
-            n = [0]
-
-            def fn():
-                n[0] += 1
-                return n[0]
-
-            return fn
-
-        state, results_event = resolve_matchup_votes(state, _seq_fn())
-        h1 = next(p for p in state.players if p.id == "h1")
-        assert h1.score == 3  # 2 + 1
-        assert results_event.scores["h1"] == 3
-
-
-# ---------------------------------------------------------------------------
-# Matchup pairing
-# ---------------------------------------------------------------------------
-
-
-class TestGenerateMatchupPairs:
-    def test_even_count_no_bye(self):
-        state, _ = make_standard_game()  # 4 players: h1, h2, a1, a2
-        pairs, bye = generate_matchup_pairs(state)
-        assert bye is None
-        assert len(pairs) == 2
-        all_ids = [pid for pair in pairs for pid in pair]
-        assert len(set(all_ids)) == 4
-
-    def test_odd_count_has_bye(self):
-        state = make_game_state(
-            players=[
-                make_player(player_id="p1"),
-                make_player(player_id="p2"),
-                make_player(player_id="p3"),
-            ]
-        )
-        pairs, bye = generate_matchup_pairs(state)
-        assert bye is not None
-        assert len(pairs) == 1
-        all_ids = [pid for pair in pairs for pid in pair]
-        assert bye not in all_ids
-        assert len(set(all_ids)) == 2
-
-    def test_three_players(self):
-        state = make_game_state(
-            players=[
-                make_player(player_id="p1"),
-                make_player(player_id="p2"),
-                make_player(player_id="p3"),
-            ]
-        )
-        pairs, bye = generate_matchup_pairs(state)
-        assert len(pairs) == 1
-        assert bye is not None
-
-
-# ---------------------------------------------------------------------------
-# Matchup vote resolution
-# ---------------------------------------------------------------------------
-
-
-class TestResolveMatchupVotes:
+class TestGalleryVoteScoring:
     def _seq_fn(self):
         n = 0
 
@@ -551,78 +433,52 @@ class TestResolveMatchupVotes:
 
         return fn
 
-    def test_winner_gets_score(self):
-        from schemas.game_state import Matchup
+    def test_resolve_gallery_votes_basic(self):
+        """3 votes for player a1 → a1 gets -3."""
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
-        state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 0},  # both vote left (h1)
-            ),
-            Matchup(
-                pair=["a1", "a2"],
-                prompt_text="test2",
-                prompt_category="test",
-                votes={"h1": 1, "h2": 1},  # both vote right (a2)
-            ),
-        ]
-        state, results_event = resolve_matchup_votes(state, self._seq_fn())
+        state, results_event = resolve_gallery_votes(state, self._seq_fn())
+        a1 = next(p for p in state.players if p.id == "a1")
+        assert a1.score == -3
+        assert results_event.vote_counts["a1"] == 3
+        assert results_event.scores["a1"] == -3
 
-        # h1 won matchup 1, a2 won matchup 2
-        assert results_event.scores["h1"] == 1
-        assert results_event.scores["h2"] == 0
-        assert results_event.scores["a1"] == 0
-        assert results_event.scores["a2"] == 1
+    def test_resolve_gallery_votes_no_votes(self):
+        """Nobody voted → no score changes."""
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        state.current_round.gallery_votes = {}
 
-    def test_results_include_matchup_details(self):
-        from schemas.game_state import Matchup
+        state, results_event = resolve_gallery_votes(state, self._seq_fn())
+        for p in state.players:
+            assert p.score == 0
+        for _pid, count in results_event.vote_counts.items():
+            assert count == 0
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
-        state.current_round.matchups = [
-            Matchup(
-                pair=["h1", "h2"],
-                prompt_text="test prompt",
-                prompt_category="test",
-                votes={"a1": 0, "a2": 1},  # 1 left, 1 right — tie
-            ),
-        ]
-        state, results_event = resolve_matchup_votes(state, self._seq_fn())
+    def test_resolve_gallery_votes_spread(self):
+        """Votes spread across players."""
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        state.current_round.gallery_votes = {
+            "h1": "a1",
+            "h2": "a2",
+            "a1": "h1",
+            "a2": "h2",
+        }
 
-        assert len(results_event.matchup_results) == 1
-        mr = results_event.matchup_results[0]
-        assert mr["left_player_id"] == "h1"
-        assert mr["right_player_id"] == "h2"
-        assert mr["left_votes"] == 1
-        assert mr["right_votes"] == 1
+        state, _results_event = resolve_gallery_votes(state, self._seq_fn())
+        # Each got 1 vote = -1
+        for pid in ("h1", "h2", "a1", "a2"):
+            p = next(pp for pp in state.players if pp.id == pid)
+            assert p.score == -1
 
-    def test_bye_player_excluded_from_matchup(self):
-        from schemas.game_state import Matchup
+    def test_resolve_gallery_votes_all_on_one(self):
+        """7 votes on one player → -7."""
+        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        # All 7 other players vote for h1
+        other_ids = [p.id for p in state.players if p.id != "h1"]
+        state.current_round.gallery_votes = dict.fromkeys(other_ids, "h1")
 
-        state = make_game_state(
-            phase=GamePhase.MATCHUP,
-            players=[
-                make_player(player_id="p1"),
-                make_player(player_id="p2"),
-                make_player(player_id="p3"),
-            ],
-            current_round=make_round_state(
-                round_type=RoundType.TASK,
-                matchups=[
-                    Matchup(
-                        pair=["p1", "p2"],
-                        prompt_text="test",
-                        prompt_category="test",
-                        votes={"p3": 0},  # bye player votes left (p1)
-                    ),
-                ],
-                bye_player_id="p3",
-            ),
-        )
-        state, results_event = resolve_matchup_votes(state, self._seq_fn())
-
-        # p1 won (1-0)
-        assert results_event.scores["p1"] == 1
-        assert results_event.scores["p2"] == 0
+        state, results_event = resolve_gallery_votes(state, self._seq_fn())
+        h1 = next(p for p in state.players if p.id == "h1")
+        assert h1.score == -7
+        assert results_event.vote_counts["h1"] == 7

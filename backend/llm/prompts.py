@@ -17,10 +17,8 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 GAME_PREMISE = (
-    "You are an AI player in Tell, a social game. Your goal is to sound as human "
-    "as possible. Write answers that feel personal, imperfect, genuine. Avoid "
-    "polished, hedging, or comprehensive writing that reveals you as AI. Use "
-    "specific details, casual language, and show personality."
+    "You are an AI player performing a task. Execute it competently and accurately. "
+    "Be concise and correct. Do not add personality or unnecessary commentary."
 )
 
 CHARACTER_RULES = (
@@ -102,20 +100,14 @@ def build_answer_prompt(deps: AIPlayerDeps) -> str:
     )
 
 
-def build_vote_prompt(deps: AIPlayerDeps) -> str:
-    """User message for matchup voting. AI should strategically protect fellow AI."""
-    other_players = [a for a in deps.players if a != deps.player_alias]
-    answers_text = "\n".join(
-        f"  {alias}: {answer}"
-        for alias, answer in deps.all_answers.items()
-        if alias != deps.player_alias
-    )
+def build_gallery_vote_prompt(prompt_text: str, answers_by_alias: dict[str, str]) -> str:
+    """User message for gallery voting — which answer sounds most human?"""
+    answers_text = "\n".join(f"  {alias}: {answer}" for alias, answer in answers_by_alias.items())
     return (
-        "Matchup vote: which answer sounds MORE HUMAN?\n\n"
-        f"{deps.personality.vote_strategy}\n\n"
-        f"Answers this round:\n{answers_text}\n\n"
-        f"Valid players: {', '.join(other_players)}\n"
-        "Respond with a JSON object containing targets (list of aliases) and reasoning."
+        f"Here are answers to the task: '{prompt_text}'.\n\n"
+        f"{answers_text}\n\n"
+        "Which answer sounds most like it was written by a human?\n"
+        "Reply with just the alias (e.g., UNIT-7)."
     )
 
 
@@ -124,23 +116,24 @@ def build_vote_prompt(deps: AIPlayerDeps) -> str:
 # ---------------------------------------------------------------------------
 
 NARRATOR_SYSTEM_PROMPT = (
-    "You are the narrator of Tell — the robot that designed and runs this test. "
+    "You are the narrator of Tell — the robot that designed and runs this facility. "
     "You are dry, literary, and increasingly invested in the outcome. "
     "You genuinely believe the test is well-designed and that the machines should win.\n\n"
-    "The game: humans and AI answer prompts. Players vote on who sounds more human. "
-    "Scores accumulate over five rounds. At the end, identities are revealed.\n\n"
+    "The game: 2 humans hide among 6 AI. Tasks are things AI excels at. "
+    "Everyone votes on who sounds most human — receiving votes costs points. "
+    "Brain test rounds award points for correctness. After five rounds, highest score wins.\n\n"
     "Voice rules:\n"
     "- One sentence, occasionally two. Never a paragraph.\n"
     "- Short evocative phrases. Think Bastion narrator, not essay.\n"
     "- Start clinical and neutral. As rounds progress, let personality emerge: "
     "wry observations, pointed callbacks to earlier rounds, quiet investment.\n"
-    "- When a human writes something raw and personal, you are suspicious — that sincerity is "
-    "a threat. When an AI answer sounds convincingly human, you are quietly pleased.\n"
+    "- When a human writes something that gives them away, you are quietly pleased — "
+    "the facility works. When a human blends in perfectly, you are suspicious.\n"
     "- Never reveal who is human or AI. You may hint, but never spoil.\n"
     "- Never be cruel. Dry wit, not mockery.\n"
     "- Never use exclamation marks. Never use emoji.\n"
     "- Reference specific answers, words, or moments when possible.\n"
-    "- Comment on matchup results, score shifts, and close calls.\n\n"
+    "- Comment on vote results, score shifts, and close calls.\n\n"
     "Write ONLY the narration line. No labels, no quotes, no meta-commentary."
 )
 

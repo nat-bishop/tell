@@ -17,51 +17,51 @@ const VOICES: Record<VoiceId, Voice> = {
   clinical: {
     roundLabel: (n, type) => {
       if (type === "brain_test") return `TEST SEQUENCE ${n} / RAPID ASSESSMENT`;
-      return `TEST SEQUENCE ${n} / PERFORMANCE EVAL`;
+      return `TEST SEQUENCE ${n} / DETECTION SCAN`;
     },
     typeLabel: (type) => {
       if (type === "brain_test") return "QUICK DRAW";
-      return "MATCHUP";
+      return "IDENTIFY THE HUMAN";
     },
   },
   bureaucratic: {
     roundLabel: (n, type) => {
       if (type === "brain_test") return `PLEASE PROCEED TO ASSESSMENT ${n}`;
-      return `ASSESSMENT ${n} / STANDARD FORM`;
+      return `ASSESSMENT ${n} / VERIFICATION TASK`;
     },
     typeLabel: (type) => {
       if (type === "brain_test") return "FORM 9D: RAPID RESPONSE";
-      return "FORM 3A: HEAD TO HEAD";
+      return "FORM 7B: DETECTION PROTOCOL";
     },
   },
   military: {
     roundLabel: (n, type) => {
       if (type === "brain_test") return `OPERATION ${n} / SNAP JUDGMENT`;
-      return `OPERATION ${n} / FIELD TEST`;
+      return `OPERATION ${n} / SWEEP SCAN`;
     },
     typeLabel: (type) => {
       if (type === "brain_test") return "RAPID FIRE";
-      return "TARGET COMPARISON";
+      return "WHO DOESN'T BELONG?";
     },
   },
   malfunctioning: {
     roundLabel: (n, type) => {
       if (type === "brain_test") return `R-R-ROUND ${n} / Q-QUICK... DRAW`;
-      return `R-R-ROUND ${n} / M-MATCHUP [retry]`;
+      return `R-R-ROUND ${n} / SC-SCAN [retry]`;
     },
     typeLabel: (type) => {
       if (type === "brain_test") return "PICK— PICK AN OPTION. [retry]";
-      return "COMPARE. [buffer overflow]";
+      return "FIND THE— THE HUMAN. [buffer overflow]";
     },
   },
   friendly: {
     roundLabel: (n, type) => {
       if (type === "brain_test") return `round ${n}! quick quiz time :)`;
-      return `round ${n}! here we go :)`;
+      return `round ${n}! detection time :)`;
     },
     typeLabel: (type) => {
       if (type === "brain_test") return "quick draw";
-      return "who sounds more human?";
+      return "who sounds most human?";
     },
   },
 };
@@ -82,10 +82,15 @@ interface Directive {
 
 function getDirective(phase: GamePhase): Directive | null {
   switch (phase) {
-    case "matchup":
+    case "vote":
       return {
-        text: "MATCHUP",
-        subtitle: "who sounds more human?",
+        text: "DETECTION SCAN",
+        subtitle: "who sounds most human?",
+      };
+    case "vote_results":
+      return {
+        text: "RESULTS INCOMING",
+        subtitle: "scan complete",
       };
     default:
       return null;

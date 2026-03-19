@@ -5,10 +5,11 @@ import { create } from "zustand";
 export type GamePhase =
   | "lobby"
   | "prompt"
+  | "vote"
+  | "vote_results"
   | "game_over"
   | "brain_test"
-  | "brain_test_results"
-  | "matchup";
+  | "brain_test_results";
 
 export interface PlayerInfo {
   id: string;
@@ -41,10 +42,10 @@ export interface StateSyncData {
   is_host: boolean;
   phase_deadline: string | null;
   phase_duration: number | null;
-  writing_begins_at?: string | null;
   action_starts_at?: string | null;
   scores: Record<string, number>;
   total_rounds: number;
+  my_vote?: string | null;
 }
 
 export interface PlayerEventData {
@@ -64,9 +65,7 @@ export interface PhaseChangedData {
   phase_duration?: number;
   answers?: Record<string, string>;
   round_type?: string;
-  writing_begins_at?: string;
   action_starts_at?: string;
-  matchups?: MatchupInfo[];
 }
 
 export interface CountData {
@@ -116,32 +115,16 @@ export interface BrainTestResultsData {
   scores: Record<string, number>;
 }
 
-export interface MatchupChallengeData {
+export interface VoteSubmittedData {
   seq: number;
-  matchup_index: number;
-  left_player_id: string;
-  left_alias: string;
-  left_answer: string;
-  right_player_id: string;
-  right_alias: string;
-  right_answer: string;
-  prompt_text: string;
-  sub_deadline: string | null;
-  phase_duration: number | null;
+  player_id: string;
+  vote_count: number;
+  total: number;
 }
 
-export interface MatchupResultsData {
+export interface VoteResultsData {
   seq: number;
-  matchup_results: Array<{
-    matchup_index: number;
-    left_player_id: string;
-    left_alias: string;
-    left_votes: number;
-    right_player_id: string;
-    right_alias: string;
-    right_votes: number;
-    prompt_text: string;
-  }>;
+  vote_counts: Record<string, number>;
   scores: Record<string, number>;
 }
 
@@ -150,14 +133,6 @@ export interface FinalRevealData {
   players: RevealedPlayer[];
   winner_ids: string[];
   narrator_text: string | null;
-}
-
-export interface MatchupInfo {
-  pair: string[];
-  prompt_text: string;
-  prompt_category: string;
-  left_alias: string;
-  right_alias: string;
 }
 
 export interface SeqData {
@@ -193,9 +168,6 @@ interface GameState {
   phaseDeadline: string | null;
   phaseDuration: number | null;
 
-  // Reading period
-  writingBeginsAt: string | null;
-
   // Interstitial
   actionStartsAt: string | null;
 
@@ -223,20 +195,10 @@ interface GameState {
   // Brain Test scores
   brainTestScores: Record<string, number> | null;
 
-  // Matchup
-  matchups: MatchupInfo[] | null;
-  myMatchupPrompt: string | null;
-  byePlayerId: string | null;
-  matchupIndex: number;
-  matchupLeftId: string | null;
-  matchupLeftAlias: string | null;
-  matchupLeftAnswer: string | null;
-  matchupRightId: string | null;
-  matchupRightAlias: string | null;
-  matchupRightAnswer: string | null;
-  matchupPromptText: string | null;
-  matchupMyVote: number | null;  // 0=left, 1=right
-  matchupResults: MatchupResultsData | null;
+  // Gallery vote
+  votedForId: string | null;
+  voteCount: number;
+  voteResults: VoteResultsData | null;
 
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
@@ -255,8 +217,8 @@ interface GameState {
   onNarration: (data: NarrationData) => void;
   onBrainTestChallenge: (data: BrainTestChallengeData) => void;
   onBrainTestResults: (data: BrainTestResultsData) => void;
-  onMatchupChallenge: (data: MatchupChallengeData) => void;
-  onMatchupResults: (data: MatchupResultsData) => void;
+  onVoteSubmitted: (data: VoteSubmittedData) => void;
+  onVoteResults: (data: VoteResultsData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
   onOpen: () => void;
   onError: () => void;
@@ -282,7 +244,6 @@ const initialState = {
   roundType: null as string | null,
   phaseDeadline: null as string | null,
   phaseDuration: null as number | null,
-  writingBeginsAt: null as string | null,
   actionStartsAt: null as string | null,
   scores: {} as Record<string, number>,
   totalRounds: 5,
@@ -298,19 +259,9 @@ const initialState = {
     question: string; options: string[]; selected_index: number; correct_index: number; challenge_type: string;
   }>> | null,
   brainTestScores: null as Record<string, number> | null,
-  matchups: null as MatchupInfo[] | null,
-  myMatchupPrompt: null as string | null,
-  byePlayerId: null as string | null,
-  matchupIndex: 0,
-  matchupLeftId: null as string | null,
-  matchupLeftAlias: null as string | null,
-  matchupLeftAnswer: null as string | null,
-  matchupRightId: null as string | null,
-  matchupRightAlias: null as string | null,
-  matchupRightAnswer: null as string | null,
-  matchupPromptText: null as string | null,
-  matchupMyVote: null as number | null,
-  matchupResults: null as MatchupResultsData | null,
+  votedForId: null as string | null,
+  voteCount: 0,
+  voteResults: null as VoteResultsData | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -335,11 +286,11 @@ export const useGameStore = create<GameState>((set) => ({
       isHost: data.is_host,
       phaseDeadline: data.phase_deadline,
       phaseDuration: data.phase_duration ?? null,
-      writingBeginsAt: data.writing_begins_at ?? null,
       actionStartsAt: data.action_starts_at ?? null,
       scores: data.scores || {},
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
+      votedForId: data.my_vote ?? null,
       connectionStatus: "connected",
     }),
 
@@ -382,25 +333,13 @@ export const useGameStore = create<GameState>((set) => ({
       promptCategory: data.prompt_category || null,
       phaseDeadline: data.phase_deadline || null,
       phaseDuration: data.phase_duration ?? null,
-      writingBeginsAt: data.writing_begins_at ?? null,
       actionStartsAt: data.action_starts_at ?? null,
       answers: data.answers || {},
       roundType: data.round_type || null,
       lastSeq: data.seq,
       myAnswer: null,
       answerCount: 0,
-      totalCount: data.phase === "prompt"
-        ? (() => {
-            const total = s.players.length;
-            // Subtract bye player for matchup rounds
-            if (data.matchups) {
-              const paired = new Set(data.matchups.flatMap(m => m.pair));
-              const byeCount = s.players.filter(p => !paired.has(p.id)).length;
-              return total - byeCount;
-            }
-            return total;
-          })()
-        : 0,
+      totalCount: data.phase === "prompt" ? s.players.length : 0,
       narrationText: null,
       narrationTrigger: null,
       // Brain test reset
@@ -410,35 +349,10 @@ export const useGameStore = create<GameState>((set) => ({
       brainTestOptions: [],
       brainTestResults: null,
       brainTestScores: null,
-      // Matchup data — preserve existing if not provided (MATCHUP phase reuses PROMPT data)
-      matchups: data.matchups ?? s.matchups,
-      myMatchupPrompt: (() => {
-        const matchupList = data.matchups || s.matchups;
-        if (!matchupList || !s.playerId) return null;
-        for (const mu of matchupList) {
-          if (mu.pair.includes(s.playerId)) return mu.prompt_text;
-        }
-        return null; // bye player
-      })(),
-      byePlayerId: (() => {
-        const matchupList = data.matchups || s.matchups;
-        if (!matchupList || !s.playerId) return null;
-        const allPaired = new Set(matchupList.flatMap(mu => mu.pair));
-        for (const p of s.players) {
-          if (!allPaired.has(p.id)) return p.id;
-        }
-        return null;
-      })(),
-      matchupIndex: 0,
-      matchupLeftId: null,
-      matchupLeftAlias: null,
-      matchupLeftAnswer: null,
-      matchupRightId: null,
-      matchupRightAlias: null,
-      matchupRightAnswer: null,
-      matchupPromptText: null,
-      matchupMyVote: null,
-      matchupResults: null,
+      // Vote reset
+      votedForId: null,
+      voteCount: 0,
+      voteResults: null,
     })),
 
   onAnswerSubmitted: (data) =>
@@ -474,6 +388,19 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     })),
 
+  onVoteSubmitted: (data) =>
+    set({
+      voteCount: data.vote_count,
+      lastSeq: data.seq,
+    }),
+
+  onVoteResults: (data) =>
+    set((s) => ({
+      voteResults: data,
+      scores: { ...s.scores, ...(data.scores || {}) },
+      lastSeq: data.seq,
+    })),
+
   onGameOver: (data) =>
     set({
       phase: "game_over",
@@ -493,29 +420,6 @@ export const useGameStore = create<GameState>((set) => ({
         is_host: p.id === data.new_host_id,
       })),
       isHost: s.playerId === data.new_host_id,
-      lastSeq: data.seq,
-    })),
-
-  onMatchupChallenge: (data) =>
-    set({
-      matchupIndex: data.matchup_index,
-      matchupLeftId: data.left_player_id,
-      matchupLeftAlias: data.left_alias,
-      matchupLeftAnswer: data.left_answer,
-      matchupRightId: data.right_player_id,
-      matchupRightAlias: data.right_alias,
-      matchupRightAnswer: data.right_answer,
-      matchupPromptText: data.prompt_text,
-      matchupMyVote: null,
-      phaseDeadline: data.sub_deadline,
-      phaseDuration: data.phase_duration ?? 12,
-      lastSeq: data.seq,
-    }),
-
-  onMatchupResults: (data) =>
-    set((s) => ({
-      matchupResults: data,
-      scores: { ...s.scores, ...(data.scores || {}) },
       lastSeq: data.seq,
     })),
 
