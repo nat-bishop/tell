@@ -104,7 +104,7 @@ class TestStartGame:
 
 class TestSubmitAnswer:
     async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.MATCHUP)
+        game_id, _, _ = seed_game(GamePhase.ACTIVE)
         resp = await client.post(
             f"/games/{game_id}/answer",
             json={"player_id": "h1", "answer": "test"},
@@ -158,7 +158,7 @@ class TestSubmitAnswer:
 
 class TestMatchupVote:
     def _seed_matchup_game(self):
-        game_id, session, players = seed_game(GamePhase.MATCHUP, round_type=RoundType.TASK)
+        game_id, session, players = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
         session.state.current_round.matchups = [
             Matchup(
                 pair=["h1", "h2"],
@@ -189,7 +189,7 @@ class TestMatchupVote:
             json={"player_id": "h1", "matchup_index": 0, "choice": 0},
         )
         assert resp.status_code == 400
-        assert "matchup" in resp.json()["detail"].lower()
+        assert "active" in resp.json()["detail"].lower()
 
     async def test_own_matchup_rejected(self, client, mock_ai):
         game_id, _, _ = self._seed_matchup_game()

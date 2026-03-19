@@ -11,7 +11,6 @@ if TYPE_CHECKING:
 
 from schemas.api_models import (
     GameOverEvent,
-    MatchupResultsEvent,
     PhaseChangedEvent,
 )
 from schemas.constants import NO_RESPONSE
@@ -46,17 +45,47 @@ def fill_missing_answers(state: TellGameState) -> None:
 
 
 class MinigameMeta:
-    """Metadata for a round type, used by round selection."""
+    """Metadata for a round type, used by round selection and phase transitions."""
 
-    __slots__ = ("min_players",)
+    __slots__ = (
+        "active_interstitial",
+        "has_prompt",
+        "has_results",
+        "min_players",
+        "results_interstitial",
+    )
 
-    def __init__(self, *, min_players: int) -> None:
+    def __init__(
+        self,
+        *,
+        min_players: int,
+        has_prompt: bool = True,
+        has_results: bool = False,
+        active_interstitial: int = 3,
+        results_interstitial: int = 0,
+    ) -> None:
         self.min_players = min_players
+        self.has_prompt = has_prompt
+        self.has_results = has_results
+        self.active_interstitial = active_interstitial
+        self.results_interstitial = results_interstitial
 
 
 MINIGAMES: dict[RoundType, MinigameMeta] = {
-    RoundType.TASK: MinigameMeta(min_players=3),
-    RoundType.BRAIN_TEST: MinigameMeta(min_players=2),
+    RoundType.TASK: MinigameMeta(
+        min_players=3,
+        has_prompt=True,
+        has_results=False,
+        active_interstitial=3,
+        results_interstitial=0,
+    ),
+    RoundType.BRAIN_TEST: MinigameMeta(
+        min_players=2,
+        has_prompt=False,
+        has_results=True,
+        active_interstitial=5,
+        results_interstitial=2,
+    ),
 }
 
 
@@ -88,14 +117,17 @@ def select_next_round_type(
 # The frontend derives its dismiss timing from the action_starts_at timestamp.
 _INTERSTITIAL_HOLD: dict[GamePhase, int] = {
     GamePhase.PROMPT: 5,  # round start — staggered visual beats
-    GamePhase.BRAIN_TEST: 5,  # round start
-    GamePhase.BRAIN_TEST_RESULTS: 2,
-    GamePhase.MATCHUP: 3,
 }
 
 
-def get_interstitial_hold(phase: GamePhase) -> int:
+def get_interstitial_hold(phase: GamePhase, round_type: RoundType | None = None) -> int:
     """Extra seconds added to phase deadline for client interstitial overlay."""
+    if phase in (GamePhase.ACTIVE, GamePhase.RESULTS) and round_type:
+        meta = MINIGAMES.get(round_type)
+        if meta:
+            if phase == GamePhase.ACTIVE:
+                return meta.active_interstitial
+            return meta.results_interstitial
     return _INTERSTITIAL_HOLD.get(phase, 0)
 
 
@@ -108,20 +140,26 @@ def get_phase_duration(
         if round_type == RoundType.TASK:
             return settings.task_prompt_duration + reading
         return settings.prompt_duration + reading
-    if phase == GamePhase.BRAIN_TEST:
-        return settings.brain_test_duration
-    if phase == GamePhase.BRAIN_TEST_RESULTS:
-        return settings.brain_test_results_duration
-    if phase == GamePhase.MATCHUP:
-        return settings.matchup_duration
+    if phase == GamePhase.ACTIVE:
+        if round_type == RoundType.TASK:
+            return settings.matchup_duration
+        if round_type == RoundType.BRAIN_TEST:
+            return settings.brain_test_duration
+        return None
+    if phase == GamePhase.RESULTS:
+        if round_type == RoundType.BRAIN_TEST:
+            return settings.brain_test_results_duration
+        return None
     return None
 
 
-def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) -> TellGameState:
+def _transition_to_phase(
+    state: TellGameState, phase: GamePhase, duration: int, round_type: RoundType | None = None
+) -> TellGameState:
     """Move to a phase with a deadline (includes interstitial hold)."""
     state.phase = phase
     state.phase_deadline = datetime.now(UTC) + timedelta(
-        seconds=duration + get_interstitial_hold(phase)
+        seconds=duration + get_interstitial_hold(phase, round_type)
     )
     return state
 
@@ -151,19 +189,19 @@ def transition_to_brain_test(
             for c in challenges
         ],
     )
-    state.phase = GamePhase.BRAIN_TEST
+    state.phase = GamePhase.ACTIVE
     state.phase_deadline = datetime.now(UTC) + timedelta(
-        seconds=duration + get_interstitial_hold(GamePhase.BRAIN_TEST)
+        seconds=duration + get_interstitial_hold(GamePhase.ACTIVE, RoundType.BRAIN_TEST)
     )
     return state
 
 
 def transition_to_brain_test_results(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.BRAIN_TEST_RESULTS, duration)
+    return _transition_to_phase(state, GamePhase.RESULTS, duration, RoundType.BRAIN_TEST)
 
 
 def transition_to_matchup(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.MATCHUP, duration)
+    return _transition_to_phase(state, GamePhase.ACTIVE, duration, RoundType.TASK)
 
 
 def generate_matchup_pairs(
@@ -224,7 +262,6 @@ def transition_to_task_matchup_prompt(
         prompt_category=first_category,
         round_type=RoundType.TASK,
         matchups=matchups,
-        current_matchup=0,
         bye_player_id=bye_id,
         writing_begins_at=(
             now + timedelta(seconds=reading_duration) if reading_duration > 0 else None
@@ -236,10 +273,48 @@ def transition_to_task_matchup_prompt(
     return state
 
 
+def build_matchup_round_payload(matchups: list[Matchup], players: list[Player]) -> dict:
+    """Build the round_payload dict for matchup data (used in events + reconnection)."""
+    player_map = {p.id: p for p in players}
+    return {
+        "matchups": [
+            {
+                "pair": m.pair,
+                "prompt_text": m.prompt_text,
+                "prompt_category": m.prompt_category,
+                "left_alias": player_map[m.pair[0]].alias if m.pair[0] in player_map else "",
+                "right_alias": player_map[m.pair[1]].alias if m.pair[1] in player_map else "",
+            }
+            for m in matchups
+        ],
+    }
+
+
+def build_matchup_sub_round_payload(
+    matchup: Matchup, index: int, answers: dict[str, str], players: list[Player]
+) -> dict:
+    """Build the sub-round payload dict for a single matchup challenge."""
+    player_map = {p.id: p for p in players}
+    left_id, right_id = matchup.pair[0], matchup.pair[1]
+    return {
+        "matchup_index": index,
+        "left_player_id": left_id,
+        "left_alias": player_map[left_id].alias if left_id in player_map else left_id,
+        "left_answer": answers.get(left_id, "[no response]"),
+        "right_player_id": right_id,
+        "right_alias": player_map[right_id].alias if right_id in player_map else right_id,
+        "right_answer": answers.get(right_id, "[no response]"),
+        "prompt_text": matchup.prompt_text,
+    }
+
+
 def resolve_matchup_votes(
-    state: TellGameState, seq_fn
-) -> tuple[TellGameState, MatchupResultsEvent]:
-    """Tally per-matchup LEFT/RIGHT votes. Award 1 point to the winner of each matchup."""
+    state: TellGameState,
+) -> tuple[TellGameState, list[dict], dict[str, int]]:
+    """Tally per-matchup LEFT/RIGHT votes. Award 1 point to the winner of each matchup.
+
+    Returns (state, matchup_results_list, scores_dict). Caller wraps in RoundResultsEvent.
+    """
     rs = state.current_round
     matchups = rs.matchups if rs else []
 
@@ -282,13 +357,7 @@ def resolve_matchup_votes(
     # Build scores dict: all players' current total scores
     scores = {p.id: p.score for p in state.players}
 
-    results_event = MatchupResultsEvent(
-        seq=seq_fn(),
-        matchup_results=matchup_results_list,
-        scores=scores,
-    )
-
-    return state, results_event
+    return state, matchup_results_list, scores
 
 
 # ---------------------------------------------------------------------------
@@ -423,8 +492,8 @@ def build_state_sync(
                 prompt_text = None
                 prompt_category = None
 
-        # Answers visible during game_over, matchup
-        if state.phase in (GamePhase.GAME_OVER, GamePhase.MATCHUP):
+        # Answers visible during game_over, active (matchup)
+        if state.phase in (GamePhase.GAME_OVER, GamePhase.ACTIVE):
             answers = round_state.answers
 
         if state.phase == GamePhase.PROMPT and player_id in round_state.answers:
@@ -434,6 +503,34 @@ def build_state_sync(
     is_host = player_obj.is_host if player_obj else False
 
     scores = {p.id: p.score for p in state.players}
+
+    # Build generic round data for reconnection
+    round_payload: dict | None = None
+    sub_round_index: int = 0
+    sub_round_payload: dict | None = None
+
+    if round_state and state.phase in (GamePhase.ACTIVE, GamePhase.PROMPT):
+        if round_state.round_type == RoundType.TASK and round_state.matchups:
+            round_payload = build_matchup_round_payload(round_state.matchups, state.players)
+            # Active matchup sub-round data
+            if state.phase == GamePhase.ACTIVE:
+                sub_round_index = round_state.current_sub_round
+                idx = round_state.current_sub_round
+                if idx < len(round_state.matchups):
+                    sub_round_payload = build_matchup_sub_round_payload(
+                        round_state.matchups[idx], idx, round_state.answers, state.players
+                    )
+        elif round_state.round_type == RoundType.BRAIN_TEST and round_state.brain_challenges:
+            sub_round_index = round_state.current_sub_round
+            if state.phase == GamePhase.ACTIVE:
+                idx = round_state.current_sub_round
+                if idx < len(round_state.brain_challenges):
+                    ch = round_state.brain_challenges[idx]
+                    sub_round_payload = {
+                        "challenge_type": ch.challenge_type,
+                        "question": ch.question,
+                        "options": ch.options,
+                    }
 
     return {
         "event_type": "state_sync",
@@ -464,4 +561,7 @@ def build_state_sync(
             if state.phase_deadline and phase_duration
             else None
         ),
+        "round_payload": round_payload,
+        "sub_round_index": sub_round_index,
+        "sub_round_payload": sub_round_payload,
     }

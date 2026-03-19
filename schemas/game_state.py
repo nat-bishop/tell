@@ -11,10 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field
 class GamePhase(enum.StrEnum):
     LOBBY = "lobby"
     PROMPT = "prompt"
+    ACTIVE = "active"
+    RESULTS = "results"
     GAME_OVER = "game_over"
-    BRAIN_TEST = "brain_test"
-    BRAIN_TEST_RESULTS = "brain_test_results"
-    MATCHUP = "matchup"
 
 
 class RoundType(enum.StrEnum):
@@ -72,7 +71,6 @@ class RoundState(BaseModel):
     brain_challenges: list[BrainTestChallenge] = Field(default_factory=list)
     # Matchup (Task 1v1)
     matchups: list[Matchup] = Field(default_factory=list)
-    current_matchup: int = 0
     bye_player_id: str | None = None
 
 

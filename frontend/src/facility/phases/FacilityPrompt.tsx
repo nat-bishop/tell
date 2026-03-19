@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useGameStore } from "@/hooks/useGameStore";
+import { useState, useEffect, useMemo } from "react";
+import { useGameStore, type MatchupInfo } from "@/hooks/useGameStore";
 import { submitAnswer } from "@/api/actions";
 import { Panel } from "@/facility/Panel";
 import { SystemText } from "@/components/SystemText";
@@ -29,9 +29,29 @@ export function FacilityPrompt() {
     myAnswer,
     roundType,
     writingBeginsAt,
-    myMatchupPrompt,
-    byePlayerId,
+    roundPayload,
+    players,
   } = useGameStore();
+
+  // Derive matchup-specific data from roundPayload
+  const matchups = useMemo(
+    () => (roundPayload?.matchups as MatchupInfo[]) ?? null,
+    [roundPayload],
+  );
+
+  const myMatchupPrompt = useMemo(() => {
+    if (!matchups || !playerId) return null;
+    for (const mu of matchups) {
+      if (mu.pair.includes(playerId)) return mu.prompt_text;
+    }
+    return null; // bye player
+  }, [matchups, playerId]);
+
+  const byePlayerId = useMemo(() => {
+    if (!matchups) return null;
+    const allPaired = new Set(matchups.flatMap((mu) => mu.pair));
+    return players.find((p) => !allPaired.has(p.id))?.id ?? null;
+  }, [matchups, players]);
 
   const [answer, setAnswer] = useState("");
   const [submitted, setSubmitted] = useState(false);

@@ -325,12 +325,14 @@ async def _ai_brain_test_task(
 
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.BRAIN_TEST:
+        if not session or session.state.phase != GamePhase.ACTIVE:
             return
 
         state = session.state
         rs = state.current_round
-        if not rs or challenge_index >= len(rs.brain_challenges):
+        if not rs or rs.round_type != RoundType.BRAIN_TEST:
+            return
+        if challenge_index >= len(rs.brain_challenges):
             return
 
         ch = rs.brain_challenges[challenge_index]
@@ -347,10 +349,12 @@ async def _ai_brain_test_task(
 
         async with lock:
             session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.BRAIN_TEST:
+            if not session or session.state.phase != GamePhase.ACTIVE:
                 return
             rs = session.state.current_round
-            if not rs or challenge_index >= len(rs.brain_challenges):
+            if not rs or rs.round_type != RoundType.BRAIN_TEST:
+                return
+            if challenge_index >= len(rs.brain_challenges):
                 return
             ch = rs.brain_challenges[challenge_index]
             if player_id in ch.responses:
@@ -418,10 +422,12 @@ async def _ai_matchup_vote_task(
         async with lock:
             repo = get_game_repository()
             session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.MATCHUP:
+            if not session or session.state.phase != GamePhase.ACTIVE:
                 return
             rs = session.state.current_round
-            if not rs or matchup_index >= len(rs.matchups):
+            if not rs or rs.round_type != RoundType.TASK:
+                return
+            if matchup_index >= len(rs.matchups):
                 return
             matchup = rs.matchups[matchup_index]
             if player_id in matchup.votes:

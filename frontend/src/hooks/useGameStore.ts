@@ -6,10 +6,9 @@ import { log } from "@/lib/log";
 export type GamePhase =
   | "lobby"
   | "prompt"
-  | "game_over"
-  | "brain_test"
-  | "brain_test_results"
-  | "matchup";
+  | "active"
+  | "results"
+  | "game_over";
 
 export interface PlayerInfo {
   id: string;
@@ -46,6 +45,12 @@ export interface StateSyncData {
   action_starts_at?: string | null;
   scores: Record<string, number>;
   total_rounds: number;
+  // Generic round data for reconnection
+  round_payload?: Record<string, unknown> | null;
+  sub_round_index?: number;
+  sub_round_payload?: Record<string, unknown> | null;
+  round_results?: Record<string, unknown> | null;
+  round_scores?: Record<string, number> | null;
 }
 
 export interface PlayerEventData {
@@ -67,7 +72,9 @@ export interface PhaseChangedData {
   round_type?: string;
   writing_begins_at?: string;
   action_starts_at?: string;
-  matchups?: MatchupInfo[];
+  round_payload?: Record<string, unknown> | null;
+  round_results?: Record<string, unknown> | null;
+  round_scores?: Record<string, number> | null;
 }
 
 export interface CountData {
@@ -95,55 +102,21 @@ export interface NarrationData {
   trigger: string;
 }
 
-export interface BrainTestChallengeData {
+export interface SubRoundData {
   seq: number;
-  challenge_index: number;
-  challenge_type: string;
-  question: string;
-  options: string[];
+  round_type: string;
+  sub_round_index: number;
+  payload: Record<string, unknown>;
   sub_deadline: string | null;
   phase_duration: number | null;
 }
 
-export interface BrainTestResultsData {
+export interface RoundResultsData {
   seq: number;
-  results: Record<string, Array<{
-    question: string;
-    options: string[];
-    selected_index: number;
-    correct_index: number;
-    challenge_type: string;
-  }>>;
+  round_type: string;
+  results: Record<string, Array<Record<string, unknown>>>;
   scores: Record<string, number>;
-}
-
-export interface MatchupChallengeData {
-  seq: number;
-  matchup_index: number;
-  left_player_id: string;
-  left_alias: string;
-  left_answer: string;
-  right_player_id: string;
-  right_alias: string;
-  right_answer: string;
-  prompt_text: string;
-  sub_deadline: string | null;
-  phase_duration: number | null;
-}
-
-export interface MatchupResultsData {
-  seq: number;
-  matchup_results: Array<{
-    matchup_index: number;
-    left_player_id: string;
-    left_alias: string;
-    left_votes: number;
-    right_player_id: string;
-    right_alias: string;
-    right_votes: number;
-    prompt_text: string;
-  }>;
-  scores: Record<string, number>;
+  payload: Record<string, unknown>;
 }
 
 export interface FinalRevealData {
@@ -212,32 +185,12 @@ interface GameState {
   narrationText: string | null;
   narrationTrigger: string | null;
 
-  // Brain Test
-  brainTestQuestion: string | null;
-  brainTestChallengeIndex: number;
-  brainTestChallengeType: string | null;
-  brainTestOptions: string[];
-  brainTestResults: Record<string, Array<{
-    question: string; options: string[]; selected_index: number; correct_index: number; challenge_type: string;
-  }>> | null;
-
-  // Brain Test scores
-  brainTestScores: Record<string, number> | null;
-
-  // Matchup
-  matchups: MatchupInfo[] | null;
-  myMatchupPrompt: string | null;
-  byePlayerId: string | null;
-  matchupIndex: number;
-  matchupLeftId: string | null;
-  matchupLeftAlias: string | null;
-  matchupLeftAnswer: string | null;
-  matchupRightId: string | null;
-  matchupRightAlias: string | null;
-  matchupRightAnswer: string | null;
-  matchupPromptText: string | null;
-  matchupMyVote: number | null;  // 0=left, 1=right
-  matchupResults: MatchupResultsData | null;
+  // Generic round data (replaces minigame-specific fields)
+  subRoundIndex: number;
+  subRoundPayload: Record<string, unknown> | null;
+  roundPayload: Record<string, unknown> | null;
+  roundResults: Record<string, unknown> | null;
+  roundScores: Record<string, number> | null;
 
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
@@ -254,10 +207,8 @@ interface GameState {
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
   onNarration: (data: NarrationData) => void;
-  onBrainTestChallenge: (data: BrainTestChallengeData) => void;
-  onBrainTestResults: (data: BrainTestResultsData) => void;
-  onMatchupChallenge: (data: MatchupChallengeData) => void;
-  onMatchupResults: (data: MatchupResultsData) => void;
+  onSubRound: (data: SubRoundData) => void;
+  onRoundResults: (data: RoundResultsData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
   onOpen: () => void;
   onError: () => void;
@@ -291,27 +242,11 @@ const initialState = {
   revealedPlayers: null as RevealedPlayer[] | null,
   narrationText: null as string | null,
   narrationTrigger: null as string | null,
-  brainTestQuestion: null as string | null,
-  brainTestChallengeIndex: 0,
-  brainTestChallengeType: null as string | null,
-  brainTestOptions: [] as string[],
-  brainTestResults: null as Record<string, Array<{
-    question: string; options: string[]; selected_index: number; correct_index: number; challenge_type: string;
-  }>> | null,
-  brainTestScores: null as Record<string, number> | null,
-  matchups: null as MatchupInfo[] | null,
-  myMatchupPrompt: null as string | null,
-  byePlayerId: null as string | null,
-  matchupIndex: 0,
-  matchupLeftId: null as string | null,
-  matchupLeftAlias: null as string | null,
-  matchupLeftAnswer: null as string | null,
-  matchupRightId: null as string | null,
-  matchupRightAlias: null as string | null,
-  matchupRightAnswer: null as string | null,
-  matchupPromptText: null as string | null,
-  matchupMyVote: null as number | null,
-  matchupResults: null as MatchupResultsData | null,
+  subRoundIndex: 0,
+  subRoundPayload: null as Record<string, unknown> | null,
+  roundPayload: null as Record<string, unknown> | null,
+  roundResults: null as Record<string, unknown> | null,
+  roundScores: null as Record<string, number> | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -343,6 +278,12 @@ export const useGameStore = create<GameState>((set) => ({
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
       connectionStatus: "connected",
+      // Generic round data for reconnection
+      roundPayload: (data.round_payload as Record<string, unknown>) ?? null,
+      subRoundIndex: data.sub_round_index ?? 0,
+      subRoundPayload: (data.sub_round_payload as Record<string, unknown>) ?? null,
+      roundResults: (data.round_results as Record<string, unknown>) ?? null,
+      roundScores: data.round_scores ?? null,
     });
   },
 
@@ -391,58 +332,18 @@ export const useGameStore = create<GameState>((set) => ({
       answers: data.answers || {},
       roundType: data.round_type || null,
       lastSeq: data.seq,
+      // Shared resets
       myAnswer: null,
       answerCount: 0,
-      totalCount: data.phase === "prompt"
-        ? (() => {
-            const total = s.players.length;
-            // Subtract bye player for matchup rounds
-            if (data.matchups) {
-              const paired = new Set(data.matchups.flatMap(m => m.pair));
-              const byeCount = s.players.filter(p => !paired.has(p.id)).length;
-              return total - byeCount;
-            }
-            return total;
-          })()
-        : 0,
+      totalCount: data.phase === "prompt" ? s.players.length : 0,
       narrationText: null,
       narrationTrigger: null,
-      // Brain test reset
-      brainTestQuestion: null,
-      brainTestChallengeIndex: 0,
-      brainTestChallengeType: null,
-      brainTestOptions: [],
-      brainTestResults: null,
-      brainTestScores: null,
-      // Matchup data — preserve existing if not provided (MATCHUP phase reuses PROMPT data)
-      matchups: data.matchups ?? s.matchups,
-      myMatchupPrompt: (() => {
-        const matchupList = data.matchups || s.matchups;
-        if (!matchupList || !s.playerId) return null;
-        for (const mu of matchupList) {
-          if (mu.pair.includes(s.playerId)) return mu.prompt_text;
-        }
-        return null; // bye player
-      })(),
-      byePlayerId: (() => {
-        const matchupList = data.matchups || s.matchups;
-        if (!matchupList || !s.playerId) return null;
-        const allPaired = new Set(matchupList.flatMap(mu => mu.pair));
-        for (const p of s.players) {
-          if (!allPaired.has(p.id)) return p.id;
-        }
-        return null;
-      })(),
-      matchupIndex: 0,
-      matchupLeftId: null,
-      matchupLeftAlias: null,
-      matchupLeftAnswer: null,
-      matchupRightId: null,
-      matchupRightAlias: null,
-      matchupRightAnswer: null,
-      matchupPromptText: null,
-      matchupMyVote: null,
-      matchupResults: null,
+      // Generic round data — set from event, no per-minigame logic
+      roundPayload: (data.round_payload as Record<string, unknown>) ?? null,
+      roundResults: (data.round_results as Record<string, unknown>) ?? null,
+      roundScores: data.round_scores ?? null,
+      subRoundIndex: 0,
+      subRoundPayload: null,
     }));
   },
 
@@ -462,21 +363,19 @@ export const useGameStore = create<GameState>((set) => ({
     });
   },
 
-  onBrainTestChallenge: (data) =>
+  onSubRound: (data) =>
     set({
-      brainTestQuestion: data.question,
-      brainTestChallengeIndex: data.challenge_index,
-      brainTestChallengeType: data.challenge_type,
-      brainTestOptions: data.options || [],
+      subRoundIndex: data.sub_round_index,
+      subRoundPayload: data.payload,
       phaseDeadline: data.sub_deadline,
       phaseDuration: data.phase_duration ?? 12,
       lastSeq: data.seq,
     }),
 
-  onBrainTestResults: (data) =>
+  onRoundResults: (data) =>
     set((s) => ({
-      brainTestResults: data.results,
-      brainTestScores: data.scores ?? null,
+      roundResults: data.results as Record<string, unknown>,
+      roundScores: data.scores ?? null,
       scores: { ...s.scores, ...(data.scores || {}) },
       lastSeq: data.seq,
     })),
@@ -502,29 +401,6 @@ export const useGameStore = create<GameState>((set) => ({
         is_host: p.id === data.new_host_id,
       })),
       isHost: s.playerId === data.new_host_id,
-      lastSeq: data.seq,
-    })),
-
-  onMatchupChallenge: (data) =>
-    set({
-      matchupIndex: data.matchup_index,
-      matchupLeftId: data.left_player_id,
-      matchupLeftAlias: data.left_alias,
-      matchupLeftAnswer: data.left_answer,
-      matchupRightId: data.right_player_id,
-      matchupRightAlias: data.right_alias,
-      matchupRightAnswer: data.right_answer,
-      matchupPromptText: data.prompt_text,
-      matchupMyVote: null,
-      phaseDeadline: data.sub_deadline,
-      phaseDuration: data.phase_duration ?? 12,
-      lastSeq: data.seq,
-    }),
-
-  onMatchupResults: (data) =>
-    set((s) => ({
-      matchupResults: data,
-      scores: { ...s.scores, ...(data.scores || {}) },
       lastSeq: data.seq,
     })),
 

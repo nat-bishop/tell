@@ -48,7 +48,8 @@ async def seed_game(req: SeedGameRequest):
     if req.start_timers and active_phase:
         from backend.services.transitions import start_phase_timer
 
-        await start_phase_timer(game_id, state.phase)
+        round_type_for_timer = state.current_round.round_type if state.current_round else None
+        await start_phase_timer(game_id, state.phase, round_type_for_timer)
 
     # Assign AI personalities and schedule AI actions
     if req.trigger_ai and active_phase:

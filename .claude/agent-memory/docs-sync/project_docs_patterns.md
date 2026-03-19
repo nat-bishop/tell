@@ -27,16 +27,40 @@ The game was completely redesigned from elimination-based to score-based in 2026
 - **Rive inputs**: state machine name `"facility_sm"`, 6 character slots × 3 inputs (`char_{i}_x`, `char_{i}_state`, `char_{i}_visible`), plus 3 room inputs. `phaseLayouts.ts` is authoritative for what gets set per phase.
 - **Legacy components are NOT removed**: They're still used. Don't document them as removed.
 
-## Common drift sources (v2)
+## Generic Minigame Architecture (v3, current)
 
-- **Round types**: Only `TASK` and `BRAIN_TEST` in `MINIGAMES`. Selection rule: no consecutive repeat only (no player count restrictions).
+`GamePhase` is now 5 fixed values: `LOBBY, PROMPT, ACTIVE, RESULTS, GAME_OVER`. `ACTIVE` and `RESULTS` dispatch by `round_type` — phases never grow with new minigames.
+
+Key event renames:
+- `BrainTestChallengeEvent` + `MatchupChallengeEvent` → `SubRoundEvent(round_type, sub_round_index, payload)`
+- `BrainTestResultsEvent` + `MatchupResultsEvent` → `RoundResultsEvent(round_type, results, scores, payload)`
+- `PhaseChangedEvent` now carries `round_payload`, `round_results`, `round_scores` (not `matchups`)
+
+Key function renames in `transitions.py`:
+- `do_matchup_complete` + `do_brain_test_complete` → `do_active_complete` (dispatches by round_type)
+- `do_after_brain_test` → `do_results_complete`
+- New: `_initialize_round()`, `_start_sub_round_loop()` dispatchers
+
+`MinigameMeta` now has: `min_players`, `has_prompt`, `has_results`, `active_interstitial`, `results_interstitial`.
+
+Frontend store: ~20 minigame-specific fields replaced with 5 generic fields: `subRoundIndex`, `subRoundPayload`, `roundPayload`, `roundResults`, `roundScores`.
+
+`FacilityScene.tsx` routes `active`/`results` by `roundType` (not phase-specific components).
+`phaseLayouts.ts`: `PHASE_LAYOUTS` record → `getPhaseLayout(phase, roundType)` two-tier lookup.
+
+`RoundState.current_matchup` removed — redundant with `current_sub_round`.
+`resolve_matchup_votes()` returns `(state, matchup_results_list, scores_dict)`.
+
+## Common drift sources (v3)
+
+- **Round types**: Only `TASK` and `BRAIN_TEST` in `MINIGAMES`. Selection rule: no consecutive repeat only.
 - **Phase durations**: `config.toml` is authoritative. `config.py` default fallbacks may lag.
 - **schemas/constants.py** is minimal — just three constants. Not where durations or limits live.
-- **Matchup sub-round loop**: `_start_matchup_loop` in `transitions.py`, analogous to `_start_brain_test_loop`. Uses `MatchupChallengeEvent` SSE. AI votes via generate-then-lock pattern.
+- **Sub-round events**: Both loops now emit `SubRoundEvent`. Check `round_type` field to distinguish matchup vs brain test.
 - **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` then `GameOverEvent`. Frontend handles reveal-first, score-second sequence.
 - **`total_rounds = 5`** is the game length (not a safety cap). `check_game_over()` returns winner when `round_number >= total_rounds`.
 - **`initialize_and_start_game`** is in `transitions.py` (not `actions.py`) — shared by host-start and matchmaking.
 - **Narrator fires in** `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking, generate-then-lock pattern.
 - **AI conversation history**: `_conversation_history` dict in `ai_scheduler.py`. Easy to miss in architecture docs.
-- **`StateSyncEvent` carries `scores` dict** — player_id → score. Also on `MatchupResultsEvent`, `BrainTestResultsEvent`, `GameOverEvent`.
+- **`StateSyncEvent` carries `scores` dict** — player_id → score. Also on `RoundResultsEvent` and `GameOverEvent`.
 - **Bye player**: Odd player out in matchup rounds stored as `bye_player_id` on `RoundState`. They don't appear in a head-to-head but still accumulate score from other rounds.

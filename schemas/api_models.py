@@ -50,6 +50,12 @@ class StateSyncEvent(GameEvent):
     total_rounds: int = 5
     # Reading period
     writing_begins_at: str | None = None
+    # Generic round data for reconnection
+    sub_round_index: int = 0
+    sub_round_payload: dict | None = None
+    round_payload: dict | None = None
+    round_results: dict[str, list[dict]] | None = None
+    round_scores: dict[str, int] | None = None
 
 
 class PlayerJoinedEvent(GameEvent):
@@ -81,8 +87,10 @@ class PhaseChangedEvent(GameEvent):
     round_type: str | None = None
     writing_begins_at: str | None = None
     action_starts_at: str | None = None
-    # Matchup data (Task rounds)
-    matchups: list[dict] | None = None
+    # Generic round data
+    round_payload: dict | None = None
+    round_results: dict[str, list[dict]] | None = None
+    round_scores: dict[str, int] | None = None
 
 
 class AnswerSubmittedEvent(GameEvent):
@@ -117,41 +125,21 @@ class NarrationEvent(GameEvent):
     trigger: str
 
 
-class BrainTestChallengeEvent(GameEvent):
-    event_type: Literal["brain_test_challenge"] = "brain_test_challenge"
-    challenge_index: int
-    challenge_type: str
-    question: str
-    options: list[str] = Field(default_factory=list)
+class SubRoundEvent(GameEvent):
+    event_type: Literal["sub_round"] = "sub_round"
+    round_type: str
+    sub_round_index: int
+    payload: dict  # minigame-specific sub-round data
     sub_deadline: str | None = None
     phase_duration: int | None = None
 
 
-class BrainTestResultsEvent(GameEvent):
-    event_type: Literal["brain_test_results"] = "brain_test_results"
-    # player_id -> list of {question, options, selected_index, correct_index, challenge_type}
-    results: dict[str, list[dict]]
+class RoundResultsEvent(GameEvent):
+    event_type: Literal["round_results"] = "round_results"
+    round_type: str
+    results: dict[str, list[dict]]  # player_id → per-challenge results
     scores: dict[str, int] = Field(default_factory=dict)
-
-
-class MatchupChallengeEvent(GameEvent):
-    event_type: Literal["matchup_challenge"] = "matchup_challenge"
-    matchup_index: int
-    left_player_id: str
-    left_alias: str
-    left_answer: str
-    right_player_id: str
-    right_alias: str
-    right_answer: str
-    prompt_text: str
-    sub_deadline: str | None = None
-    phase_duration: int | None = None
-
-
-class MatchupResultsEvent(GameEvent):
-    event_type: Literal["matchup_results"] = "matchup_results"
-    matchup_results: list[dict]  # per-matchup vote tallies
-    scores: dict[str, int] = Field(default_factory=dict)  # running totals
+    payload: dict = Field(default_factory=dict)  # extra data (e.g. matchup vote tallies)
 
 
 class FinalRevealEvent(GameEvent):

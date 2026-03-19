@@ -34,7 +34,7 @@ from schemas.api_models import (
     SubmitMatchupVoteRequest,
 )
 from schemas.constants import NO_RESPONSE
-from schemas.game_state import GamePhase, Player, PlayerRole
+from schemas.game_state import GamePhase, Player, PlayerRole, RoundType
 
 router = APIRouter()
 
@@ -209,8 +209,12 @@ async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerReque
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.BRAIN_TEST:
-            raise HTTPException(status_code=400, detail="Not in brain test phase")
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        round_state_check = state.current_round
+        if not round_state_check or round_state_check.round_type != RoundType.BRAIN_TEST:
+            raise HTTPException(status_code=400, detail="Not in brain test round")
 
         player = get_player_by_id(state, req.player_id)
         if not player:
@@ -255,8 +259,12 @@ async def submit_matchup_vote(game_id: str, req: SubmitMatchupVoteRequest):
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.MATCHUP:
-            raise HTTPException(status_code=400, detail="Not in matchup phase")
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        round_state_check = state.current_round
+        if not round_state_check or round_state_check.round_type != RoundType.TASK:
+            raise HTTPException(status_code=400, detail="Not in matchup round")
 
         player = get_player_by_id(state, req.player_id)
         if not player:

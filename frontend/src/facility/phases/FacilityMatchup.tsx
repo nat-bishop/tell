@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useGameStore } from "@/hooks/useGameStore";
+import { useGameStore, type MatchupInfo } from "@/hooks/useGameStore";
 import { submitMatchupVote } from "@/api/actions";
 import { Panel } from "@/facility/Panel";
 import { SystemText } from "@/components/SystemText";
@@ -55,19 +55,24 @@ function MatchupCard({
 export function FacilityMatchup() {
   const gameId = useGameStore((s) => s.gameId);
   const playerId = useGameStore((s) => s.playerId);
-  const matchupIndex = useGameStore((s) => s.matchupIndex);
-  const matchupLeftId = useGameStore((s) => s.matchupLeftId);
-  const matchupLeftAlias = useGameStore((s) => s.matchupLeftAlias);
-  const matchupLeftAnswer = useGameStore((s) => s.matchupLeftAnswer);
-  const matchupRightId = useGameStore((s) => s.matchupRightId);
-  const matchupRightAlias = useGameStore((s) => s.matchupRightAlias);
-  const matchupRightAnswer = useGameStore((s) => s.matchupRightAnswer);
-  const matchups = useGameStore((s) => s.matchups);
+  const subRoundIndex = useGameStore((s) => s.subRoundIndex);
+  const subRoundPayload = useGameStore((s) => s.subRoundPayload);
+  const roundPayload = useGameStore((s) => s.roundPayload);
+
+  // Cast sub-round payload to matchup challenge data
+  const matchupLeftId = (subRoundPayload?.left_player_id as string) ?? null;
+  const matchupLeftAlias = (subRoundPayload?.left_alias as string) ?? null;
+  const matchupLeftAnswer = (subRoundPayload?.left_answer as string) ?? null;
+  const matchupRightId = (subRoundPayload?.right_player_id as string) ?? null;
+  const matchupRightAlias = (subRoundPayload?.right_alias as string) ?? null;
+  const matchupRightAnswer = (subRoundPayload?.right_answer as string) ?? null;
+
+  const matchups = (roundPayload?.matchups as MatchupInfo[]) ?? null;
 
   const [voted, setVoted] = useState<Record<number, number>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const myVote = voted[matchupIndex] ?? null;
+  const myVote = voted[subRoundIndex] ?? null;
   const isInPair = playerId === matchupLeftId || playerId === matchupRightId;
   const canVote = !isInPair;
   const totalMatchups = matchups?.length ?? 0;
@@ -76,15 +81,14 @@ export function FacilityMatchup() {
     (choice: number) => {
       if (!gameId || !playerId || isInPair) return;
 
-      setVoted((prev) => ({ ...prev, [matchupIndex]: choice }));
-      useGameStore.setState({ matchupMyVote: choice });
+      setVoted((prev) => ({ ...prev, [subRoundIndex]: choice }));
 
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        submitMatchupVote(gameId, playerId, matchupIndex, choice).catch(() => {});
+        submitMatchupVote(gameId, playerId, subRoundIndex, choice).catch(() => {});
       }, 300);
     },
-    [gameId, playerId, matchupIndex, isInPair],
+    [gameId, playerId, subRoundIndex, isInPair],
   );
 
   useEffect(() => {
@@ -108,7 +112,7 @@ export function FacilityMatchup() {
       {/* Readout: progress */}
       <Panel zone="readout">
         <p className="font-system text-[0.65rem] text-cold tracking-[0.2em] uppercase text-center">
-          {matchupIndex + 1} / {totalMatchups}
+          {subRoundIndex + 1} / {totalMatchups}
         </p>
       </Panel>
 

@@ -226,8 +226,8 @@ class TestStateSanitization:
         assert sync["answers"] == {}  # all answers hidden during PROMPT
         assert sync["my_answer"] == "my answer"  # own answer visible
 
-    def test_build_state_sync_shows_answers_in_matchup(self):
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+    def test_build_state_sync_shows_answers_in_active(self):
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
@@ -263,9 +263,9 @@ class TestStateSanitization:
         assert event.scores["h1"] == 3
 
     def test_make_phase_changed_event(self):
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         event = make_phase_changed_event(state, seq=5)
-        assert event.phase == "matchup"
+        assert event.phase == "active"
         assert event.round_number == 1
         assert event.seq == 5
 
@@ -312,13 +312,17 @@ class TestGetPhaseDuration:
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.PROMPT, RoundType.TASK) == 35  # 25 + 10
 
-    def test_brain_test(self):
+    def test_active_brain_test(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.BRAIN_TEST) == 85
+        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.BRAIN_TEST) == 85
 
-    def test_matchup(self):
+    def test_active_task(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.MATCHUP) == 30
+        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.TASK) == 30
+
+    def test_results_brain_test(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.BRAIN_TEST) == 15
 
     def test_unknown_phase(self):
         s = _mock_settings()
@@ -408,7 +412,7 @@ class TestScoringCalculation:
     def test_matchup_winner_gets_point(self):
         from schemas.game_state import Matchup
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.matchups = [
             Matchup(
                 pair=["h1", "h2"],
@@ -418,27 +422,18 @@ class TestScoringCalculation:
             ),
         ]
 
-        def _seq_fn():
-            n = [0]
-
-            def fn():
-                n[0] += 1
-                return n[0]
-
-            return fn
-
-        state, results_event = resolve_matchup_votes(state, _seq_fn())
+        state, _matchup_results, scores = resolve_matchup_votes(state)
         # h1 won (2-0), should get +1 score
         h1 = next(p for p in state.players if p.id == "h1")
         h2 = next(p for p in state.players if p.id == "h2")
         assert h1.score == 1
         assert h2.score == 0
-        assert results_event.scores["h1"] == 1
+        assert scores["h1"] == 1
 
     def test_tie_matchup_no_points(self):
         from schemas.game_state import Matchup
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.matchups = [
             Matchup(
                 pair=["h1", "h2"],
@@ -448,16 +443,7 @@ class TestScoringCalculation:
             ),
         ]
 
-        def _seq_fn():
-            n = [0]
-
-            def fn():
-                n[0] += 1
-                return n[0]
-
-            return fn
-
-        state, _results_event = resolve_matchup_votes(state, _seq_fn())
+        state, _results, _scores = resolve_matchup_votes(state)
         h1 = next(p for p in state.players if p.id == "h1")
         h2 = next(p for p in state.players if p.id == "h2")
         assert h1.score == 0
@@ -466,7 +452,7 @@ class TestScoringCalculation:
     def test_cumulative_scoring(self):
         from schemas.game_state import Matchup
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.players[0].score = 2  # h1 already had 2 points
 
         state.current_round.matchups = [
@@ -478,19 +464,10 @@ class TestScoringCalculation:
             ),
         ]
 
-        def _seq_fn():
-            n = [0]
-
-            def fn():
-                n[0] += 1
-                return n[0]
-
-            return fn
-
-        state, results_event = resolve_matchup_votes(state, _seq_fn())
+        state, _results, scores = resolve_matchup_votes(state)
         h1 = next(p for p in state.players if p.id == "h1")
         assert h1.score == 3  # 2 + 1
-        assert results_event.scores["h1"] == 3
+        assert scores["h1"] == 3
 
 
 # ---------------------------------------------------------------------------
@@ -541,20 +518,10 @@ class TestGenerateMatchupPairs:
 
 
 class TestResolveMatchupVotes:
-    def _seq_fn(self):
-        n = 0
-
-        def fn():
-            nonlocal n
-            n += 1
-            return n
-
-        return fn
-
     def test_winner_gets_score(self):
         from schemas.game_state import Matchup
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.matchups = [
             Matchup(
                 pair=["h1", "h2"],
@@ -569,18 +536,18 @@ class TestResolveMatchupVotes:
                 votes={"h1": 1, "h2": 1},  # both vote right (a2)
             ),
         ]
-        state, results_event = resolve_matchup_votes(state, self._seq_fn())
+        state, _results, scores = resolve_matchup_votes(state)
 
         # h1 won matchup 1, a2 won matchup 2
-        assert results_event.scores["h1"] == 1
-        assert results_event.scores["h2"] == 0
-        assert results_event.scores["a1"] == 0
-        assert results_event.scores["a2"] == 1
+        assert scores["h1"] == 1
+        assert scores["h2"] == 0
+        assert scores["a1"] == 0
+        assert scores["a2"] == 1
 
     def test_results_include_matchup_details(self):
         from schemas.game_state import Matchup
 
-        state, _ = make_standard_game(phase=GamePhase.MATCHUP)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.matchups = [
             Matchup(
                 pair=["h1", "h2"],
@@ -589,10 +556,10 @@ class TestResolveMatchupVotes:
                 votes={"a1": 0, "a2": 1},  # 1 left, 1 right — tie
             ),
         ]
-        state, results_event = resolve_matchup_votes(state, self._seq_fn())
+        state, matchup_results, _scores = resolve_matchup_votes(state)
 
-        assert len(results_event.matchup_results) == 1
-        mr = results_event.matchup_results[0]
+        assert len(matchup_results) == 1
+        mr = matchup_results[0]
         assert mr["left_player_id"] == "h1"
         assert mr["right_player_id"] == "h2"
         assert mr["left_votes"] == 1
@@ -602,7 +569,7 @@ class TestResolveMatchupVotes:
         from schemas.game_state import Matchup
 
         state = make_game_state(
-            phase=GamePhase.MATCHUP,
+            phase=GamePhase.ACTIVE,
             players=[
                 make_player(player_id="p1"),
                 make_player(player_id="p2"),
@@ -621,8 +588,8 @@ class TestResolveMatchupVotes:
                 bye_player_id="p3",
             ),
         )
-        state, results_event = resolve_matchup_votes(state, self._seq_fn())
+        state, _results, scores = resolve_matchup_votes(state)
 
         # p1 won (1-0)
-        assert results_event.scores["p1"] == 1
-        assert results_event.scores["p2"] == 0
+        assert scores["p1"] == 1
+        assert scores["p2"] == 0

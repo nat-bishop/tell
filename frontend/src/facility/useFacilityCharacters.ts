@@ -1,14 +1,15 @@
 import { useEffect } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
-import { PHASE_LAYOUTS, CHAR_STATES } from "./phaseLayouts";
+import { getPhaseLayout, CHAR_STATES } from "./phaseLayouts";
 
 export function useFacilityCharacters(rive: any | null) {
   const players = useGameStore((s) => s.players);
   const phase = useGameStore((s) => s.phase);
+  const roundType = useGameStore((s) => s.roundType);
 
   useEffect(() => {
     if (!rive) return;
-    const config = PHASE_LAYOUTS[phase];
+    const config = getPhaseLayout(phase, roundType);
     if (!config) return;
 
     players.forEach((player, i) => {
@@ -28,5 +29,5 @@ export function useFacilityCharacters(rive: any | null) {
     rive.setNumberInput("room_config", config.roomIndex);
     rive.setNumberInput("ambient_brightness", config.brightness);
     rive.setNumberInput("accent_color", config.accentColor);
-  }, [rive, phase, players]);
+  }, [rive, phase, roundType, players]);
 }

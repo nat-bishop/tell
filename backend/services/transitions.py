@@ -15,12 +15,14 @@ from backend.api.deps import (
     get_timer_manager,
 )
 from backend.services.game_logic import (
+    MINIGAMES,
+    build_matchup_round_payload,
+    build_matchup_sub_round_payload,
     check_game_over,
     fill_missing_answers,
     get_interstitial_hold,
     get_next_round_type,
     get_phase_duration,
-    get_player_by_id,
     make_game_over_event,
     make_phase_changed_event,
     resolve_matchup_votes,
@@ -32,12 +34,11 @@ from backend.services.game_logic import (
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
-    BrainTestChallengeEvent,
-    BrainTestResultsEvent,
     FinalRevealEvent,
-    MatchupChallengeEvent,
     NarrationEvent,
     PlayerJoinedEvent,
+    RoundResultsEvent,
+    SubRoundEvent,
 )
 from schemas.game_state import (
     GamePhase,
@@ -150,7 +151,8 @@ async def _notify_ai(game_id: str, phase: GamePhase) -> None:
 def _make_event(state, session, settings, **extra):
     """Build a PhaseChangedEvent with phase_duration computed from settings."""
     rs = state.current_round
-    pd = get_phase_duration(settings, state.phase, rs.round_type if rs else None)
+    rt = rs.round_type if rs else None
+    pd = get_phase_duration(settings, state.phase, rt)
     # Include writing_begins_at for reading period
     if rs and rs.writing_begins_at and "writing_begins_at" not in extra:
         extra["writing_begins_at"] = rs.writing_begins_at.isoformat()
@@ -169,7 +171,7 @@ async def start_phase_timer(
         return
     # Interstitial hold is already baked into phase_deadline by transition functions,
     # so the timer must include it too to stay in sync with the deadline.
-    duration += get_interstitial_hold(phase)
+    duration += get_interstitial_hold(phase, round_type)
 
     async def on_timer_expire():
         await handle_phase_expiry(game_id, phase)
@@ -194,21 +196,17 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             fill_missing_answers(session.state)
             await do_prompt_complete(game_id, session)
 
-        elif expired_phase == GamePhase.MATCHUP:
-            # Safety timer — resolve matchup votes
-            await do_matchup_complete(game_id, session)
+        elif expired_phase == GamePhase.ACTIVE:
+            # Safety timer — resolve active round
+            await do_active_complete(game_id, session)
 
-        elif expired_phase == GamePhase.BRAIN_TEST:
-            # Safety timer — transition to results
-            await do_brain_test_complete(game_id, session)
-
-        elif expired_phase == GamePhase.BRAIN_TEST_RESULTS:
+        elif expired_phase == GamePhase.RESULTS:
             # Results done — check game over or next round
-            await do_after_brain_test(game_id, session)
+            await do_results_complete(game_id, session)
 
 
 async def do_prompt_complete(game_id: str, session) -> None:
-    """PROMPT complete → TASK rounds go to MATCHUP.
+    """PROMPT complete → TASK rounds go to ACTIVE.
 
     Assumes caller holds the game lock and has called fill_missing_answers.
     """
@@ -226,8 +224,11 @@ async def do_prompt_complete(game_id: str, session) -> None:
 
     assert round_state, "No active round in PROMPT phase"
 
-    # Task rounds → MATCHUP (1v1 pair voting)
+    # Task rounds → ACTIVE (1v1 pair voting)
     transition_to_matchup(state, settings.matchup_duration)
+
+    round_payload = build_matchup_round_payload(round_state.matchups, state.players)
+
     await cm.broadcast(
         game_id,
         _make_event(
@@ -236,10 +237,11 @@ async def do_prompt_complete(game_id: str, session) -> None:
             settings,
             answers=round_state.answers,
             round_type=round_state.round_type,
+            round_payload=round_payload,
         ),
     )
-    next_phase = GamePhase.MATCHUP
-    await start_phase_timer(game_id, next_phase)
+    next_phase = GamePhase.ACTIVE
+    await start_phase_timer(game_id, next_phase, RoundType.TASK)
     # Notify AI *before* starting the matchup loop — on_phase_change calls
     # cancel_all() which would kill the loop task if it were already registered.
     await _notify_ai(game_id, next_phase)
@@ -314,40 +316,11 @@ async def _do_game_over(game_id: str, session, state, winner, winner_ids) -> Non
     cm.cleanup_game(game_id)
 
 
-async def do_matchup_complete(game_id: str, session) -> None:
-    """All matchup sub-rounds done → resolve votes → check game over or next round.
+async def do_active_complete(game_id: str, session) -> None:
+    """ACTIVE phase done → dispatch scoring by round_type → results or next round.
 
     Assumes caller holds the game lock.
     """
-    cm = get_connection_manager()
-    state = session.state
-
-    state, matchup_results_event = resolve_matchup_votes(state, session.next_seq)
-    await cm.broadcast(game_id, matchup_results_event)
-    log.info(
-        "matchup_resolved",
-        scores={p.id: p.score for p in state.players},
-    )
-
-    # Check game over
-    result = check_game_over(state)
-    if result:
-        winner, winner_ids = result
-        await _do_game_over(game_id, session, state, winner, winner_ids)
-        return
-
-    # Fire narrator: between rounds
-    await _fire_narration(
-        game_id,
-        "between_rounds",
-        "A round just ended. Comment on the state of play — scores, standout moments.",
-    )
-
-    await _start_next_round(game_id, session)
-
-
-async def do_brain_test_complete(game_id: str, session) -> None:
-    """Brain test challenges done → score, update player scores, show results."""
     cm = get_connection_manager()
     settings = get_settings()
     state = session.state
@@ -355,58 +328,92 @@ async def do_brain_test_complete(game_id: str, session) -> None:
     if not rs:
         return
 
-    # Build results: player_id -> list of {question, options, selected_index, correct_index, ...}
+    round_type = rs.round_type
+    meta = MINIGAMES.get(round_type)
+
+    # --- Score by round type ---
     results: dict[str, list[dict]] = {}
-    for p in state.players:
-        player_results = []
-        for ch in rs.brain_challenges:
-            player_results.append(
-                {
-                    "question": ch.question,
-                    "options": ch.options,
-                    "selected_index": ch.responses.get(p.id, -1),
-                    "correct_index": ch.correct_index,
-                    "challenge_type": ch.challenge_type,
-                }
-            )
-        results[p.id] = player_results
+    scores: dict[str, int] = {}
+    payload: dict = {}
 
-    # Score brain test
-    bt_scores = score_brain_test(rs.brain_challenges)
+    if round_type == RoundType.TASK:
+        state, matchup_results_list, scores = resolve_matchup_votes(state)
+        # Build per-player results (one entry per matchup the player was in)
+        for p in state.players:
+            results[p.id] = []
+        payload = {"matchup_results": matchup_results_list}
+        log.info("matchup_resolved", scores=scores)
 
-    # Add brain test scores to each player's running total
-    for p in state.players:
-        p.score += bt_scores.get(p.id, 0)
+    elif round_type == RoundType.BRAIN_TEST:
+        # Build results: player_id -> list of {question, options, selected_index, correct_index}
+        for p in state.players:
+            player_results = []
+            for ch in rs.brain_challenges:
+                player_results.append(
+                    {
+                        "question": ch.question,
+                        "options": ch.options,
+                        "selected_index": ch.responses.get(p.id, -1),
+                        "correct_index": ch.correct_index,
+                        "challenge_type": ch.challenge_type,
+                    }
+                )
+            results[p.id] = player_results
 
-    # Build running total scores for the event
-    scores = {p.id: p.score for p in state.players}
+        bt_scores = score_brain_test(rs.brain_challenges)
+        for p in state.players:
+            p.score += bt_scores.get(p.id, 0)
+        scores = {p.id: p.score for p in state.players}
 
+    # --- Broadcast RoundResultsEvent ---
     await cm.broadcast(
         game_id,
-        BrainTestResultsEvent(
+        RoundResultsEvent(
             seq=session.next_seq(),
+            round_type=round_type,
             results=results,
             scores=scores,
+            payload=payload,
         ),
     )
 
-    transition_to_brain_test_results(state, settings.brain_test_results_duration)
-    await cm.broadcast(
-        game_id,
-        _make_event(state, session, settings, round_type=RoundType.BRAIN_TEST),
-    )
-    await start_phase_timer(game_id, GamePhase.BRAIN_TEST_RESULTS)
+    # --- RESULTS phase or next round ---
+    if meta and meta.has_results:
+        transition_to_brain_test_results(state, settings.brain_test_results_duration)
+        await cm.broadcast(
+            game_id,
+            _make_event(
+                state,
+                session,
+                settings,
+                round_type=round_type,
+                round_results=results,
+                round_scores=scores,
+            ),
+        )
+        await start_phase_timer(game_id, GamePhase.RESULTS, round_type)
+        await _fire_narration(
+            game_id,
+            "post_submissions",
+            "Brain test results are in. Comment on notable performances.",
+        )
+    else:
+        # No results phase (Task) — check game over or next round
+        result = check_game_over(state)
+        if result:
+            winner, winner_ids = result
+            await _do_game_over(game_id, session, state, winner, winner_ids)
+            return
+        await _fire_narration(
+            game_id,
+            "between_rounds",
+            "A round just ended. Comment on the state of play — scores, standout moments.",
+        )
+        await _start_next_round(game_id, session)
 
-    # Fire narrator
-    await _fire_narration(
-        game_id,
-        "post_submissions",
-        "Brain test results are in. Comment on notable performances.",
-    )
 
-
-async def do_after_brain_test(game_id: str, session) -> None:
-    """Brain test results done → check game over or next round."""
+async def do_results_complete(game_id: str, session) -> None:
+    """RESULTS phase done → check game over or next round."""
     state = session.state
 
     # Check game over
@@ -430,25 +437,18 @@ async def _start_next_round(game_id: str, session) -> None:
 
     next_round_type = get_next_round_type(state)
     state.round_types.append(next_round_type)
+    meta = MINIGAMES[next_round_type]
 
-    if next_round_type == RoundType.TASK:
-        total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
-        transition_to_task_matchup_prompt(state, total, settings.prompt_reading_duration)
+    if meta.has_prompt:
+        # Task rounds: initialize round, go to PROMPT, then ACTIVE after answers
+        _initialize_round(state, next_round_type, settings)
         round_state = state.current_round
-        # Build matchup data for PhaseChangedEvent so clients can look up their prompt
-        matchup_data = None
-        if round_state and round_state.matchups:
-            player_map = {p.id: p for p in state.players}
-            matchup_data = [
-                {
-                    "pair": m.pair,
-                    "prompt_text": m.prompt_text,
-                    "prompt_category": m.prompt_category,
-                    "left_alias": player_map[m.pair[0]].alias if m.pair[0] in player_map else "",
-                    "right_alias": player_map[m.pair[1]].alias if m.pair[1] in player_map else "",
-                }
-                for m in round_state.matchups
-            ]
+
+        round_payload = (
+            build_matchup_round_payload(round_state.matchups, state.players)
+            if round_state and round_state.matchups
+            else None
+        )
         await cm.broadcast(
             game_id,
             _make_event(
@@ -457,23 +457,40 @@ async def _start_next_round(game_id: str, session) -> None:
                 settings,
                 prompt_text=round_state.prompt_text if round_state else None,
                 prompt_category=round_state.prompt_category if round_state else None,
-                round_type=round_state.round_type if round_state else RoundType.TASK,
-                matchups=matchup_data,
+                round_type=next_round_type,
+                round_payload=round_payload,
             ),
         )
-        await start_phase_timer(game_id, GamePhase.PROMPT, RoundType.TASK)
+        await start_phase_timer(game_id, GamePhase.PROMPT, next_round_type)
         await _notify_ai(game_id, GamePhase.PROMPT)
+    else:
+        # Brain Test: initialize round, go directly to ACTIVE
+        _initialize_round(state, next_round_type, settings)
+        await cm.broadcast(
+            game_id,
+            _make_event(state, session, settings, round_type=next_round_type),
+        )
+        await start_phase_timer(game_id, GamePhase.ACTIVE, next_round_type)
+        await _start_sub_round_loop(game_id, session, next_round_type)
 
-    elif next_round_type == RoundType.BRAIN_TEST:
+
+def _initialize_round(state, round_type: RoundType, settings) -> None:
+    """Initialize a new round by round type."""
+    if round_type == RoundType.TASK:
+        total = get_phase_duration(settings, GamePhase.PROMPT, RoundType.TASK) or 35
+        transition_to_task_matchup_prompt(state, total, settings.prompt_reading_duration)
+    elif round_type == RoundType.BRAIN_TEST:
         from schemas.prompts import select_brain_test_challenges
 
         challenges = select_brain_test_challenges(settings.brain_test_challenges)
         transition_to_brain_test(state, challenges, settings.brain_test_duration)
-        await cm.broadcast(
-            game_id,
-            _make_event(state, session, settings, round_type=RoundType.BRAIN_TEST),
-        )
-        await start_phase_timer(game_id, GamePhase.BRAIN_TEST)
+
+
+async def _start_sub_round_loop(game_id: str, session, round_type: RoundType) -> None:
+    """Dispatch to the correct sub-round loop by round type."""
+    if round_type == RoundType.TASK:
+        await _start_matchup_loop(game_id, session)
+    elif round_type == RoundType.BRAIN_TEST:
         await _start_brain_test_loop(game_id, session)
 
 
@@ -503,36 +520,26 @@ async def _start_matchup_loop(game_id: str, session) -> None:
                     if not session:
                         return
                     state = session.state
-                    if state.phase != GamePhase.MATCHUP:
+                    if state.phase != GamePhase.ACTIVE:
                         return
                     rs = state.current_round
                     if not rs or i >= len(rs.matchups):
                         return
 
-                    rs.current_matchup = i
-                    m = rs.matchups[i]
-                    left_id, right_id = m.pair[0], m.pair[1]
-
-                    left_player = get_player_by_id(state, left_id)
-                    right_player = get_player_by_id(state, right_id)
-                    left_answer = rs.answers.get(left_id, "[no response]")
-                    right_answer = rs.answers.get(right_id, "[no response]")
+                    rs.current_sub_round = i
 
                     sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
                     state.phase_deadline = sub_deadline
 
                     await cm.broadcast(
                         game_id,
-                        MatchupChallengeEvent(
+                        SubRoundEvent(
                             seq=session.next_seq(),
-                            matchup_index=i,
-                            left_player_id=left_id,
-                            left_alias=left_player.alias if left_player else left_id,
-                            left_answer=left_answer,
-                            right_player_id=right_id,
-                            right_alias=right_player.alias if right_player else right_id,
-                            right_answer=right_answer,
-                            prompt_text=m.prompt_text,
+                            round_type=RoundType.TASK,
+                            sub_round_index=i,
+                            payload=build_matchup_sub_round_payload(
+                                rs.matchups[i], i, rs.answers, state.players
+                            ),
                             sub_deadline=sub_deadline.isoformat(),
                             phase_duration=sub_duration,
                         ),
@@ -545,15 +552,15 @@ async def _start_matchup_loop(game_id: str, session) -> None:
 
                 await asyncio.sleep(sub_duration)
 
-            # All matchups done — transition to results
+            # All matchups done — resolve
             async with lock:
                 session = repo.get(game_id)
                 if not session:
                     return
-                if session.state.phase != GamePhase.MATCHUP:
+                if session.state.phase != GamePhase.ACTIVE:
                     return
                 get_timer_manager().cancel_timer(game_id)
-                await do_matchup_complete(game_id, session)
+                await do_active_complete(game_id, session)
 
         except asyncio.CancelledError:
             pass
@@ -584,7 +591,7 @@ async def _start_brain_test_loop(game_id: str, session) -> None:
                     if not session:
                         return
                     state = session.state
-                    if state.phase != GamePhase.BRAIN_TEST:
+                    if state.phase != GamePhase.ACTIVE:
                         return
                     rs = state.current_round
                     if not rs or i >= len(rs.brain_challenges):
@@ -598,12 +605,15 @@ async def _start_brain_test_loop(game_id: str, session) -> None:
 
                     await cm.broadcast(
                         game_id,
-                        BrainTestChallengeEvent(
+                        SubRoundEvent(
                             seq=session.next_seq(),
-                            challenge_index=i,
-                            challenge_type=ch.challenge_type,
-                            question=ch.question,
-                            options=ch.options,
+                            round_type=RoundType.BRAIN_TEST,
+                            sub_round_index=i,
+                            payload={
+                                "challenge_type": ch.challenge_type,
+                                "question": ch.question,
+                                "options": ch.options,
+                            },
                             sub_deadline=sub_deadline.isoformat(),
                             phase_duration=sub_duration,
                         ),
@@ -616,15 +626,15 @@ async def _start_brain_test_loop(game_id: str, session) -> None:
 
                 await asyncio.sleep(sub_duration)
 
-            # All challenges done — transition to results
+            # All challenges done — resolve
             async with lock:
                 session = repo.get(game_id)
                 if not session:
                     return
-                if session.state.phase != GamePhase.BRAIN_TEST:
+                if session.state.phase != GamePhase.ACTIVE:
                     return
                 get_timer_manager().cancel_timer(game_id)
-                await do_brain_test_complete(game_id, session)
+                await do_active_complete(game_id, session)
 
         except asyncio.CancelledError:
             pass

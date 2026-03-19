@@ -10,7 +10,7 @@ export interface PhaseLayout {
   characters: CharacterPosition[]; // Default positions per slot (up to 6)
 }
 
-export const PHASE_LAYOUTS: Record<string, PhaseLayout> = {
+const SHARED_LAYOUTS: Record<string, PhaseLayout> = {
   lobby: {
     roomIndex: 0,
     brightness: 0.6,
@@ -37,45 +37,6 @@ export const PHASE_LAYOUTS: Record<string, PhaseLayout> = {
       { x: 0.9, state: "sit" },
     ],
   },
-  brain_test: {
-    roomIndex: 2,
-    brightness: 0.9,
-    accentColor: 0,
-    characters: [
-      { x: 0.15, state: "idle" },
-      { x: 0.3, state: "idle" },
-      { x: 0.45, state: "idle" },
-      { x: 0.6, state: "idle" },
-      { x: 0.75, state: "idle" },
-      { x: 0.9, state: "idle" },
-    ],
-  },
-  brain_test_results: {
-    roomIndex: 2,
-    brightness: 0.9,
-    accentColor: 0,
-    characters: [
-      { x: 0.15, state: "idle" },
-      { x: 0.3, state: "idle" },
-      { x: 0.45, state: "idle" },
-      { x: 0.6, state: "idle" },
-      { x: 0.75, state: "idle" },
-      { x: 0.9, state: "idle" },
-    ],
-  },
-  matchup: {
-    roomIndex: 3,
-    brightness: 0.8,
-    accentColor: 0,
-    characters: [
-      { x: 0.2, state: "idle" },
-      { x: 0.35, state: "idle" },
-      { x: 0.5, state: "idle" },
-      { x: 0.65, state: "idle" },
-      { x: 0.8, state: "idle" },
-      { x: 0.9, state: "idle" },
-    ],
-  },
   game_over: {
     roomIndex: 4,
     brightness: 1.0,
@@ -90,6 +51,65 @@ export const PHASE_LAYOUTS: Record<string, PhaseLayout> = {
     ],
   },
 };
+
+const ROUND_LAYOUTS: Record<string, Record<string, PhaseLayout>> = {
+  task: {
+    active: {
+      roomIndex: 3,
+      brightness: 0.8,
+      accentColor: 0,
+      characters: [
+        { x: 0.2, state: "idle" },
+        { x: 0.35, state: "idle" },
+        { x: 0.5, state: "idle" },
+        { x: 0.65, state: "idle" },
+        { x: 0.8, state: "idle" },
+        { x: 0.9, state: "idle" },
+      ],
+    },
+  },
+  brain_test: {
+    active: {
+      roomIndex: 2,
+      brightness: 0.9,
+      accentColor: 0,
+      characters: [
+        { x: 0.15, state: "idle" },
+        { x: 0.3, state: "idle" },
+        { x: 0.45, state: "idle" },
+        { x: 0.6, state: "idle" },
+        { x: 0.75, state: "idle" },
+        { x: 0.9, state: "idle" },
+      ],
+    },
+    results: {
+      roomIndex: 2,
+      brightness: 0.9,
+      accentColor: 0,
+      characters: [
+        { x: 0.15, state: "idle" },
+        { x: 0.3, state: "idle" },
+        { x: 0.45, state: "idle" },
+        { x: 0.6, state: "idle" },
+        { x: 0.75, state: "idle" },
+        { x: 0.9, state: "idle" },
+      ],
+    },
+  },
+};
+
+export function getPhaseLayout(phase: string, roundType: string | null): PhaseLayout {
+  // Check shared layouts first
+  if (SHARED_LAYOUTS[phase]) return SHARED_LAYOUTS[phase];
+
+  // Check round-type-specific layouts for active/results phases
+  if (roundType && ROUND_LAYOUTS[roundType]?.[phase]) {
+    return ROUND_LAYOUTS[roundType][phase];
+  }
+
+  // Fallback
+  return SHARED_LAYOUTS.lobby;
+}
 
 export const CHAR_STATES: Record<string, number> = {
   idle: 0,

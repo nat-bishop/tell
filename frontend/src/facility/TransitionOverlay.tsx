@@ -80,21 +80,19 @@ interface Directive {
   subtitle: string;
 }
 
-function getDirective(phase: GamePhase): Directive | null {
-  switch (phase) {
-    case "matchup":
-      return {
-        text: "MATCHUP",
-        subtitle: "who sounds more human?",
-      };
-    default:
-      return null;
+function getDirective(phase: GamePhase, roundType: string | null): Directive | null {
+  if (phase === "active" && roundType === "task") {
+    return {
+      text: "MATCHUP",
+      subtitle: "who sounds more human?",
+    };
   }
+  return null;
 }
 
 // ─── Situation Lines ───
 
-const INTERSTITIAL_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
+const INTERSTITIAL_PHASES = new Set<GamePhase>(["prompt", "active"]);
 
 function getSituationLine(
   roundNumber: number,
@@ -153,7 +151,7 @@ function TransitionOverlayContent() {
     subtitle = voice.typeLabel(roundType);
     situationLine = getSituationLine(roundNumber, totalRounds, scores, players);
   } else {
-    const directive = getDirective(phase);
+    const directive = getDirective(phase, roundType);
     if (directive) {
       text = directive.text;
       subtitle = directive.subtitle;

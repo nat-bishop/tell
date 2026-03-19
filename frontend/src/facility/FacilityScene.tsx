@@ -10,6 +10,7 @@ import { FacilityBrainTest } from "@/facility/phases/FacilityBrainTest";
 
 export function FacilityScene() {
   const phase = useGameStore((s) => s.phase);
+  const roundType = useGameStore((s) => s.roundType);
   const { transitionState } = useFacilityContext();
 
   if (transitionState === "lockdown" || transitionState === "reconfigure") return null;
@@ -18,8 +19,10 @@ export function FacilityScene() {
     <>
       {phase === "lobby" && <FacilityLobby />}
       {phase === "prompt" && <FacilityPrompt />}
-      {phase === "matchup" && <FacilityMatchup />}
-      {(phase === "brain_test" || phase === "brain_test_results") && <FacilityBrainTest />}
+      {(phase === "active" || phase === "results") && (
+        roundType === "task" ? <FacilityMatchup /> :
+        roundType === "brain_test" ? <FacilityBrainTest /> : null
+      )}
       {phase === "game_over" && <FacilityGameOver />}
     </>
   );
