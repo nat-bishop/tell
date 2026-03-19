@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { log } from "@/lib/log";
 
 // --- Types matching backend SSE event models ---
 
@@ -320,8 +321,9 @@ export const useGameStore = create<GameState>((set) => ({
   setIdentity: (gameId, playerId, alias) =>
     set({ gameId, playerId, myAlias: alias }),
 
-  onStateSync: (data) =>
-    set({
+  onStateSync: (data) => {
+    log.info("state_sync", { phase: data.phase, round: data.round_number, player_count: data.players.length });
+    return set({
       phase: data.phase,
       players: data.players,
       roundNumber: data.round_number,
@@ -341,7 +343,8 @@ export const useGameStore = create<GameState>((set) => ({
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
       connectionStatus: "connected",
-    }),
+    });
+  },
 
   onPlayerJoined: (data) =>
     set((s) => ({
@@ -374,8 +377,9 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     })),
 
-  onPhaseChanged: (data) =>
-    set((s) => ({
+  onPhaseChanged: (data) => {
+    log.info("phase_changed", { phase: data.phase, round: data.round_number, round_type: data.round_type });
+    return set((s) => ({
       phase: data.phase,
       roundNumber: data.round_number,
       promptText: data.prompt_text || null,
@@ -439,7 +443,8 @@ export const useGameStore = create<GameState>((set) => ({
       matchupPromptText: null,
       matchupMyVote: null,
       matchupResults: null,
-    })),
+    }));
+  },
 
   onAnswerSubmitted: (data) =>
     set({
@@ -448,12 +453,14 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     }),
 
-  onNarration: (data) =>
-    set({
+  onNarration: (data) => {
+    log.info("narration_received", { trigger: data.trigger, text_len: data.text.length });
+    return set({
       narrationText: data.text,
       narrationTrigger: data.trigger,
       lastSeq: data.seq,
-    }),
+    });
+  },
 
   onBrainTestChallenge: (data) =>
     set({
@@ -474,15 +481,17 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     })),
 
-  onGameOver: (data) =>
-    set({
+  onGameOver: (data) => {
+    log.info("game_over", { winner: data.winner, winner_count: (data.winner_ids || []).length });
+    return set({
       phase: "game_over",
       winner: data.winner,
       winnerIds: data.winner_ids || [],
       revealedPlayers: data.players,
       scores: data.scores || {},
       lastSeq: data.seq,
-    }),
+    });
+  },
 
   onTimerTick: (data) => set({ lastSeq: data.seq }),
 
@@ -519,18 +528,20 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     })),
 
-  onFinalReveal: (data) =>
-    set({
+  onFinalReveal: (data) => {
+    log.info("final_reveal", { winner_count: (data.winner_ids || []).length, has_narration: !!data.narrator_text });
+    return set({
       revealedPlayers: data.players,
       winnerIds: data.winner_ids || [],
       narrationText: data.narrator_text,
       narrationTrigger: "game_over",
       lastSeq: data.seq,
-    }),
+    });
+  },
 
-  onOpen: () => set({ connectionStatus: "connected" }),
+  onOpen: () => { log.info("sse_connected"); return set({ connectionStatus: "connected" }); },
 
-  onError: () => set({ connectionStatus: "reconnecting" }),
+  onError: () => { log.warn("sse_reconnecting"); return set({ connectionStatus: "reconnecting" }); },
 
   reset: () => set(initialState),
 }));

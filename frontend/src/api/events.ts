@@ -1,3 +1,4 @@
+import { log } from "@/lib/log";
 import { API_URL } from "./client";
 import type {
   StateSyncData,
@@ -67,9 +68,10 @@ export function connectGameEvents(
     es.addEventListener(eventType, (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
+        log.debug("sse_event", { event_type: eventType, seq: data.seq });
         handler(data);
       } catch {
-        console.error(`Failed to parse ${eventType} event`, e.data);
+        log.error("sse_parse_failed", { event_type: eventType });
       }
     });
   }
@@ -79,7 +81,7 @@ export function connectGameEvents(
   };
 
   es.onerror = () => {
-    console.warn("SSE connection error, will auto-reconnect");
+    log.warn("sse_connection_error");
     callbacks.onError();
   };
 

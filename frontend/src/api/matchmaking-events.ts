@@ -1,3 +1,4 @@
+import { log } from "@/lib/log";
 import { API_URL } from "./client";
 
 export interface LobbyStatusData {
@@ -35,15 +36,17 @@ export function connectMatchmakingEvents(
   for (const [eventType, handler] of Object.entries(eventMap)) {
     es.addEventListener(eventType, (e: MessageEvent) => {
       try {
-        handler(JSON.parse(e.data));
+        const data = JSON.parse(e.data);
+        log.debug("matchmaking_sse_event", { event_type: eventType });
+        handler(data);
       } catch {
-        console.error(`Failed to parse ${eventType} event`, e.data);
+        log.error("sse_parse_failed", { event_type: eventType });
       }
     });
   }
 
   es.onerror = () => {
-    console.warn("Matchmaking SSE error, will auto-reconnect");
+    log.warn("matchmaking_sse_error");
   };
 
   return { close: () => es.close() };
