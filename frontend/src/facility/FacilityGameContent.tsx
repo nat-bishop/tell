@@ -10,8 +10,7 @@ import { FacilityProvider, useFacilityContext } from "@/facility/FacilityProvide
 import { FacilityViewport } from "@/facility/FacilityViewport";
 import { FacilityScene } from "@/facility/FacilityScene";
 import { TransitionOverlay } from "@/facility/TransitionOverlay";
-import { RiveScene } from "@/facility/RiveScene";
-import { useFacilityCharacters } from "@/facility/useFacilityCharacters";
+import { FacilityBackground } from "@/facility/FacilityBackground";
 
 const INTERSTITIAL_PHASES = new Set<GamePhase>([
   "prompt", "active", "results",
@@ -55,8 +54,7 @@ function FacilityInner() {
     phase, phaseDeadline, phaseDuration, players, actionStartsAt,
   } = useGameStore();
   const remaining = useTimer(phaseDeadline);
-  const { rive, setRive, transitionState, startTransition, snapTo } = useFacilityContext();
-  useFacilityCharacters(rive);
+  const { transitionState, startTransition, snapTo } = useFacilityContext();
 
   // Cold open state -- show once when game transitions from lobby to first round
   const [showColdOpen, setShowColdOpen] = useState(false);
@@ -117,7 +115,7 @@ function FacilityInner() {
 
   return (
     <FacilityViewport>
-      <RiveScene onRiveReady={setRive} />
+      <FacilityBackground />
       {!hideTimer && <FacilityTimer remaining={remaining} total={total} />}
       <HudPanel />
       <FacilityNarration />

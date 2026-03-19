@@ -414,3 +414,30 @@ input:focus, textarea:focus {
 .animate-panel-exit {
   animation: panel-exit 300ms ease both;
 }
+
+/* ─── Facility Background Atmosphere ─── */
+
+.facility-bg {
+  transition: background 1.5s ease;
+}
+
+/* ─── Ambient Particles ─── */
+
+@keyframes particle-float {
+  0% { transform: translateY(0); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(-110vh); opacity: 0; }
+}
+
+.facility-particle {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--cold);
+  opacity: 0.2;
+  animation: particle-float linear infinite;
+  mix-blend-mode: screen;
+}
+
