@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { usePhaseLayout } from "./usePhaseLayout";
+import { useGameStore } from "@/hooks/useGameStore";
+import { getPhaseLayout } from "./phaseLayouts";
 
 // Room-index → radial gradient position/spread
 const GRADIENT_CONFIGS: Record<number, string[]> = {
@@ -47,7 +48,9 @@ function buildBackground(
 }
 
 export function FacilityBackground() {
-  const layout = usePhaseLayout();
+  const phase = useGameStore((s) => s.phase);
+  const roundType = useGameStore((s) => s.roundType);
+  const layout = useMemo(() => getPhaseLayout(phase, roundType), [phase, roundType]);
 
   const background = useMemo(
     () => buildBackground(layout.roomIndex, layout.accentColor, layout.brightness),

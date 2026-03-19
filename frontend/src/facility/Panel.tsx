@@ -6,23 +6,15 @@ interface PanelProps {
   zone: ZoneName;
   children: React.ReactNode;
   className?: string;
-  entering?: boolean;
-  exiting?: boolean;
 }
 
-export function Panel({ zone, children, className, entering, exiting }: PanelProps) {
+export function Panel({ zone, children, className }: PanelProps) {
   const z = ZONES[zone];
   if (!z) return null;
 
-  const animClass = exiting
-    ? "animate-panel-exit"
-    : entering
-      ? "animate-panel-enter"
-      : "";
-
   return (
     <div
-      className={`facility-panel ${animClass} ${className ?? ""}`}
+      className={`facility-panel ${className ?? ""}`}
       style={{
         position: "absolute",
         top: z.top,

@@ -7,7 +7,6 @@ import {
   connectMatchmakingEvents,
   type LobbyStatusData,
 } from "@/api/matchmaking-events";
-import { log } from "@/lib/log";
 import { Stage } from "@/components/Stage";
 import { SystemText } from "@/components/SystemText";
 
@@ -30,7 +29,7 @@ export default function QueuePage() {
       setAlias(res.alias);
       setJoined(true);
     } catch (err) {
-      log.error("matchmaking_join_failed", { error: String(err) });
+      console.error("[TELL] matchmaking_join_failed", { error: String(err) });
     }
   };
 

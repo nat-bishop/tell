@@ -7,7 +7,6 @@ import { FacilityNarration } from "@/facility/FacilityNarration";
 import { HudPanel } from "@/facility/HudPanel";
 import { useTimer } from "@/hooks/useTimer";
 import { FacilityProvider, useFacilityContext } from "@/facility/FacilityProvider";
-import { FacilityViewport } from "@/facility/FacilityViewport";
 import { FacilityScene } from "@/facility/FacilityScene";
 import { TransitionOverlay } from "@/facility/TransitionOverlay";
 import { FacilityBackground } from "@/facility/FacilityBackground";
@@ -114,20 +113,23 @@ function FacilityInner() {
   const hideTimer = phase === "lobby" || phase === "game_over" || showColdOpen || transitionState !== "idle";
 
   return (
-    <FacilityViewport>
-      <FacilityBackground />
-      {!hideTimer && <FacilityTimer remaining={remaining} total={total} />}
-      <HudPanel />
-      <FacilityNarration />
-      <TransitionOverlay />
-      {showColdOpen ? (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <ColdOpen playerCount={players.length} />
-        </div>
-      ) : (
-        <FacilityScene />
-      )}
-    </FacilityViewport>
+    <div className="facility-viewport">
+      <div className="facility-vignette" />
+      <div style={{ position: "relative", zIndex: 10, width: "100%", height: "100%" }}>
+        <FacilityBackground />
+        {!hideTimer && <FacilityTimer remaining={remaining} total={total} />}
+        <HudPanel />
+        <FacilityNarration />
+        <TransitionOverlay />
+        {showColdOpen ? (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <ColdOpen playerCount={players.length} />
+          </div>
+        ) : (
+          <FacilityScene />
+        )}
+      </div>
+    </div>
   );
 }
 

@@ -1,4 +1,3 @@
-import { log } from "@/lib/log";
 import { API_URL } from "./client";
 
 export interface LobbyStatusData {
@@ -37,16 +36,15 @@ export function connectMatchmakingEvents(
     es.addEventListener(eventType, (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
-        log.debug("matchmaking_sse_event", { event_type: eventType });
         handler(data);
       } catch {
-        log.error("sse_parse_failed", { event_type: eventType });
+        console.error("[TELL] sse_parse_failed", { event_type: eventType });
       }
     });
   }
 
   es.onerror = () => {
-    log.warn("matchmaking_sse_error");
+    console.warn("[TELL] matchmaking_sse_error");
   };
 
   return { close: () => es.close() };

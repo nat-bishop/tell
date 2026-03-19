@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { log } from "@/lib/log";
 
 // --- Types matching backend SSE event models ---
 
@@ -257,7 +256,7 @@ export const useGameStore = create<GameState>((set) => ({
     set({ gameId, playerId, myAlias: alias }),
 
   onStateSync: (data) => {
-    log.info("state_sync", { phase: data.phase, round: data.round_number, player_count: data.players.length });
+    console.info("[TELL] state_sync", { phase: data.phase, round: data.round_number, player_count: data.players.length });
     return set({
       phase: data.phase,
       players: data.players,
@@ -319,7 +318,7 @@ export const useGameStore = create<GameState>((set) => ({
     })),
 
   onPhaseChanged: (data) => {
-    log.info("phase_changed", { phase: data.phase, round: data.round_number, round_type: data.round_type });
+    console.info("[TELL] phase_changed", { phase: data.phase, round: data.round_number, round_type: data.round_type });
     return set((s) => ({
       phase: data.phase,
       roundNumber: data.round_number,
@@ -355,7 +354,7 @@ export const useGameStore = create<GameState>((set) => ({
     }),
 
   onNarration: (data) => {
-    log.info("narration_received", { trigger: data.trigger, text_len: data.text.length });
+    console.info("[TELL] narration_received", { trigger: data.trigger, text_len: data.text.length });
     return set({
       narrationText: data.text,
       narrationTrigger: data.trigger,
@@ -381,7 +380,7 @@ export const useGameStore = create<GameState>((set) => ({
     })),
 
   onGameOver: (data) => {
-    log.info("game_over", { winner: data.winner, winner_count: (data.winner_ids || []).length });
+    console.info("[TELL] game_over", { winner: data.winner, winner_count: (data.winner_ids || []).length });
     return set({
       phase: "game_over",
       winner: data.winner,
@@ -405,7 +404,7 @@ export const useGameStore = create<GameState>((set) => ({
     })),
 
   onFinalReveal: (data) => {
-    log.info("final_reveal", { winner_count: (data.winner_ids || []).length, has_narration: !!data.narrator_text });
+    console.info("[TELL] final_reveal", { winner_count: (data.winner_ids || []).length, has_narration: !!data.narrator_text });
     return set({
       revealedPlayers: data.players,
       winnerIds: data.winner_ids || [],
@@ -415,9 +414,9 @@ export const useGameStore = create<GameState>((set) => ({
     });
   },
 
-  onOpen: () => { log.info("sse_connected"); return set({ connectionStatus: "connected" }); },
+  onOpen: () => { console.info("[TELL] sse_connected"); return set({ connectionStatus: "connected" }); },
 
-  onError: () => { log.warn("sse_reconnecting"); return set({ connectionStatus: "reconnecting" }); },
+  onError: () => { console.warn("[TELL] sse_reconnecting"); return set({ connectionStatus: "reconnecting" }); },
 
   reset: () => set(initialState),
 }));
