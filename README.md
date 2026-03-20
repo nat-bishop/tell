@@ -1,6 +1,6 @@
 # Tell
 
-Multiplayer social deduction game — reverse Turing test. Players join a group where some are AI, some human. Everyone votes each matchup on who sounds more human. After 5 rounds: big reveal, highest score wins.
+Multiplayer social deduction game — reverse Turing test. Players join a group where some are AI, some human. Everyone votes each round on who sounds most human. After 5 rounds: big reveal, highest score wins.
 
 ## Prerequisites
 

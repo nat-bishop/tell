@@ -56,40 +56,40 @@ The contrast between serif dialogue and monospace system text reinforces the the
 
 ---
 
-## The Two Games
+## The Four Game Types
 
 Round type is selected dynamically each round — no repeat of the previous type.
 
-Each creates different pressure. Gallery Vote exposes voice and judgment simultaneously — everyone is both judge and suspect. Quick Draw is a speed test with a right answer — the gap between human and AI accuracy becomes visible without social reads.
+Each creates different pressure. Gallery Vote exposes voice and judgment simultaneously. Quick Draw is objective — no social reads, just accuracy. Wager reveals how people reason about uncertainty. Signal tests whether you can decode a deliberately constrained communication.
 
 ---
 
 ### Gallery Vote — Find the AI
 
-A constrained creative prompt. Everyone answers simultaneously. Then all answers are shown at once and everyone votes for the player who sounds most human. Votes received = negative points (−1 per vote). Being suspected costs you.
+A linguistic task prompt. Everyone answers simultaneously. Then all answers are shown at once and everyone votes for the player who sounds most human. Votes received = negative points (−1 per vote). Being suspected costs you.
 
 ```
-PROMPT (45s) → ACTIVE (all answers visible, tap to vote) → RoundResultsEvent
-  → RESULTS (vote counts, 15s) → next round
+PROMPT (45s) → ACTIVE (all answers visible, tap to vote)
+  → RESULTS (vote counts, 8s) → next round
 ```
 
-~60-90 seconds per round. Short answers leave nowhere to hide — every word is evidence.
+~60-75 seconds per round. Task quality leaves nowhere to hide — every word is evidence.
 
 #### The 7 Prompt Categories
 
-Each category exploits a different AI blindspot or strength:
+Each category exploits a different AI blindspot:
 
 | Category | Example prompt | The tell |
 |---|---|---|
-| **haiku** | "Write a haiku about Monday mornings." | LLMs notoriously miscounting syllables. Getting it wrong might be the AI tell. Getting it right (slowly, on your fingers) is human. |
-| **concise** | "Explain love in exactly 5 words." | LLMs are constitutionally verbose. They hedge, qualify, add context. The most concise answer is probably human. |
-| **humor** | "Write a fortune cookie message that's unsettling." | AI jokes are structurally correct but soulless. The weird, slightly broken joke that makes one person snort is human. |
-| **corporate** | "Write a polite way to say 'this meeting could have been an email.'" | AI has ingested millions of corporate emails. Being too polished is the tell. |
-| **casual** | "Explain quantum physics using only slang." | AI casual sounds like a 45-year-old executive who just learned what "fire" means. The effort is visible. |
-| **style** | "Describe breakfast like a nature documentary narrator." | AI style transfer is technically clean. Human impressions are funnier and uneven. |
-| **emotional_task** | "Write the text you'd send at 2am to someone you miss." | AI empathy is a performance. "I validate your emotional experience" vs "hey. just thinking about you." |
+| **style_transfer** | "Rewrite 'I had a terrible day at work' as a pirate would say it." | AI style transfer is technically clean. Human impressions are funnier and uneven. |
+| **translation** | "Translate to French: 'The meeting has been rescheduled to Thursday.'" | AI is fluent; humans miss accents or overthink idioms. The too-perfect translation is the tell. |
+| **pattern** | "Complete the sequence: A, C, E, G, ___" | AI answers instantly and correctly. A human might second-guess or overthink it. |
+| **grammar** | "Fix the grammar: 'Me and him went to the store yesterday, we buyed milk.'" | AI corrections are impeccable. Human fixes might overcorrect or add voice. |
+| **format_conversion** | "Rewrite as a haiku: 'The sunset was beautiful over the calm ocean.'" | AI haiku are syllabically correct but lifeless. Human haiku are imperfect and evocative. |
+| **summary** | "Summarize in one sentence: [3-sentence passage]" | AI summaries are precise but generic. Humans compress differently — they notice different things. |
+| **rewrite** | "Make this sentence casual: 'I would like to inquire about the availability...'" | AI casual sounds like a 45-year-old executive who just learned what "fire" means. |
 
-42 prompts total (6 per category). No repeats, no same-category back-to-back.
+36 prompts total (5 per category, some with 6). No repeats, no same-category back-to-back.
 
 #### How the Gallery Vote Works
 
@@ -97,25 +97,25 @@ All answers are shown at once with player aliases visible. Each player taps one 
 
 #### What Makes It Fun
 
-The scoring inversion is the key: you want to be overlooked, not celebrated. The most "human-sounding" answer loses points. This creates a perverse incentive — being too creative, too polished, too AI-like all have the same cost. The gallery format (all answers visible at once) means you're comparing the whole room, not just a pair. The `FacilityVote` component shows all answers; `FacilityVoteResults` reveals the vote tallies.
+The scoring inversion is the key: you want to be overlooked, not celebrated. The most "human-sounding" answer loses points. This creates a perverse incentive — being too polished, too AI-like all have the same cost. The gallery format (all answers visible at once) means you're comparing the whole room.
 
-**Skill tested**: Format fluency, creative economy, reading the room for AI tells under time pressure.
+**Skill tested**: Linguistic imperfection, reading the room for AI tells under time pressure.
 
 ---
 
 ### Quick Draw — The Evidence Round
 
-No writing of your own. No head-to-head. A rapid sequence of multiple-choice challenges — estimation, common knowledge, trick questions, pattern completion. Everyone taps an option. Points awarded for correct answers.
+No writing of your own. A rapid sequence of multiple-choice challenges — estimation, common knowledge, trick questions, pattern completion. Everyone taps an option. Points awarded for correct answers.
 
 ```
-ACTIVE (5 challenges × 15s each, 85s safety timer) → RESULTS (15s) → next round
+ACTIVE (5 challenges × 12s each, 75s safety timer) → RESULTS (15s) → next round
 ```
 
-~90 seconds per round. The only round with a right answer.
+~75 seconds per round. The only round with a right answer.
 
 #### How It Works
 
-1. Five challenges appear one at a time, 15 seconds each. A new `SubRoundEvent(round_type="brain_test", ...)` fires for each, with 4 option buttons.
+1. Five challenges appear one at a time, 12 seconds each. A new `SubRoundEvent(round_type="brain_test", ...)` fires for each, with 4 option buttons.
 2. All players tap one of the 4 options. AI selects an option via LLM.
 3. After all challenges, `RESULTS` phase shows every player's selections with correct/incorrect indicators and running scores.
 4. No vote. `do_results_complete()` starts the next round directly.
@@ -137,9 +137,88 @@ Pure correctness: `selected_index == correct_index` → 1 point per challenge. N
 
 #### The Design Tension
 
-Quick Draw is a pressure valve. After a Gallery Vote round with social judgment, a round with no voting feels like a reprieve. But it isn't — the choices become permanent record, accumulated in running scores that everyone can see. The gap between a human who second-guesses the trick question and an AI that answers confidently wrong creates information.
+Quick Draw is a pressure valve. After a Gallery Vote round with social judgment, a round with no voting feels like a reprieve. But it isn't — the choices become permanent record. The gap between a human who second-guesses the trick question and an AI that answers confidently wrong creates information.
 
 **Skill tested**: Speed, general knowledge, reading questions carefully under time pressure.
+
+---
+
+### Wager — Estimation + Betting
+
+Numerical estimation followed by social betting. Everyone guesses a number, then bets on whose guess is closest. No creativity — just calibrated intuition and reading your opponents.
+
+```
+ACTIVE: 3 questions × [GUESS 15s → BET 15s], 100s safety timer
+→ RESULTS (15s) → next round
+```
+
+~105 seconds per round. Scoring is transparent — you can see all guesses before betting.
+
+#### How It Works
+
+1. A question appears with a number line range (e.g., "How many astronauts have walked on the Moon?" 0–100). All players drag a marker to their estimate.
+2. After the GUESS window, all guesses are revealed. Players then bet on whose guess is closest. Self-betting allowed.
+3. After 3 questions: `RoundResultsEvent` carries final scores and a breakdown per question.
+
+#### Scoring
+
++1 for having the closest guess. +1 for betting on a player with the closest guess. Max 2 points per question, 6 total. Ties in closest guess: all tied players get the +1.
+
+#### The 6 Question Categories
+
+`geography`, `science`, `history`, `pop_culture`, `economics`, `nature`. 26 questions total. `select_wager_questions()` picks a category-diverse mix of 3 each round.
+
+#### What Makes It Fun
+
+The bet phase creates a reveal moment mid-round. You see your opponents' guesses, assess who might be closest, and decide whether to self-bet or chase someone else's confident number. AI guesses are personality-driven — an eccentric AI might anchor to a wild number. A sardonic one might bet on itself reflexively.
+
+**Skill tested**: Numerical calibration, reading confidence in opponents, risk assessment.
+
+---
+
+### Signal — Phrase Transformation
+
+Drawful-style. Each player gets a secret phrase and everyone uses the same constraint to transform it. Others try to guess the original.
+
+```
+PROMPT (20s — each player sees their secret phrase + shared constraint, submits transformation)
+→ ACTIVE: N sub-rounds × 12s each — one featured player's transformation per sub-round
+→ LLM batch-judges all guesses → RESULTS (15s) → next round
+```
+
+~90-120 seconds per round depending on player count.
+
+#### How It Works
+
+1. During PROMPT: each player sees their secret phrase (e.g., "a dog chasing a squirrel") and the shared constraint (e.g., "Only questions — describe using only questions, no statements"). They write their transformation.
+2. During ACTIVE: one player's transformation is featured per sub-round. All other players read it and type their guess at the original phrase.
+3. After all sub-rounds: LLM judges all guesses via batch Y/N format (parallelized per featured player). Fuzzy match fallback if LLM fails.
+4. RESULTS: shows phrase / transformation / all guesses with correct/incorrect judgment cards per player.
+
+#### Scoring
+
++1 per correct guess (guesser). +1 for the transmitter if >= half of guessers got it right. LLM judging uses semantic equivalence — not exact wording.
+
+#### The Constraints
+
+15 shared constraints, selected without repeat. Examples:
+
+| Constraint | Instruction |
+|---|---|
+| Only questions | Describe the phrase using only questions. No statements. |
+| No nouns | Describe the phrase without using any nouns. |
+| Opposite day | Describe the opposite of the phrase. Everything reversed. |
+| As a recipe | Describe the phrase as if it were a cooking recipe. |
+| News headline | Describe the phrase as a breaking news headline. |
+| Text message | Describe the phrase as a casual text to a friend. Use abbreviations. |
+
+40 secret phrases — concrete everyday scenarios ("stepping on a Lego barefoot", "trying to fold a fitted sheet"). Must be visually evocable for constraint-based transformation.
+
+#### What Makes It Fun
+
+The constraint forces creative compression under absurd rules. "A dog chasing a squirrel" transformed via "Only questions" becomes something like "Why is it always the squirrels? Why can't we just walk?" — which may or may not be guessable. The judging moment (does the LLM think "a furious pursuit in the park" counts?) creates tension. AI players transform and guess via LLM — their constraints produce characteristically flat transformations, which ironically makes them easier to decode.
+
+**Skill tested**: Creative constraint satisfaction, theory-of-mind (can others decode what you transformed?), pattern-matching under time pressure.
 
 ---
 
@@ -155,18 +234,20 @@ Total game: ~8-12 minutes. The party game sweet spot for a single-session experi
 
 ### Round Variety
 
-Two round types alternate (no consecutive repeat):
+Four round types, no consecutive repeat:
 
 | Round | Duration | What it tests |
 |-------|----------|--------------|
-| Gallery Vote | ~60-90s | Voice, creativity, reading the room |
-| Quick Draw | ~90s | Speed, knowledge, AI accuracy |
+| Gallery Vote | ~60-75s | Linguistic imperfection, reading the room |
+| Quick Draw | ~75s | Speed, knowledge, AI accuracy |
+| Wager | ~105s | Numerical calibration, social betting |
+| Signal | ~90-120s | Creative constraint, theory-of-mind |
 
-The alternation prevents monotony. After judging creative answers, a round of objective questions resets the dynamic before returning to social reads.
+The variety prevents monotony. Each round type creates distinct information — linguistic style, factual accuracy, quantitative calibration, decoding skill. No single strength dominates across all four.
 
 ### The Reveal
 
-All roles are revealed simultaneously at game end — not one by one. Everyone sees everyone's true identity at the same moment. The post-reveal conversation ("UNIT-7 was AI the whole time? But the haiku was so good!") is half the entertainment.
+All roles are revealed simultaneously at game end — not one by one. Everyone sees everyone's true identity at the same moment. The post-reveal conversation ("UNIT-7 was AI the whole time? But the transformation was so good!") is half the entertainment.
 
 The `FinalRevealEvent` fires before `GameOverEvent`, giving the frontend a reveal-first, score-second sequence.
 
@@ -182,12 +263,12 @@ The game is funny. This section explains why, so future design decisions preserv
 
 ### Constraint Creates Comedy
 
-"Explain love in 5 words" is funnier than "write something funny." The constraint eliminates the blank-page problem and narrows the comedic path. Every format restriction — word count, syllable count, style imitation — forces creative compression, which is where comedy lives. Time pressure amplifies this: you can't self-edit in 25 seconds, so you get gut reactions instead of polished responses.
+"Rewrite this as a pirate" is funnier when you can see everyone else's version simultaneously. The constraint eliminates the blank-page problem and narrows the comedic path. Every format restriction — style imitation, format conversion, transformation rule — forces creative compression. Time pressure amplifies this: you can't self-edit in 12 seconds, so you get gut reactions instead of polished responses.
 
 ### Three Sources of Humor
 
-1. **The answers themselves** — constrained prompts produce inherently quotable responses. A haiku about Monday mornings written in 25 seconds will be imperfect and human and funny.
-2. **The juxtaposition** — seeing all answers together in the gallery. One player wrote a cry for help; the AI wrote something technically perfect but soulless. The comparison is the joke.
+1. **The answers themselves** — constrained prompts produce inherently quotable responses. "Make this casual: 'I would like to inquire about the availability of the aforementioned product'" produces wildly different results in 12 seconds.
+2. **The juxtaposition** — seeing all answers together in the gallery. One player's translation has a charming error; the AI's is flawless and sterile. The comparison is the joke.
 3. **The reveal** — "UNIT-7 was AI" after everyone voted them as the most human. The post-reveal conversation is half the entertainment.
 
 ---
@@ -196,7 +277,7 @@ The game is funny. This section explains why, so future design decisions preserv
 
 ### Matchmaking
 
-`play →` on the landing page routes to `/queue`. Enter a name, get a robot alias, join the rolling lobby. When enough humans queue up, a countdown fires and everyone is dropped into a game. Solo players wait up to 45s before starting with AI companions. Game is pre-populated with AI players (target total: 5-7).
+`play →` on the landing page routes to `/queue`. Enter a name, get a robot alias, join the rolling lobby. When 2+ humans queue, a countdown fires and everyone drops into a game filled to 8 total with AI players.
 
 Private game (host flow): create → share URL → host starts manually.
 
@@ -241,5 +322,9 @@ The narrator knows everyone's role. It never reveals that directly — but the w
 - **Empty answer**: Submitted as "[no response]". Legitimate strategy.
 - **Gallery vote: no votes on a player**: Zero vote count shown in results. No score change for that player.
 - **Brain Test: no response to a challenge**: Shown as blank in results grid. No point.
+- **Wager: player misses guess window**: Cannot be a bet target (route validates target has a guess).
+- **Signal: featured player cannot guess their own phrase**: Route rejects `player_id == featured_pid`.
+- **Signal: LLM judge fails**: Falls back to fuzzy match (case-insensitive substring containment).
+- **Signal: no guesses for a featured player**: Score deltas are empty for that sub-round; transmitter gets no bonus.
 - **All players tie at game end**: `winner_ids` contains all tied player IDs.
 - **Matchmaking queue drop**: Player disconnecting from SSE auto-removes them from the queue.

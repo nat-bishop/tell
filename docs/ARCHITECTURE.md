@@ -11,8 +11,9 @@ Human Client B  ◄── SSE: phase_changed ───────────�
 AI Player       ── internal asyncio task ──────────────┘  all queues
 
 GET /games/{id}/events       →  persistent EventSource per client
-POST /games/{id}/*           →  actions (join, start, answer,
-                                 vote, brain-test-answer)
+POST /games/{id}/*           →  actions (join, start, answer, vote,
+                                 brain-test-answer, wager-guess, wager-bet, signal-guess)
+GET  /games/{id}/signal-phrase →  player's secret phrase + constraint (signal rounds only)
 POST /matchmaking/join|leave →  matchmaking queue
 GET /matchmaking/events      →  matchmaking SSE (lobby_status, game_assigned)
 GET /matchmaking/status      →  current lobby state
@@ -50,6 +51,7 @@ class MinigameHandler:
                                  # active_interstitial, results_interstitial
 
     def setup_round(state, settings)          # mutates TellGameState in place
+    def get_prompt_duration(settings) → int  # default: settings.prompt_duration; override for custom timing
     def get_active_duration(settings) → int
     def get_results_duration(settings) → int
     def active_event_extras(state) → dict     # merged into PhaseChangedEvent
@@ -60,25 +62,40 @@ class MinigameHandler:
 
 `MINIGAME_REGISTRY` (dict in `backend/minigames/__init__.py`) maps `RoundType → MinigameHandler`. `get_handler(round_type)` is the single lookup point used by `transitions.py` and `game_logic.py`.
 
-**To add a round type**: Create `backend/minigames/mytype.py`, subclass `MinigameHandler`, call `register(MyHandler())` in `__init__.py`. Add `MINIGAME_COMPONENTS[round_type]` entry in `FacilityScene.tsx`.
+**To add a round type**: Create `backend/minigames/mytype.py`, subclass `MinigameHandler`, call `register(MyHandler())` in `__init__.py`. Add `MINIGAME_COMPONENTS[round_type]` entry in `FacilityScene.tsx`. If the round needs a custom prompt screen, add a `Prompt` key to the registry entry.
 
 ## State Machine
 
-Two round types: **Task (Gallery Vote)** and **Quick Draw (Brain Test)**. Selected dynamically at the start of each round via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat.
+Four round types selected dynamically at the start of each round via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat.
 
-**Task / Gallery Vote** (creative prompt, everyone votes for most-human-sounding answer):
+**Task / Gallery Vote** (linguistic task prompt, everyone votes for most-human-sounding answer):
 ```
 PROMPT (45s + 5s interstitial) → ACTIVE (all see all answers, tap to vote)
-  → RoundResultsEvent → RESULTS (vote counts, 15s) → next round
+  → RoundResultsEvent → RESULTS (vote counts, 8s) → next round
 ```
 During ACTIVE, all players see all answers and vote for the player who sounds most human. Votes received = negative points (−1 per vote). `TaskHandler.on_active_start()` schedules AI vote tasks. Early-complete fires when all players have voted.
 
 **Quick Draw / Brain Test** (multiple-choice speed quiz, scored by correctness):
 ```
-ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent
+ACTIVE (75s safety timer, 5 challenges × 12s each) → RoundResultsEvent
   → RESULTS (15s) → next round
 ```
 `BrainTestHandler.on_active_start()` spawns `_brain_loop` as a background task. Each iteration broadcasts `SubRoundEvent(round_type="brain_test", sub_round_index=i, payload={question, options, ...})`, calls `on_brain_test_challenge()` to schedule AI, then sleeps for the sub-duration. After all challenges, cancels safety timer and calls `do_active_complete()`.
+
+**Wager** (numerical estimation + social betting):
+```
+ACTIVE (100s safety, 3 questions × [GUESS 15s + BET 15s]) → RoundResultsEvent
+  → RESULTS (15s) → next round
+```
+`WagerHandler._wager_loop` iterates each question in two sub-rounds: GUESS (place marker on number line) then BET (pick whose guess is closest). Each sub-round broadcasts `SubRoundEvent(round_type="wager", ...)`. Scoring: +1 for closest guess, +1 for betting on a closest guesser; self-bet allowed. `score_wager()` in `wager.py`.
+
+**Signal** (Drawful-style phrase transformation + guessing):
+```
+PROMPT (20s — each player gets a secret phrase + shared constraint, submits transformation)
+→ ACTIVE (120s safety, N sub-rounds × 12s each — one per player)
+→ LLM batch-judges all guesses → RoundResultsEvent → RESULTS (15s) → next round
+```
+`SignalHandler._signal_loop` iterates `signal_player_order`, broadcasting `SubRoundEvent(round_type="signal", ...)` showing one player's transformation. Others submit guesses via `POST /signal-guess`. After all sub-rounds, `_judge_all_guesses` parallelizes LLM judging via `asyncio.gather`. Scoring: guesser +1 per correct guess; transmitter +1 if >= half guessers correct. Signal uses a custom PROMPT component (`FacilitySignalPrompt`) that fetches per-player phrases via `GET /signal-phrase`.
 
 **After `total_rounds` (default 5)**:
 ```
@@ -111,8 +128,10 @@ Checked in `game_logic.check_game_over()` after each round completes. Returns `N
 ### Scoring
 
 - `Player.score` (int) accumulates across rounds.
-- Task: votes received = **−1 per vote** via `TaskHandler.build_results()`. `tally_gallery_votes()` in `game_logic.py`.
-- Brain Test: `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
+- **Task**: votes received = **−1 per vote** via `TaskHandler.build_results()`. `tally_gallery_votes()` in `game_logic.py`.
+- **Brain Test**: `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
+- **Wager**: +1 for closest guess, +1 for betting on a closest guesser. `score_wager()` in `wager.py`.
+- **Signal**: guesser +1 per correct guess; transmitter +1 if >= half guessers got it right. LLM-judged with fuzzy match fallback. `SignalHandler.build_results()`.
 - `scores` dict (player_id → score) carried on `RoundResultsEvent`, `StateSyncEvent`, `GameOverEvent`.
 
 ## Matchmaking
@@ -121,9 +140,7 @@ Checked in `game_logic.check_game_over()` after each round completes. Returns `N
 
 1. Players `POST /matchmaking/join` → get `player_id` + `alias` + connect to `GET /matchmaking/events` SSE.
 2. Each join/leave triggers `_on_player_change()`: if `human_count >= mm_min_humans`, start countdown; if count drops below, cancel it.
-3. Solo player gets a separate `mm_solo_timeout_seconds` (45s) grace period, then fires a game with AI companions.
-4. `_fire_game()`: snapshot + clear queue, close join window (`_join_window_open.clear()`), create `TellGameState`, add human players, call `initialize_and_start_game(game_id, ai_count)`, broadcast `game_assigned` SSE event to all lobby clients, then reopen window.
-5. Total player count is randomized: `target_total = random.randint(mm_min_total, mm_max_total)`, `ai_count = max(1, target_total - human_count)`.
+3. `_fire_game()`: snapshot + clear queue (capped at `mm_max_humans`), close join window (`_join_window_open.clear()`), create `TellGameState`, add human players, fill to 8 total with AI, call `initialize_and_start_game(game_id, ai_count)`, broadcast `game_assigned` SSE event to all lobby clients, then reopen window.
 
 The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game ID within `ConnectionManager` so the same SSE infrastructure serves both game and lobby streams.
 
@@ -141,13 +158,16 @@ The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game
 7. Release lock
 ```
 
-`on_phase_change()` in `ai_scheduler.py` **only handles PROMPT** — schedules AI answer tasks. ACTIVE phase AI scheduling is delegated to each minigame handler's `on_active_start()`:
+`on_phase_change()` in `ai_scheduler.py` **only handles PROMPT** — schedules AI answer tasks (for Task and Signal rounds). ACTIVE phase AI scheduling is delegated to each minigame handler's `on_active_start()`:
 - **Task**: `TaskHandler.on_active_start()` schedules `_ai_vote_task` for each AI player.
 - **Brain Test**: `BrainTestHandler._brain_loop` calls `on_brain_test_challenge()` per challenge.
+- **Wager**: `WagerHandler._wager_loop` calls `on_wager_guess()`/`on_wager_bet()` per sub-round.
+- **Signal (PROMPT)**: `_ai_answer_task` detects `round_type == SIGNAL` and uses `build_signal_transform_prompt` instead of `build_answer_prompt`.
+- **Signal (ACTIVE)**: `SignalHandler._signal_loop` calls `on_signal_sub_round()` each sub-round, scheduling `_ai_signal_guess_task` for each non-featured AI player.
 
 All tasks stored in `_ai_tasks[game_id]` and cancelled on phase change via `cancel_all()`. `register_task()` allows handlers to register external tasks for cleanup.
 
-**Conversation history**: Each AI player has a `message_history` (PydanticAI `ModelMessage` list) stored in `_conversation_history`. History is threaded through `generate_answer` and `decide_vote` calls, giving AI players memory within a game.
+**Conversation history**: Each AI player has a `message_history` (PydanticAI `ModelMessage` list) stored in `_conversation_history`. History is threaded through `generate_answer`, `generate_wager_guess`, and `generate_wager_bet` calls, giving AI players memory within a game. Stateless agents (gallery vote, brain test, signal guess) do not use history.
 
 **Fallback**: If LLM fails, personality's `fallback_response` is used.
 
@@ -163,10 +183,14 @@ Two agent tiers:
 
 | Function | Phase | Notes |
 |---|---|---|
-| `generate_answer` | PROMPT | Responds to prompt trying to pass as human |
-| `decide_vote` | ACTIVE / task | Picks which player sounds most human; structured output `VoteResponse` |
+| `generate_answer` | PROMPT / task+signal | For signal: uses `build_signal_transform_prompt`. For task: `build_answer_prompt` |
+| `decide_gallery_vote` | ACTIVE / task | Picks which player sounds most human; uses stateless `brain_test_agent`. Fallback: random |
 | `generate_brain_test_answer` | ACTIVE / brain_test | Picks from 4 options. Uses stateless `brain_test_agent`. 3s timeout |
-| `generate_narration` | Transition hooks | Uses `narrator_agent` + message history; dry literary narrator voice. 3s timeout (5s for game_over) |
+| `generate_wager_guess` | ACTIVE / wager | `WagerGuessResponse` structured output; personality-driven with history |
+| `generate_wager_bet` | ACTIVE / wager | `WagerBetResponse` structured output; personality-driven with history |
+| `generate_signal_guess` | ACTIVE / signal | Stateless — guesses original phrase from transformation. 3s timeout |
+| `judge_signal_guesses` | post-ACTIVE / signal | Batch Y/N LLM judging, parallelized per featured player. 5s timeout. Fuzzy match fallback |
+| `generate_narration` | Transition hooks | Uses `narrator_agent` + message history. 3s timeout (5s for game_over) |
 
 5 personalities: anxious, chill, earnest, eccentric, sardonic. Each has `description`, `vote_strategy`, and `fallback_response`.
 
@@ -218,21 +242,29 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 **Cold open**: When phase transitions from `lobby` to first round, `FacilityGameContent` shows "N SUBJECTS DETECTED / some are not what they seem" for 5.5s before handing off to `FacilityScene`.
 
-**Component registry** (`FacilityScene.tsx`): `MINIGAME_COMPONENTS` maps `round_type → {Active, Results}` component pairs. Phase routing dispatches to `minigame.Active` for `phase === "active"` and `minigame.Results` for `phase === "results"`.
+**Component registry** (`FacilityScene.tsx`): `MINIGAME_COMPONENTS` maps `round_type → {Active, Results, Prompt?}` component pairs. Signal includes a `Prompt` entry (`FacilitySignalPrompt`); others fall back to `FacilityPrompt`. Phase routing dispatches to the appropriate component per phase.
 
 **Facility phase components**:
 
 | Component | Zones used | Notes |
 |---|---|---|
 | `FacilityLobby` | `wall-display` + `desk-terminal` | Title + player list; host start button |
-| `FacilityPrompt` | `wall-display` + `desk-terminal` | Prompt display + answer textarea |
-| `FacilityVote` | gallery layout | All answers visible; tap to cast gallery vote |
-| `FacilityVoteResults` | results layout | Vote counts per player |
-| `FacilityBrainTest` | `main-screen` + `center-area` (challenge) / `full-screen` (results) | Dual-mode based on phase |
+| `FacilityPrompt` | `wall-display` + `desk-terminal` | Default prompt phase; unused when round has custom Prompt |
+| `FacilityVote` | gallery layout | All answers visible; tap to cast gallery vote (task active) |
+| `FacilityVoteResults` | results layout | Vote counts per player (task results) |
+| `FacilityBrainTest` | `main-screen` + `center-area` (challenge) / `full-screen` (results) | Dual-mode; handles both active and results phases |
+| `FacilityWager` | layout varies | Handles both active (number line + betting) and results phases |
+| `FacilitySignalPrompt` | `wall-display` + `desk-terminal` | Custom prompt for signal: fetches per-player phrase via `GET /signal-phrase` |
+| `FacilitySignalActive` | layout varies | Shows current transformation; guess input |
+| `FacilitySignalResults` | layout varies | Phrase/guess/judgment cards per player |
 | `FacilityGameOver` | `full-screen` | Headline, scoreboard, play again |
 
 ## Prompt Selection
 
-**Task prompts**: 42 prompts across 7 categories (haiku, concise, humor, corporate, casual, style, emotional_task). `used_prompt_indices` + `last_prompt_category` tracked in `TellGameState`. No-repeat, no-same-category rules via `select_duel_prompt()` in `prompts.py`.
+**Task prompts**: 36 prompts across 7 linguistic-task categories (`style_transfer`, `translation`, `pattern`, `grammar`, `format_conversion`, `summary`, `rewrite`). `used_prompt_indices` + `last_prompt_category` tracked in `TellGameState`. No-repeat, no-same-category rules via `select_duel_prompt()` in `prompts.py`.
 
-**Brain test challenges**: 21 multiple-choice challenges across 4 types (estimation, common_knowledge, trick, pattern) in `schemas/prompts.py`. Each has 4 `options` and a `correct_index`. `select_brain_test_challenges(n)` picks a balanced mix of `n` (default 5).
+**Brain test challenges**: 21 multiple-choice challenges across 4 types (`estimation`, `common_knowledge`, `trick`, `pattern`) in `schemas/prompts.py`. Each has 4 `options` and a `correct_index`. `select_brain_test_challenges(n)` picks a balanced mix of `n` (default 5).
+
+**Wager questions**: 26 numerical estimation questions across 6 categories (`geography`, `science`, `history`, `pop_culture`, `economics`, `nature`). Each has `correct_answer`, `range_min`/`range_max`, and `unit`. `select_wager_questions(n)` picks a category-diverse mix of `n` (default 3).
+
+**Signal content**: 15 constraints (`SignalConstraint` with `text` + `instruction`) and 40 phrases (concrete everyday scenarios). Each round: one shared constraint selected via `select_signal_constraint()`, one unique phrase per player via `select_signal_phrases()`. Both track `used_indices` on `TellGameState` to avoid repeats.

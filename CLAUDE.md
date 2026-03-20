@@ -6,12 +6,15 @@ Multiplayer social deduction game — reverse Turing test. Players join a group 
 
 ```
 schemas/          Shared Pydantic models — the contract between backend + frontend
-  game_state.py   GamePhase (LOBBY/PROMPT/ACTIVE/RESULTS/GAME_OVER), Player,
-                  TellGameState, RoundState, BrainTestChallenge, WagerQuestion, NarratorEntry
+  game_state.py   GamePhase (LOBBY/PROMPT/ACTIVE/RESULTS/GAME_OVER), RoundType (TASK/BRAIN_TEST/WAGER/SIGNAL),
+                  Player, TellGameState, RoundState (incl. signal_phrases/signal_guesses/signal_judgments),
+                  BrainTestChallenge, WagerQuestion, NarratorEntry
   api_models.py   SSE event types + POST request/response models (incl. matchmaking)
-  prompts.py      42 task prompts (7 categories) + brain test challenges (multiple-choice)
-                  + select_brain_test_challenges() + wager questions (25 numerical
-                  estimation) + select_wager_questions()
+  prompts.py      36 task prompts (7 categories: style_transfer, translation, pattern,
+                  grammar, format_conversion, summary, rewrite) + select_duel_prompt() +
+                  21 brain test challenges + select_brain_test_challenges() +
+                  26 wager questions + select_wager_questions() +
+                  40 signal phrases + 15 signal constraints + select_signal_phrases/constraint()
   aliases.py      Robot alias generator (UNIT-7, BOT-42)
   constants.py    MISSING_ALIAS, NO_RESPONSE, MATCHMAKING_LOBBY_ID
 
@@ -24,7 +27,8 @@ backend/
     routes/
       game.py         POST /games, GET /games/{id}
       events.py       GET /games/{id}/events (SSE stream)
-      actions.py      POST join/start/answer/vote/brain-test-answer/wager-guess/wager-bet
+      actions.py      POST join/start/answer/vote/brain-test-answer/wager-guess/wager-bet/signal-guess;
+                      GET signal-phrase
       matchmaking.py  POST /matchmaking/join|leave, GET /matchmaking/status|events
       debug.py        POST /debug/seed (only when TELL_LOG_LEVEL=DEBUG)
   services/
@@ -42,15 +46,17 @@ backend/
                            _fire_narration, initialize_and_start_game)
     ai_scheduler.py        Generate-then-lock scheduling; on_phase_change() handles
                            PROMPT only — ACTIVE scheduling delegated to minigame handlers
-    matchmaking.py         Rolling lobby: queue, countdown, solo timeout, fire_game
+    matchmaking.py         Rolling lobby: queue, countdown, fire_game
   minigames/               Plugin package — one handler per round type
     base.py                MinigameMeta dataclass + MinigameHandler interface
     task.py                TaskHandler (gallery vote, score = negative votes received)
     brain_test.py          BrainTestHandler + score_brain_test()
     wager.py               WagerHandler + score_wager()
+    signal.py              SignalHandler + _signal_loop + _judge_all_guesses
     __init__.py            MINIGAME_REGISTRY dict + get_handler() + register()
   llm/
-    agents.py              PydanticAI: answer, vote, brain test answer, wager guess/bet, narration
+    agents.py              PydanticAI: answer, vote, brain test answer, wager guess/bet,
+                           signal guess (generate_signal_guess) + judge (judge_signal_guesses), narration
     personalities.py       5 AI personalities with system prompts + vote styles
     prompts.py             NARRATOR_SYSTEM_PROMPT + build_* helpers
 
@@ -144,14 +150,14 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_LOGFIRE_ENABLED=true` — Pydantic Logfire tracing
 - `TELL_CORS_ORIGINS` — comma-separated allowed origins (default: `*`). Set for production.
 - `TELL_AI_MODEL`, `TELL_AI_RETRIES` — override AI model and retry count
-- `TELL_PROMPT_DURATION`, `TELL_TASK_PROMPT_DURATION`, `TELL_PROMPT_READING_DURATION` — prompt phase timing
-- `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing
+- `TELL_PROMPT_DURATION` — generic prompt phase duration (default 45s); `TELL_VOTE_DURATION`, `TELL_VOTE_RESULTS_DURATION` — task active/results timing (25s/8s defaults)
+- `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing (75s safety, 12s/challenge, 5 challenges, 15s results)
 - `TELL_WAGER_DURATION`, `TELL_WAGER_SUB_ROUND_DURATION`, `TELL_WAGER_QUESTIONS`, `TELL_WAGER_RESULTS_DURATION` — wager timing
 - `TELL_SIGNAL_PROMPT_DURATION`, `TELL_SIGNAL_SUB_ROUND_DURATION`, `TELL_SIGNAL_RESULTS_DURATION`, `TELL_SIGNAL_SAFETY_DURATION` — signal timing
 - `TELL_TOTAL_ROUNDS` — override fixed game length (default 5)
 - `TELL_MIN_HUMANS`, `TELL_MAX_PLAYERS`, `TELL_MIN_AI`, `TELL_MAX_AI` — player count limits
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
-- `TELL_MM_MIN_HUMANS`, `TELL_MM_MAX_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
+- `TELL_MM_MIN_HUMANS`, `TELL_MM_MAX_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
 
 **Logging convention**: INFO for game actions (player_joined, answer_submitted, vote_cast, phase transitions). DEBUG for SSE internals (sse_connected, sse_replay, queue ops).
 
@@ -180,7 +186,7 @@ All players vote for one other player who sounds most human. Votes received = ne
 
 **Brain Test / Quick Draw** (multiple-choice challenges, scored by correctness):
 ```
-ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent → RESULTS (15s) → next round
+ACTIVE (75s safety timer, 5 challenges × 12s each) → RoundResultsEvent → RESULTS (15s) → next round
 ```
 Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, +1 point).
 
@@ -241,7 +247,7 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 `game_logic.py` contains pure functions (no I/O, no async). Phase transitions, vote tallying, game-over checks, sanitization. `get_interstitial_hold()` and `get_phase_duration()` are data-driven from handler metadata via `get_handler()`. Routes call these under the lock.
 
 ### Matchmaking
-`MatchmakingService` (singleton in `deps.py`) maintains a rolling lobby queue. Players join via `POST /matchmaking/join`, connect to `GET /matchmaking/events` SSE for status. When `mm_min_humans` (default 2) are queued, a countdown fires. After `mm_countdown_seconds` (20s), `_fire_game()` pops the queue, creates a real game, adds AI (random count from `mm_min_total`–`mm_max_total`), and calls `initialize_and_start_game()`. All lobby clients receive `game_assigned` event and redirect. Solo player gets a `mm_solo_timeout_seconds` (45s) grace period before starting with AI companions. Frontend: `/queue` page.
+`MatchmakingService` (singleton in `deps.py`) maintains a rolling lobby queue. Players join via `POST /matchmaking/join`, connect to `GET /matchmaking/events` SSE for status. When `mm_min_humans` (default 2) are queued, a countdown fires. After `mm_countdown_seconds` (20s), `_fire_game()` pops the queue (capped at `mm_max_humans`), creates a real game, fills to 8 total with AI, and calls `initialize_and_start_game()`. All lobby clients receive `game_assigned` event and redirect. Frontend: `/queue` page.
 
 ### LLM-powered features
 - **Narrator** (persistent show host): `generate_narration(trigger, context)` fires as a non-blocking background task at: `game_start`, `post_submissions`, `between_rounds`, `game_over`. Dry, literary voice (the robot running the test). 3s timeout for most triggers, 5s for `game_over`. Result stored in `state.narrator_context` (last 5 kept for continuity) and broadcast as `NarrationEvent`. Never blocks game flow. `_fire_narration()` + `_build_narrator_context()` in `transitions.py`.
@@ -261,7 +267,7 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 - **`from __future__ import annotations`** used in all Python files. Use `datetime.now(UTC)`, never `datetime.utcnow()`.
 - **`schemas/` is top-level**: Imported by both `backend/` and `scripts/`. Don't nest under `backend/`.
 - **No database**: All state is in-memory. Server restart kills all games. Completed games are recorded to `recordings/{game_id}.json` (toggle with `TELL_RECORD_GAMES=false`).
-- **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init. Also: `BrainTestHandler._brain_loop` imports `do_active_complete` at runtime for the same reason.
+- **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init. Also: `BrainTestHandler._brain_loop`, `WagerHandler._wager_loop`, and `SignalHandler._signal_loop` all import `do_active_complete` at runtime for the same reason.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
 - **Task scoring is negative**: Votes received = **negative** points. Players avoid being the most-suspected human/bot. High score means fewer suspicion votes.
 - **Gallery vote route**: `/vote` (not `/matchup-vote`). Requires `phase == ACTIVE` and `round_type == TASK`. Votes are changeable (overwrite allowed).
@@ -274,7 +280,7 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 - **Game ends by round count**: `check_game_over()` returns `None` until `state.round_number >= state.total_rounds`.
 - **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` (roles + scores revealed) then `GameOverEvent`.
 - **total_rounds is 5**: Fixed game length — not a safety cap. No early exit.
-- **Task prompts**: `used_prompt_indices` + `last_prompt_category` tracked on `TellGameState`. `select_duel_prompt()` in `prompts.py` (no-repeat, no-same-category).
+- **Task prompts**: `used_prompt_indices` + `last_prompt_category` tracked on `TellGameState`. `select_duel_prompt()` in `prompts.py` (no-repeat, no-same-category). 36 prompts across 7 linguistic-task categories (style_transfer, translation, pattern, grammar, format_conversion, summary, rewrite).
 - **Round types selected dynamically**: `get_next_round_type(state)` called at the start of each round. Only rule: no consecutive repeat.
 - **Matchmaking join window**: `MatchmakingService._join_window_open` event blocks new joins while a game is being fired.
 - **Narrator fires non-blocking**: `_fire_narration()` uses `asyncio.create_task()`. LLM call is outside the lock. Exits silently if game ends first.
