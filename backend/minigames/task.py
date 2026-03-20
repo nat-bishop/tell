@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from backend.minigames.base import MinigameHandler, MinigameMeta
 from schemas.game_state import RoundState, RoundType, TellGameState
+
+if TYPE_CHECKING:
+    from backend.config import Settings
 
 
 class TaskHandler(MinigameHandler):
@@ -18,7 +21,7 @@ class TaskHandler(MinigameHandler):
         results_interstitial=2,
     )
 
-    def setup_round(self, state: TellGameState, settings: Any) -> None:
+    def setup_round(self, state: TellGameState, settings: Settings) -> None:
         from schemas.prompts import select_duel_prompt
 
         state.round_number += 1
@@ -32,10 +35,10 @@ class TaskHandler(MinigameHandler):
             round_type=RoundType.TASK,
         )
 
-    def get_active_duration(self, settings: Any) -> int:
+    def get_active_duration(self, settings: Settings) -> int:
         return settings.vote_duration
 
-    def get_results_duration(self, settings: Any) -> int:
+    def get_results_duration(self, settings: Settings) -> int:
         return settings.vote_results_duration
 
     def active_event_extras(self, state: TellGameState) -> dict:

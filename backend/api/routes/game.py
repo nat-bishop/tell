@@ -33,7 +33,7 @@ async def create_game():
 
 
 @router.get("/{game_id}", response_model=GameInfoResponse)
-async def get_game_info(game_id: str):
+async def get_game_info(game_id: str) -> GameInfoResponse:
     """Get basic game info."""
     repo = get_game_repository()
     session = repo.get(game_id)

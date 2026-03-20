@@ -20,7 +20,9 @@ log = structlog.get_logger(__name__)
 
 
 @router.get("/{game_id}/events")
-async def game_events(game_id: str, player_id: str, request: Request, last_seq: int = 0):
+async def game_events(
+    game_id: str, player_id: str, request: Request, last_seq: int = 0
+) -> EventSourceResponse:
     """Persistent SSE stream for a game. Sends state_sync on connect, then live events."""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(game_id=game_id, player_id=player_id)
@@ -78,7 +80,7 @@ async def game_events(game_id: str, player_id: str, request: Request, last_seq: 
                 if await request.is_disconnected():
                     break
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    event = await asyncio.wait_for(queue.get(), timeout=30.0)  # type: ignore[arg-type]
                     if event is None:
                         break  # Shutdown signal
                     yield {

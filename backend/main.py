@@ -96,7 +96,7 @@ app.add_middleware(
 
 if _settings.logfire_enabled:
 
-    def _game_id_attributes_mapper(request, attributes):  # type: ignore[no-untyped-def]
+    def _game_id_attributes_mapper(request, attributes):
         """Extract game_id from path and add it to span attributes."""
         attrs = {
             "values": attributes["values"],

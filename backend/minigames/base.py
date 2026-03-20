@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from backend.config import Settings
     from schemas.game_state import RoundType, TellGameState
 
 
@@ -22,14 +23,14 @@ class MinigameHandler:
     round_type: RoundType
     meta: MinigameMeta
 
-    def setup_round(self, state: TellGameState, settings: Any) -> None:
+    def setup_round(self, state: TellGameState, settings: Settings) -> None:
         """Initialize round state (mutates in place)."""
         raise NotImplementedError
 
-    def get_active_duration(self, settings: Any) -> int:
+    def get_active_duration(self, settings: Settings) -> int:
         raise NotImplementedError
 
-    def get_results_duration(self, settings: Any) -> int:
+    def get_results_duration(self, settings: Settings) -> int:
         raise NotImplementedError
 
     def active_event_extras(self, state: TellGameState) -> dict:

@@ -37,7 +37,7 @@ def generate_player_id() -> str:
 def generate_aliases(n: int, exclude: set[str] | None = None) -> list[str]:
     """Generate n unique robot aliases like UNIT-7, BOT-42."""
     exclude = exclude or set()
-    aliases = []
+    aliases: list[str] = []
     attempts = 0
     while len(aliases) < n and attempts < 100:
         prefix = random.choice(PREFIXES)

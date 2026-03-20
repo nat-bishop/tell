@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from backend.config import Settings
+
+if TYPE_CHECKING:
+    from backend.services.matchmaking import MatchmakingService
 from backend.services.connection_manager import ConnectionManager
 from backend.services.game_repository import GameRepository
 from backend.services.timer_manager import TimerManager
@@ -12,7 +16,7 @@ from backend.services.timer_manager import TimerManager
 _connection_manager: ConnectionManager | None = None
 _game_repository: GameRepository | None = None
 _timer_manager: TimerManager | None = None
-_matchmaking_service = None
+_matchmaking_service: MatchmakingService | None = None
 
 
 @lru_cache(maxsize=1)
@@ -41,7 +45,7 @@ def get_timer_manager() -> TimerManager:
     return _timer_manager
 
 
-def get_matchmaking_service():
+def get_matchmaking_service() -> MatchmakingService:
     from backend.services.matchmaking import MatchmakingService
 
     global _matchmaking_service

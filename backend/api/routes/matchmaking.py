@@ -25,7 +25,7 @@ log = structlog.get_logger(__name__)
 
 
 @router.post("/join", response_model=MatchmakingJoinResponse)
-async def matchmaking_join(req: MatchmakingJoinRequest):
+async def matchmaking_join(req: MatchmakingJoinRequest) -> MatchmakingJoinResponse:
     """Join the matchmaking queue."""
     mm = get_matchmaking_service()
     result = await mm.join(req.player_name)
@@ -34,7 +34,7 @@ async def matchmaking_join(req: MatchmakingJoinRequest):
 
 
 @router.post("/leave", response_model=StatusResponse)
-async def matchmaking_leave(req: MatchmakingLeaveRequest):
+async def matchmaking_leave(req: MatchmakingLeaveRequest) -> dict[str, str]:
     """Leave the matchmaking queue."""
     mm = get_matchmaking_service()
     await mm.leave(req.player_id)
@@ -54,7 +54,7 @@ async def matchmaking_status():
 
 
 @router.get("/events")
-async def matchmaking_events(player_id: str, request: Request):
+async def matchmaking_events(player_id: str, request: Request) -> EventSourceResponse:
     """SSE stream for matchmaking lobby updates."""
     cm = get_connection_manager()
     queue = cm.connect(MATCHMAKING_LOBBY_ID, player_id)

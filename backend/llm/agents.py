@@ -139,7 +139,7 @@ async def _run_ai_agent(
     fields = _log_fields(deps)
     log.info("llm_call_start", action=action, model=settings.ai_model, **fields)
     try:
-        result = await ai_agent.run(
+        result: Any = await ai_agent.run(
             deps.action_prompt,
             model=settings.ai_model,
             deps=deps,

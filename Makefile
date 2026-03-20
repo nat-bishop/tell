@@ -9,7 +9,7 @@ endif
 # ── Auto-install sentinels ──────────────────────────────────────────
 
 .installed-py: pyproject.toml uv.lock
-	uv sync --dev
+	uv sync --extra dev
 	@touch $@
 
 frontend/node_modules/.installed: frontend/package.json
@@ -71,6 +71,13 @@ coverage: .installed-py ## Run tests with coverage report
 lint: .installed-py ## Lint + format Python (ruff check --fix + ruff format)
 	uv run ruff check --fix .
 	uv run ruff format .
+
+# ── Type Check ─────────────────────────────────────────────────
+
+.PHONY: typecheck
+
+typecheck: .installed-py ## Run mypy type checker
+	uv run mypy backend/ schemas/
 
 # ── Codegen ────────────────────────────────────────────────────
 

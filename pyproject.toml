@@ -21,6 +21,7 @@ dev = [
     "pytest-cov>=6.0",
     "httpx==0.28.1",
     "ruff==0.15.5",
+    "mypy>=1.14",
 ]
 
 [tool.ruff]
@@ -48,6 +49,42 @@ select = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.12"
+check_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+follow_imports = "silent"
+exclude = [
+    "^\\.claude/",
+    "^frontend/",
+    "^scripts/",
+]
+
+[[tool.mypy.overrides]]
+module = "schemas.*"
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "structlog.*",
+    "sse_starlette.*",
+    "pydantic_ai.*",
+    "logfire.*",
+]
+ignore_missing_imports = true
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+warn_untyped_fields = true
 
 [build-system]
 requires = ["hatchling"]

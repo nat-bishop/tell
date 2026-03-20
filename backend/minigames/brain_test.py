@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.config import Settings
 
 import structlog
 
@@ -38,7 +41,7 @@ class BrainTestHandler(MinigameHandler):
         results_interstitial=2,
     )
 
-    def setup_round(self, state: TellGameState, settings: Any) -> None:
+    def setup_round(self, state: TellGameState, settings: Settings) -> None:
         from schemas.prompts import select_brain_test_challenges
 
         challenges = select_brain_test_challenges(settings.brain_test_challenges)
@@ -60,10 +63,10 @@ class BrainTestHandler(MinigameHandler):
             ],
         )
 
-    def get_active_duration(self, settings: Any) -> int:
+    def get_active_duration(self, settings: Settings) -> int:
         return settings.brain_test_duration
 
-    def get_results_duration(self, settings: Any) -> int:
+    def get_results_duration(self, settings: Settings) -> int:
         return settings.brain_test_results_duration
 
     async def on_active_start(self, game_id: str) -> None:

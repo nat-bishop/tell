@@ -18,7 +18,7 @@ log = structlog.get_logger(__name__)
 
 
 @router.post("/seed")
-async def seed_game(req: SeedGameRequest):
+async def seed_game(req: SeedGameRequest) -> dict[str, str | int]:
     """Inject a complete game state for debugging."""
     repo = get_game_repository()
     settings = get_settings()

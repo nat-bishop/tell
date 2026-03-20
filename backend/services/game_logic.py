@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
 from backend.minigames import MINIGAME_REGISTRY, get_handler
+
+if TYPE_CHECKING:
+    from backend.config import Settings
 from schemas.api_models import (
     GameOverEvent,
     PhaseChangedEvent,
@@ -69,7 +74,7 @@ def get_interstitial_hold(phase: GamePhase, round_type: RoundType | None = None)
 
 
 def get_phase_duration(
-    settings, phase: GamePhase, round_type: RoundType | None = None
+    settings: Settings, phase: GamePhase, round_type: RoundType | None = None
 ) -> int | None:
     """Get the duration for a given phase."""
     if phase == GamePhase.PROMPT:
@@ -125,7 +130,7 @@ def check_game_over(state: TellGameState) -> tuple[str, list[str]] | None:
 
 
 def make_game_over_event(
-    state: TellGameState, winner: str, winner_ids: list[str], seq_fn
+    state: TellGameState, winner: str, winner_ids: list[str], seq_fn: Callable[[], int]
 ) -> GameOverEvent:
     players_revealed = []
     for p in state.players:
@@ -148,7 +153,7 @@ def make_game_over_event(
 
 
 def make_phase_changed_event(
-    state: TellGameState, seq: int, phase_duration: int | None = None, **extra
+    state: TellGameState, seq: int, phase_duration: int | None = None, **extra: Any
 ) -> PhaseChangedEvent:
     action_starts_at = None
     if state.phase_deadline and phase_duration:

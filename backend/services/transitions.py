@@ -25,6 +25,7 @@ from backend.services.game_logic import (
     tally_gallery_votes,
     transition_to_phase,
 )
+from backend.services.game_repository import TellGameSession
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
     FinalRevealEvent,
@@ -38,12 +39,13 @@ from schemas.game_state import (
     Player,
     PlayerRole,
     RoundType,
+    TellGameState,
 )
 
 log = structlog.get_logger(__name__)
 
 
-def _build_narrator_context(state) -> str:
+def _build_narrator_context(state: TellGameState) -> str:
     """Build a context string for the narrator from game state."""
     parts: list[str] = []
     n_players = len(state.players)
@@ -198,7 +200,7 @@ async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
             await do_results_complete(game_id, session)
 
 
-async def do_prompt_complete(game_id: str, session) -> None:
+async def do_prompt_complete(game_id: str, session: TellGameSession) -> None:
     """PROMPT complete → transition to ACTIVE phase.
 
     Assumes caller holds the game lock and has called fill_missing_answers.
@@ -236,7 +238,7 @@ async def do_prompt_complete(game_id: str, session) -> None:
     )
 
 
-async def do_active_complete(game_id: str, session) -> None:
+async def do_active_complete(game_id: str, session: TellGameSession) -> None:
     """ACTIVE complete → score round via handler → RESULTS or next round.
 
     Assumes caller holds the game lock.
@@ -294,7 +296,7 @@ async def do_active_complete(game_id: str, session) -> None:
     )
 
 
-async def do_results_complete(game_id: str, session) -> None:
+async def do_results_complete(game_id: str, session: TellGameSession) -> None:
     """RESULTS done → check game over or next round.
 
     Assumes caller holds the game lock.
@@ -310,7 +312,13 @@ async def do_results_complete(game_id: str, session) -> None:
     await _start_next_round(game_id, session)
 
 
-async def _do_game_over(game_id: str, session, state, winner, winner_ids) -> None:
+async def _do_game_over(
+    game_id: str,
+    session: TellGameSession,
+    state: TellGameState,
+    winner: str,
+    winner_ids: list[str],
+) -> None:
     """Shared game-over flow: narration → FinalRevealEvent → GameOverEvent.
 
     Assumes caller holds the game lock.
@@ -377,7 +385,7 @@ async def _do_game_over(game_id: str, session, state, winner, winner_ids) -> Non
     cm.cleanup_game(game_id)
 
 
-async def _start_next_round(game_id: str, session) -> None:
+async def _start_next_round(game_id: str, session: TellGameSession) -> None:
     """Start the next round using the handler registry.
 
     Assumes caller holds the game lock.

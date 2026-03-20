@@ -42,7 +42,7 @@ log = structlog.get_logger(__name__)
 
 
 @router.post("/{game_id}/join", response_model=JoinGameResponse)
-async def join_game(game_id: str, req: JoinGameRequest):
+async def join_game(game_id: str, req: JoinGameRequest) -> JoinGameResponse:
     """Join a game lobby."""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(game_id=game_id)
@@ -90,7 +90,7 @@ async def join_game(game_id: str, req: JoinGameRequest):
 
 
 @router.post("/{game_id}/start", response_model=StatusResponse)
-async def start_game(game_id: str, req: StartGameRequest):
+async def start_game(game_id: str, req: StartGameRequest) -> dict[str, str]:
     """Start the game (host only). Spawns 6 AI players and begins round 1."""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(game_id=game_id)
@@ -126,7 +126,7 @@ async def start_game(game_id: str, req: StartGameRequest):
 
 
 @router.post("/{game_id}/answer", response_model=StatusResponse)
-async def submit_answer(game_id: str, req: SubmitAnswerRequest):
+async def submit_answer(game_id: str, req: SubmitAnswerRequest) -> dict[str, str]:
     """Submit an answer to the current prompt."""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(game_id=game_id)
@@ -184,7 +184,7 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest):
 
 
 @router.post("/{game_id}/vote", response_model=StatusResponse)
-async def submit_vote(game_id: str, req: SubmitVoteRequest):
+async def submit_vote(game_id: str, req: SubmitVoteRequest) -> dict[str, str]:
     """Cast a gallery vote — who sounds most human?"""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(game_id=game_id)
@@ -250,7 +250,9 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest):
 
 
 @router.post("/{game_id}/brain-test-answer", response_model=StatusResponse)
-async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerRequest):
+async def submit_brain_test_answer(
+    game_id: str, req: SubmitBrainTestAnswerRequest
+) -> dict[str, str]:
     """Submit an answer to a brain test challenge."""
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(game_id=game_id)
