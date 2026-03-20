@@ -25,6 +25,7 @@ backend/
       events.py       GET /games/{id}/events (SSE stream)
       actions.py      POST join/start/answer/matchup-vote/brain-test-answer
       matchmaking.py  POST /matchmaking/join|leave, GET /matchmaking/status|events
+      debug.py        POST /debug/seed (only when TELL_LOG_LEVEL=DEBUG)
   services/
     connection_manager.py  Per-game asyncio.Queue broadcast + event log + recording buffer
     game_repository.py     In-memory game session store
@@ -63,16 +64,15 @@ frontend/src/
   facility/                Verification Facility UI — diegetic themed rewrite
     zones.ts               PanelZone interface + ZONES layout registry (9 named zones)
     Panel.tsx              Frosted-glass panel at absolute zone position; enter/exit anims
-    FacilityViewport.tsx   Full-viewport container (vignette layer + z-index stack)
-    FacilityProvider.tsx   React context: rive instance + transition state + snapTo
+    FacilityBackground.tsx CSS atmospheric background (radial gradients, ambient glow)
+    FacilityProvider.tsx   React context: transition state + snapTo
     useTransitionMachine.ts State machine: idle → lockdown(300ms) → reconfigure → boot(400ms) → idle
     FacilityScene.tsx      Phase router → facility phase components; `active`/`results` dispatch
                            by `roundType` (task → FacilityMatchup, brain_test → FacilityBrainTest);
                            hidden during lockdown/reconfigure
-    FacilityGameContent.tsx Main orchestrator: cold open, transition timing, RiveScene, Narration
-    RiveScene.tsx          Full-viewport Rive canvas; checks for real .riv (>100 bytes) before loading;
-                           null render if missing. State machine name: "facility_sm"
-    useFacilityCharacters.ts Maps players → 6 Rive character slots (3 inputs each: x, state, visible)
+    FacilityGameContent.tsx Main orchestrator: cold open, transition timing, background, Narration
+    subjectColors.ts       Player color palette (6 named hues)
+    usePlayerColors.ts     Hook: maps player IDs → color values
     phaseLayouts.ts        `getPhaseLayout(phase, roundType)` — two-tier lookup:
                            SHARED_LAYOUTS (lobby/prompt/game_over) then
                            ROUND_LAYOUTS[roundType][phase] for active/results
@@ -131,12 +131,14 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_LOG_LEVEL=DEBUG` — enables debug logging **and** mounts debug routes (`/debug/seed`, etc.)
 - `TELL_LOGFIRE_ENABLED=true` — Pydantic Logfire tracing
 - `TELL_CORS_ORIGINS` — comma-separated allowed origins (default: `*`). Set for production.
-- `TELL_MM_MIN_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
+- `TELL_AI_MODEL`, `TELL_AI_RETRIES` — override AI model and retry count
+- `TELL_PROMPT_DURATION`, `TELL_TASK_PROMPT_DURATION`, `TELL_PROMPT_READING_DURATION` — prompt phase timing
 - `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing
 - `TELL_MATCHUP_DURATION`, `TELL_MATCHUP_CHALLENGE_DURATION` — matchup safety timer and per-sub-round duration
 - `TELL_TOTAL_ROUNDS` — override fixed game length (default 5)
-- `TELL_MIN_HUMANS` — minimum humans required to start a private game (default 1)
+- `TELL_MIN_HUMANS`, `TELL_MAX_PLAYERS`, `TELL_MIN_AI`, `TELL_MAX_AI` — player count limits
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
+- `TELL_MM_MIN_HUMANS`, `TELL_MM_MAX_HUMANS`, `TELL_MM_COUNTDOWN`, `TELL_MM_SOLO_TIMEOUT`, `TELL_MM_MIN_TOTAL`, `TELL_MM_MAX_TOTAL` — matchmaking thresholds (see `config.toml [matchmaking]`)
 
 **Logging convention**: INFO for game actions (player_joined, answer_submitted, vote_cast, phase transitions). DEBUG for SSE internals (sse_connected, sse_replay, queue ops).
 
@@ -159,13 +161,13 @@ Round types are selected dynamically via `get_next_round_type(state)` (wraps `se
 
 **Task / Matchup** (constrained creative prompt, 1v1 voting):
 ```
-PROMPT (25s) → ACTIVE (matchup sub-round loop, 12s each) → RoundResultsEvent → next round
+PROMPT (45s + 10s reading) → ACTIVE (matchup sub-round loop, 12s each) → RoundResultsEvent → next round
 ```
 Players answer the prompt, then are paired for head-to-head voting. Each sub-round broadcasts `SubRoundEvent(round_type="task", ...)`. All players vote on which answer sounds more human. Matchup winner earns +1 point. Odd player out gets a bye. No results phase (`has_results=False`).
 
 **Brain Test / Quick Draw** (multiple-choice challenges, scored by correctness):
 ```
-ACTIVE (75s safety timer, 5 challenges × 12s each) → RoundResultsEvent → RESULTS (15s) → next round
+ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent → RESULTS (15s) → next round
 ```
 Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, 1 point). Results phase used (`has_results=True`).
 
@@ -224,7 +226,7 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 - **Python**: Pydantic v2 models, type hints, `ruff` formatting (line-length 100)
 - **TypeScript**: Strict mode, path aliases (`@/*` → `src/*`), Zustand for state
 - **Fonts**: Cormorant (literary content), Cormorant SC (character names), IBM Plex Mono (system text)
-- **Color**: `--page` `--ink` `--dim` `--rule` `--surface` `--raised` `--cold`. `--warm` (#B85C38) reserved for timer warning, vote selection, and "human" reveals.
+- **Color**: `--page` `--ink` `--dim` `--rule` `--surface` `--raised` `--cold` `--cold-glow` `--glow`. `--warm` (#E07A5F) reserved for timer warning, vote selection, and "human" reveals.
 - **Animation**: CSS only, no libraries. `animate-fade-in`, `animate-headline-reveal`, `animate-panel-enter`, `animate-panel-exit`.
 - **Facility CSS classes**: `facility-viewport` (fixed full-screen, grid overlay), `facility-vignette` (edge darkening), `facility-panel` (frosted glass + CRT scanline overlay via `backdrop-filter`). Defined in `globals.css`.
 - **Textarea submit**: All gameplay textareas submit on Enter (no Shift). Auto-resize via `scrollHeight`. `maxLength` enforced per field.

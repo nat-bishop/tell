@@ -44,15 +44,15 @@ Two round types: **Task (Matchup)** and **Quick Draw (Brain Test)**. Selected dy
 
 **Task / Matchup** (constrained creative prompt, 1v1 voting):
 ```
-PROMPT (25s) → MATCHUP (sub-round loop, 12s each) → MatchupResultsEvent → next round
+PROMPT (45s + 10s reading) → ACTIVE (matchup sub-round loop, 12s each) → RoundResultsEvent → next round
 ```
-After PROMPT, players are paired for head-to-head voting. `_start_matchup_loop` runs as a background task cycling through pairs. Each iteration broadcasts `MatchupChallengeEvent` with both answers and no labels; all players vote which sounds more human (0=left, 1=right). Winning player gets +1 score via `resolve_matchup_votes()`.
+After PROMPT, players are paired for head-to-head voting. `_start_matchup_loop` runs as a background task cycling through pairs. Each iteration broadcasts `SubRoundEvent(round_type="task", ...)` with both answers and no labels; all players vote which sounds more human (0=left, 1=right). Winning player gets +1 score via `resolve_matchup_votes()`.
 
 **Quick Draw / Brain Test** (multiple-choice speed quiz, scored by correctness):
 ```
-BRAIN_TEST (75s safety timer, 5 challenges × 12s each) → BRAIN_TEST_RESULTS (15s) → next round
+ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent → RESULTS (15s) → next round
 ```
-`_start_brain_test_loop` cycles through challenges. Each challenge shows 4 options; players tap one. Scored by pure correctness (`selected_index == correct_index` → 1 point). `do_after_brain_test()` starts the next round directly.
+`_start_brain_test_loop` cycles through challenges. Each challenge shows 4 options; players tap one. Scored by pure correctness (`selected_index == correct_index` → 1 point). `do_results_complete()` starts the next round directly.
 
 **After `total_rounds` (default 5)**:
 ```
@@ -68,17 +68,16 @@ All transitions funnel through helper functions in `transitions.py` (shared by `
 |---|---|---|
 | `start_phase_timer` | Every phase start | Creates `asyncio.Task` that sleeps then calls `handle_phase_expiry` |
 | `handle_phase_expiry` | Timer fires | Acquires lock, checks phase unchanged, routes to `do_*_complete` |
-| `do_prompt_complete` | All answers in (or timer) | TASK → MATCHUP; starts `_start_matchup_loop` |
-| `do_matchup_complete` | All matchup sub-rounds done | Resolves votes, updates scores, checks game-over or next round |
-| `do_brain_test_complete` | BRAIN_TEST safety timer or challenges done | Scores challenges, → BRAIN_TEST_RESULTS |
-| `do_after_brain_test` | BRAIN_TEST_RESULTS timer | Checks game-over; starts next round directly |
+| `do_prompt_complete` | All answers in (or timer) | Starts ACTIVE phase; dispatches `_start_sub_round_loop()` by round_type |
+| `do_active_complete` | All sub-rounds done | Dispatches by round_type: resolves votes/scores, broadcasts `RoundResultsEvent`, then → RESULTS or next round |
+| `do_results_complete` | RESULTS timer | Checks game-over; starts next round directly (only for round types with `has_results=True`) |
 | `initialize_and_start_game` | Host start or matchmaking fire | Spawns AI, assigns personalities, delegates to `_start_next_round()` |
 
-**Early completion**: When all players submit answers, the timer is cancelled and `do_prompt_complete` fires immediately. MATCHUP sub-rounds run on a fixed 12s cadence — not early-completable.
+**Early completion**: When all players submit answers, the timer is cancelled and `do_prompt_complete` fires immediately. Matchup sub-rounds run on a fixed 12s cadence — not early-completable.
 
 **Matchup pairings**: Players paired in insertion order. Odd player out stored as `bye_player_id` on `RoundState`. `transition_to_matchup()` builds the `matchups` list in `game_logic.py`.
 
-**Brain Test sub-round loop**: `_start_brain_test_loop` runs as a background `asyncio.Task`. Each iteration broadcasts `BrainTestChallengeEvent` (including `options` array) with the current challenge, then calls `on_brain_test_challenge()` to schedule AI option selection (via `_ai_brain_test_task()`, generate-then-lock pattern). After all challenges, cancels safety timer and calls `do_brain_test_complete`.
+**Brain Test sub-round loop**: `_start_brain_test_loop` runs as a background `asyncio.Task`. Each iteration broadcasts `SubRoundEvent(round_type="brain_test", ...)` (including `options` array) with the current challenge, then calls `on_brain_test_challenge()` to schedule AI option selection (via `_ai_brain_test_task()`, generate-then-lock pattern). After all challenges, cancels safety timer and calls `do_active_complete`.
 
 ### Game-Over Conditions
 
@@ -93,7 +92,7 @@ Checked in `game_logic.check_game_over()` after each round completes. Returns `N
 - `Player.score` (int) accumulates across rounds.
 - Matchup: winning side gets +1 per matchup via `resolve_matchup_votes()`. Ties: no point.
 - Brain Test: `selected_index == correct_index` → +1 per challenge via `score_brain_test()`.
-- `scores` dict (player_id → score) carried on `MatchupResultsEvent`, `BrainTestResultsEvent`, `StateSyncEvent`, `GameOverEvent`.
+- `scores` dict (player_id → score) carried on `RoundResultsEvent`, `StateSyncEvent`, `GameOverEvent`.
 
 ## Matchmaking
 
@@ -156,7 +155,7 @@ Two agent tiers:
 
 `generate_brain_test_answer` uses `_run_system_call()` — a stateless utility agent with no personality context.
 
-5 personalities: paranoid, chill, overachiever, glitchy, philosopher. Each has `answer_system_prompt`, `vote_strategy`, and `fallback_response`.
+5 personalities: anxious, chill, earnest, eccentric, sardonic. Each has `description`, `vote_strategy`, and `fallback_response`.
 
 Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
@@ -180,8 +179,8 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 `frontend/src/facility/` is a parallel, diegetic rewrite of the game view. `game/[id]/page.tsx` renders `FacilityGameContent` after join. Legacy `components/` are unchanged and still used by join/queue screens.
 
-**Layer stack** (bottom → top in `FacilityViewport`):
-1. `RiveScene` — fixed full-viewport Rive canvas (z-index 0); fades in on load
+**Layer stack** (bottom → top):
+1. `FacilityBackground` — CSS atmospheric background (radial gradients, ambient glow; z-index 0)
 2. `facility-vignette` — edge darkening overlay
 3. Content layer (z-index 10) — panels, timer, narration, overlays
 
@@ -204,12 +203,7 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 **Cold open**: When phase transitions from `lobby` to first round, `FacilityGameContent` shows "N SUBJECTS DETECTED / some are not what they seem" for 5.5s before handing off to `FacilityScene`.
 
-**Rive integration** (scaffolded — requires real `.riv` asset):
-- `RiveScene` checks `content-length` of `/facility.riv` via `HEAD` request; renders null if file is missing or <100 bytes.
-- State machine name: `"facility_sm"`. Per-player inputs: `char_{i}_x` (number, 0–1 normalized), `char_{i}_state` (number, maps to `CHAR_STATES`), `char_{i}_visible` (boolean). Supports up to 6 character slots.
-- Room inputs: `room_config` (number), `ambient_brightness` (number, 0–1), `accent_color` (number, 0=cold/1=warm).
-- `useFacilityCharacters` updates all inputs on phase and player changes via `phaseLayouts.ts` config.
-- Rive instance passed via `FacilityProvider` context so multiple components can drive inputs.
+**Player colors**: `subjectColors.ts` defines 6 named hues. `usePlayerColors.ts` maps player IDs → color values, used by `HudPanel` for per-player dot indicators.
 
 **Facility phase components**:
 
