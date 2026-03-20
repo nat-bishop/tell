@@ -8,10 +8,9 @@ import type {
   SeqData,
   HostChangedData,
   NarrationData,
-  BrainTestChallengeData,
-  BrainTestResultsData,
+  SubRoundData,
+  RoundResultsData,
   VoteSubmittedData,
-  VoteResultsData,
   FinalRevealData,
 } from "@/hooks/useGameStore";
 
@@ -26,10 +25,9 @@ export interface GameEventCallbacks {
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
   onNarration: (data: NarrationData) => void;
-  onBrainTestChallenge: (data: BrainTestChallengeData) => void;
-  onBrainTestResults: (data: BrainTestResultsData) => void;
+  onSubRound: (data: SubRoundData) => void;
+  onRoundResults: (data: RoundResultsData) => void;
   onVoteSubmitted: (data: VoteSubmittedData) => void;
-  onVoteResults: (data: VoteResultsData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
   onOpen: () => void;
   onError: () => void;
@@ -56,10 +54,9 @@ export function connectGameEvents(
     timer_tick: callbacks.onTimerTick,
     host_changed: callbacks.onHostChanged,
     narration: callbacks.onNarration,
-    brain_test_challenge: callbacks.onBrainTestChallenge,
-    brain_test_results: callbacks.onBrainTestResults,
+    sub_round: callbacks.onSubRound,
+    round_results: callbacks.onRoundResults,
     vote_submitted: callbacks.onVoteSubmitted,
-    vote_results: callbacks.onVoteResults,
     final_reveal: callbacks.onFinalReveal,
   };
 

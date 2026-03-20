@@ -6,10 +6,13 @@ import { SystemText } from "@/components/SystemText";
 
 export function FacilityVoteResults() {
   const players = useGameStore((s) => s.players);
-  const voteResults = useGameStore((s) => s.voteResults);
+  const roundResults = useGameStore((s) => s.roundResults);
   const scores = useGameStore((s) => s.scores);
 
-  const voteCounts = voteResults?.vote_counts || {};
+  const voteCounts =
+    roundResults && roundResults.round_type === "task"
+      ? roundResults.vote_counts
+      : {};
 
   // Sort players by votes received (descending)
   const sorted = [...players].sort(

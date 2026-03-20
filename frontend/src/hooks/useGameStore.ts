@@ -5,11 +5,9 @@ import { create } from "zustand";
 export type GamePhase =
   | "lobby"
   | "prompt"
-  | "vote"
-  | "vote_results"
-  | "game_over"
-  | "brain_test"
-  | "brain_test_results";
+  | "active"
+  | "results"
+  | "game_over";
 
 export interface PlayerInfo {
   id: string;
@@ -46,6 +44,11 @@ export interface StateSyncData {
   scores: Record<string, number>;
   total_rounds: number;
   my_vote?: string | null;
+  // Reconnection state
+  sub_round_index?: number | null;
+  sub_round_payload?: SubRoundPayload | null;
+  round_results_payload?: RoundResultsPayload | null;
+  round_scores?: Record<string, number> | null;
 }
 
 export interface PlayerEventData {
@@ -93,25 +96,45 @@ export interface NarrationData {
   trigger: string;
 }
 
-export interface BrainTestChallengeData {
-  seq: number;
+// Generic sub-round payload (discriminated by round_type in the event)
+export type SubRoundPayload = {
+  round_type: string;
   challenge_index: number;
   challenge_type: string;
   question: string;
   options: string[];
+};
+
+// Generic round results payload (discriminated by round_type in the event)
+export type RoundResultsPayload =
+  | {
+      round_type: "brain_test";
+      results: Record<string, Array<{
+        question: string;
+        options: string[];
+        selected_index: number;
+        correct_index: number;
+        challenge_type: string;
+      }>>;
+    }
+  | {
+      round_type: "task";
+      vote_counts: Record<string, number>;
+    };
+
+export interface SubRoundData {
+  seq: number;
+  round_type: string;
+  sub_round_index: number;
+  payload: SubRoundPayload;
   sub_deadline: string | null;
   phase_duration: number | null;
 }
 
-export interface BrainTestResultsData {
+export interface RoundResultsData {
   seq: number;
-  results: Record<string, Array<{
-    question: string;
-    options: string[];
-    selected_index: number;
-    correct_index: number;
-    challenge_type: string;
-  }>>;
+  round_type: string;
+  payload: Record<string, unknown>;
   scores: Record<string, number>;
 }
 
@@ -120,12 +143,6 @@ export interface VoteSubmittedData {
   player_id: string;
   vote_count: number;
   total: number;
-}
-
-export interface VoteResultsData {
-  seq: number;
-  vote_counts: Record<string, number>;
-  scores: Record<string, number>;
 }
 
 export interface FinalRevealData {
@@ -183,22 +200,15 @@ interface GameState {
   narrationText: string | null;
   narrationTrigger: string | null;
 
-  // Brain Test
-  brainTestQuestion: string | null;
-  brainTestChallengeIndex: number;
-  brainTestChallengeType: string | null;
-  brainTestOptions: string[];
-  brainTestResults: Record<string, Array<{
-    question: string; options: string[]; selected_index: number; correct_index: number; challenge_type: string;
-  }>> | null;
-
-  // Brain Test scores
-  brainTestScores: Record<string, number> | null;
+  // Generic round state
+  subRoundIndex: number;
+  subRoundPayload: SubRoundPayload | null;
+  roundResults: RoundResultsPayload | null;
+  roundScores: Record<string, number> | null;
 
   // Gallery vote
   votedForId: string | null;
   voteCount: number;
-  voteResults: VoteResultsData | null;
 
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
@@ -215,10 +225,9 @@ interface GameState {
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
   onNarration: (data: NarrationData) => void;
-  onBrainTestChallenge: (data: BrainTestChallengeData) => void;
-  onBrainTestResults: (data: BrainTestResultsData) => void;
+  onSubRound: (data: SubRoundData) => void;
+  onRoundResults: (data: RoundResultsData) => void;
   onVoteSubmitted: (data: VoteSubmittedData) => void;
-  onVoteResults: (data: VoteResultsData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
   onOpen: () => void;
   onError: () => void;
@@ -251,17 +260,12 @@ const initialState = {
   revealedPlayers: null as RevealedPlayer[] | null,
   narrationText: null as string | null,
   narrationTrigger: null as string | null,
-  brainTestQuestion: null as string | null,
-  brainTestChallengeIndex: 0,
-  brainTestChallengeType: null as string | null,
-  brainTestOptions: [] as string[],
-  brainTestResults: null as Record<string, Array<{
-    question: string; options: string[]; selected_index: number; correct_index: number; challenge_type: string;
-  }>> | null,
-  brainTestScores: null as Record<string, number> | null,
+  subRoundIndex: 0,
+  subRoundPayload: null as SubRoundPayload | null,
+  roundResults: null as RoundResultsPayload | null,
+  roundScores: null as Record<string, number> | null,
   votedForId: null as string | null,
   voteCount: 0,
-  voteResults: null as VoteResultsData | null,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -291,6 +295,12 @@ export const useGameStore = create<GameState>((set) => ({
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
       votedForId: data.my_vote ?? null,
+      subRoundPayload: data.sub_round_payload ?? null,
+      subRoundIndex: data.sub_round_index ?? 0,
+      roundResults: data.round_results_payload
+        ? { round_type: data.round_type ?? "unknown", ...data.round_results_payload } as RoundResultsPayload
+        : null,
+      roundScores: data.round_scores ?? null,
       connectionStatus: "connected",
     }),
 
@@ -342,17 +352,13 @@ export const useGameStore = create<GameState>((set) => ({
       totalCount: data.phase === "prompt" ? s.players.length : 0,
       narrationText: null,
       narrationTrigger: null,
-      // Brain test reset
-      brainTestQuestion: null,
-      brainTestChallengeIndex: 0,
-      brainTestChallengeType: null,
-      brainTestOptions: [],
-      brainTestResults: null,
-      brainTestScores: null,
-      // Vote reset
+      // Generic round state reset
+      subRoundPayload: null,
+      subRoundIndex: 0,
+      roundResults: null,
+      roundScores: null,
       votedForId: null,
       voteCount: 0,
-      voteResults: null,
     })),
 
   onAnswerSubmitted: (data) =>
@@ -369,21 +375,19 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     }),
 
-  onBrainTestChallenge: (data) =>
+  onSubRound: (data) =>
     set({
-      brainTestQuestion: data.question,
-      brainTestChallengeIndex: data.challenge_index,
-      brainTestChallengeType: data.challenge_type,
-      brainTestOptions: data.options || [],
+      subRoundPayload: data.payload,
+      subRoundIndex: data.sub_round_index,
       phaseDeadline: data.sub_deadline,
       phaseDuration: data.phase_duration ?? 12,
       lastSeq: data.seq,
     }),
 
-  onBrainTestResults: (data) =>
+  onRoundResults: (data) =>
     set((s) => ({
-      brainTestResults: data.results,
-      brainTestScores: data.scores ?? null,
+      roundResults: { round_type: data.round_type, ...data.payload } as RoundResultsPayload,
+      roundScores: data.scores ?? null,
       scores: { ...s.scores, ...(data.scores || {}) },
       lastSeq: data.seq,
     })),
@@ -393,13 +397,6 @@ export const useGameStore = create<GameState>((set) => ({
       voteCount: data.vote_count,
       lastSeq: data.seq,
     }),
-
-  onVoteResults: (data) =>
-    set((s) => ({
-      voteResults: data,
-      scores: { ...s.scores, ...(data.scores || {}) },
-      lastSeq: data.seq,
-    })),
 
   onGameOver: (data) =>
     set({

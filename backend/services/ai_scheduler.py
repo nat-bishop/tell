@@ -27,10 +27,6 @@ from backend.services.game_logic import (
     fill_missing_answers,
     get_player_by_id,
 )
-from backend.services.transitions import (
-    do_prompt_complete,
-    do_vote_complete,
-)
 from schemas.api_models import (
     AnswerSubmittedEvent,
     VoteSubmittedEvent,
@@ -143,7 +139,11 @@ def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlay
 
 
 async def on_phase_change(game_id: str, phase: GamePhase) -> None:
-    """Called when a phase changes. Schedules AI actions for the new phase."""
+    """Called when a phase changes. Schedules AI actions for the new phase.
+
+    Only handles PROMPT (framework phase). ACTIVE phase AI is handled by
+    minigame handlers via on_active_start().
+    """
     cancel_all(game_id)
 
     repo = get_game_repository()
@@ -163,11 +163,6 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
         for player in ai_players:
             delay = random.uniform(3, 20)
             tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
-
-    elif phase == GamePhase.VOTE:
-        for player in ai_players:
-            delay = random.uniform(2, 8)
-            tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
 
     _ai_tasks[game_id] = tasks
 
@@ -243,6 +238,8 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         return await generate_answer(deps, history)
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
+        from backend.services.transitions import do_prompt_complete
+
         answer_text, updated_history = result
         state = session.state
         if not state.current_round or player_id in state.current_round.answers:
@@ -327,6 +324,8 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
         return random.choice(other_ids)
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
+        from backend.services.transitions import do_active_complete
+
         voted_for_id = result
         state = session.state
         if not state.current_round:
@@ -356,9 +355,9 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
         # Early complete: all voted
         if vote_count >= total:
             get_timer_manager().cancel_timer(game_id)
-            await do_vote_complete(game_id, session)
+            await do_active_complete(game_id, session)
 
-    await _run_ai_task(game_id, player_id, delay, GamePhase.VOTE, generate, apply, "ai_vote_task")
+    await _run_ai_task(game_id, player_id, delay, GamePhase.ACTIVE, generate, apply, "ai_vote_task")
 
 
 async def on_brain_test_challenge(game_id: str, challenge_index: int) -> None:
@@ -392,7 +391,7 @@ async def _ai_brain_test_task(
 
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.BRAIN_TEST:
+        if not session or session.state.phase != GamePhase.ACTIVE:
             return
 
         state = session.state
@@ -414,7 +413,7 @@ async def _ai_brain_test_task(
 
         async with lock:
             session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.BRAIN_TEST:
+            if not session or session.state.phase != GamePhase.ACTIVE:
                 return
             rs = session.state.current_round
             if not rs or challenge_index >= len(rs.brain_challenges):

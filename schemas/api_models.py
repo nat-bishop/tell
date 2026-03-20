@@ -50,6 +50,11 @@ class StateSyncEvent(GameEvent):
     total_rounds: int = 5
     # Gallery vote state (reconnection)
     my_vote: str | None = None
+    # Generic reconnection state
+    sub_round_index: int | None = None
+    sub_round_payload: dict | None = None
+    round_results_payload: dict | None = None
+    round_scores: dict[str, int] | None = None
 
 
 class PlayerJoinedEvent(GameEvent):
@@ -114,20 +119,19 @@ class NarrationEvent(GameEvent):
     trigger: str
 
 
-class BrainTestChallengeEvent(GameEvent):
-    event_type: Literal["brain_test_challenge"] = "brain_test_challenge"
-    challenge_index: int
-    challenge_type: str
-    question: str
-    options: list[str] = Field(default_factory=list)
+class SubRoundEvent(GameEvent):
+    event_type: Literal["sub_round"] = "sub_round"
+    round_type: str
+    sub_round_index: int
+    payload: dict = Field(default_factory=dict)
     sub_deadline: str | None = None
     phase_duration: int | None = None
 
 
-class BrainTestResultsEvent(GameEvent):
-    event_type: Literal["brain_test_results"] = "brain_test_results"
-    # player_id -> list of {question, options, selected_index, correct_index, challenge_type}
-    results: dict[str, list[dict]]
+class RoundResultsEvent(GameEvent):
+    event_type: Literal["round_results"] = "round_results"
+    round_type: str
+    payload: dict = Field(default_factory=dict)
     scores: dict[str, int] = Field(default_factory=dict)
 
 
@@ -136,12 +140,6 @@ class VoteSubmittedEvent(GameEvent):
     player_id: str
     vote_count: int  # how many have voted so far
     total: int  # total eligible voters
-
-
-class VoteResultsEvent(GameEvent):
-    event_type: Literal["vote_results"] = "vote_results"
-    vote_counts: dict[str, int] = Field(default_factory=dict)  # player_id → votes received
-    scores: dict[str, int] = Field(default_factory=dict)  # running total scores
 
 
 class FinalRevealEvent(GameEvent):

@@ -2,24 +2,17 @@
 
 from __future__ import annotations
 
-import random
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from schemas.prompts import BrainTestChallengeSpec
-
+from backend.minigames import MINIGAME_REGISTRY, get_handler
 from schemas.api_models import (
     GameOverEvent,
     PhaseChangedEvent,
-    VoteResultsEvent,
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
-    BrainTestChallenge,
     GamePhase,
     Player,
-    RoundState,
     RoundType,
     TellGameState,
 )
@@ -39,21 +32,6 @@ def fill_missing_answers(state: TellGameState) -> None:
             rs.answers[p.id] = NO_RESPONSE
 
 
-class MinigameMeta:
-    """Metadata for a round type, used by round selection."""
-
-    __slots__ = ("min_players",)
-
-    def __init__(self, *, min_players: int) -> None:
-        self.min_players = min_players
-
-
-MINIGAMES: dict[RoundType, MinigameMeta] = {
-    RoundType.TASK: MinigameMeta(min_players=2),
-    RoundType.BRAIN_TEST: MinigameMeta(min_players=2),
-}
-
-
 def select_next_round_type(
     last_round_type: RoundType | None,
 ) -> RoundType:
@@ -63,9 +41,11 @@ def select_next_round_type(
     - No repeat of previous round type
     - Random from remaining eligible types
     """
+    import random
+
     eligible: list[RoundType] = []
 
-    for rt in MINIGAMES:
+    for rt in MINIGAME_REGISTRY:
         if rt == last_round_type:
             continue
         eligible.append(rt)
@@ -76,21 +56,17 @@ def select_next_round_type(
     return random.choice(eligible)
 
 
-# Interstitial hold times (seconds) added to phase deadlines so
-# clients can display a phase-transition overlay without eating action time.
-# The frontend derives its dismiss timing from the action_starts_at timestamp.
-_INTERSTITIAL_HOLD: dict[GamePhase, int] = {
-    GamePhase.PROMPT: 5,  # round start — staggered visual beats
-    GamePhase.BRAIN_TEST: 5,  # round start
-    GamePhase.BRAIN_TEST_RESULTS: 2,
-    GamePhase.VOTE: 3,
-    GamePhase.VOTE_RESULTS: 2,
-}
-
-
-def get_interstitial_hold(phase: GamePhase) -> int:
+def get_interstitial_hold(phase: GamePhase, round_type: RoundType | None = None) -> int:
     """Extra seconds added to phase deadline for client interstitial overlay."""
-    return _INTERSTITIAL_HOLD.get(phase, 0)
+    if phase == GamePhase.PROMPT:
+        return 5
+    if round_type:
+        handler = get_handler(round_type)
+        if phase == GamePhase.ACTIVE:
+            return handler.meta.active_interstitial
+        if phase == GamePhase.RESULTS:
+            return handler.meta.results_interstitial
+    return 0
 
 
 def get_phase_duration(
@@ -99,122 +75,27 @@ def get_phase_duration(
     """Get the duration for a given phase."""
     if phase == GamePhase.PROMPT:
         return settings.prompt_duration
-    if phase == GamePhase.VOTE:
-        return settings.vote_duration
-    if phase == GamePhase.VOTE_RESULTS:
-        return settings.vote_results_duration
-    if phase == GamePhase.BRAIN_TEST:
-        return settings.brain_test_duration
-    if phase == GamePhase.BRAIN_TEST_RESULTS:
-        return settings.brain_test_results_duration
+    if round_type:
+        handler = get_handler(round_type)
+        if phase == GamePhase.ACTIVE:
+            return handler.get_active_duration(settings)
+        if phase == GamePhase.RESULTS:
+            return handler.get_results_duration(settings)
     return None
 
 
-def _transition_to_phase(state: TellGameState, phase: GamePhase, duration: int) -> TellGameState:
+def _transition_to_phase(
+    state: TellGameState,
+    phase: GamePhase,
+    duration: int,
+    round_type: RoundType | None = None,
+) -> TellGameState:
     """Move to a phase with a deadline (includes interstitial hold)."""
     state.phase = phase
     state.phase_deadline = datetime.now(UTC) + timedelta(
-        seconds=duration + get_interstitial_hold(phase)
+        seconds=duration + get_interstitial_hold(phase, round_type)
     )
     return state
-
-
-def transition_to_brain_test(
-    state: TellGameState,
-    challenges: list[BrainTestChallengeSpec],
-    duration: int,
-) -> TellGameState:
-    """Start a new Brain Test round."""
-    from schemas.game_state import BrainTestChallenge
-
-    state.round_number += 1
-    state.current_round = RoundState(
-        round_number=state.round_number,
-        prompt_text="quick draw",
-        prompt_category="brain_test",
-        round_type=RoundType.BRAIN_TEST,
-        current_sub_round=0,
-        brain_challenges=[
-            BrainTestChallenge(
-                challenge_type=c.challenge_type,
-                question=c.question,
-                options=c.options,
-                correct_index=c.correct_index,
-            )
-            for c in challenges
-        ],
-    )
-    state.phase = GamePhase.BRAIN_TEST
-    state.phase_deadline = datetime.now(UTC) + timedelta(
-        seconds=duration + get_interstitial_hold(GamePhase.BRAIN_TEST)
-    )
-    return state
-
-
-def transition_to_brain_test_results(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.BRAIN_TEST_RESULTS, duration)
-
-
-def transition_to_task_prompt(state: TellGameState, duration: int) -> TellGameState:
-    """Start a new Task round — single prompt for all players."""
-    from schemas.prompts import select_duel_prompt
-
-    state.round_number += 1
-    idx, prompt = select_duel_prompt(state.used_prompt_indices, state.last_prompt_category)
-    state.used_prompt_indices.append(idx)
-    state.last_prompt_category = prompt.category.value
-    state.current_round = RoundState(
-        round_number=state.round_number,
-        prompt_text=prompt.text,
-        prompt_category=prompt.category.value,
-        round_type=RoundType.TASK,
-    )
-    return _transition_to_phase(state, GamePhase.PROMPT, duration)
-
-
-def transition_to_vote(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.VOTE, duration)
-
-
-def transition_to_vote_results(state: TellGameState, duration: int) -> TellGameState:
-    return _transition_to_phase(state, GamePhase.VOTE_RESULTS, duration)
-
-
-def tally_gallery_votes(state: TellGameState) -> dict[str, int]:
-    """Count votes received per player. Returns player_id → vote count."""
-    vote_counts: dict[str, int] = {p.id: 0 for p in state.players}
-    rs = state.current_round
-    if rs:
-        for target_id in rs.gallery_votes.values():
-            if target_id in vote_counts:
-                vote_counts[target_id] += 1
-    return vote_counts
-
-
-def resolve_gallery_votes(state: TellGameState, seq_fn) -> tuple[TellGameState, VoteResultsEvent]:
-    """Tally gallery votes. Each vote received = -1 point."""
-    vote_counts = tally_gallery_votes(state)
-    # Apply penalties
-    player_map = {p.id: p for p in state.players}
-    for pid, count in vote_counts.items():
-        if count > 0 and pid in player_map:
-            player_map[pid].score -= count
-    scores = {p.id: p.score for p in state.players}
-    return state, VoteResultsEvent(seq=seq_fn(), vote_counts=vote_counts, scores=scores)
-
-
-# ---------------------------------------------------------------------------
-# Brain Test scoring (multiple choice — pure correctness)
-# ---------------------------------------------------------------------------
-
-
-def score_brain_test(challenges: list[BrainTestChallenge]) -> dict[str, int]:
-    """Score all challenges. 1 point per correct answer (selected_index == correct_index)."""
-    totals: dict[str, int] = {}
-    for ch in challenges:
-        for pid, selected in ch.responses.items():
-            totals[pid] = totals.get(pid, 0) + (1 if selected == ch.correct_index else 0)
-    return totals
 
 
 def get_final_rankings(state: TellGameState) -> list[tuple[str, int]]:
@@ -307,6 +188,17 @@ def get_next_round_type(state: TellGameState) -> RoundType:
     return select_next_round_type(last)
 
 
+def tally_gallery_votes(state: TellGameState) -> dict[str, int]:
+    """Count votes received per player. Returns player_id → vote count."""
+    vote_counts: dict[str, int] = {p.id: 0 for p in state.players}
+    rs = state.current_round
+    if rs:
+        for target_id in rs.gallery_votes.values():
+            if target_id in vote_counts:
+                vote_counts[target_id] += 1
+    return vote_counts
+
+
 def build_state_sync(
     state: TellGameState, player_id: str, seq: int, phase_duration: int | None = None
 ) -> dict:
@@ -324,15 +216,19 @@ def build_state_sync(
         prompt_category = round_state.prompt_category
         round_type = round_state.round_type
 
-        # Answers visible during VOTE, VOTE_RESULTS, and GAME_OVER
-        if state.phase in (GamePhase.VOTE, GamePhase.VOTE_RESULTS, GamePhase.GAME_OVER):
+        # Answers visible during ACTIVE (task), RESULTS, and GAME_OVER
+        if state.phase in (GamePhase.ACTIVE, GamePhase.RESULTS, GamePhase.GAME_OVER):
             answers = round_state.answers
 
         if state.phase == GamePhase.PROMPT and player_id in round_state.answers:
             my_answer = round_state.answers[player_id]
 
-        # Include player's own vote during VOTE phase
-        if state.phase == GamePhase.VOTE and player_id in round_state.gallery_votes:
+        # Include player's own vote during ACTIVE task phase
+        if (
+            state.phase == GamePhase.ACTIVE
+            and round_state.round_type == RoundType.TASK
+            and player_id in round_state.gallery_votes
+        ):
             my_vote = round_state.gallery_votes[player_id]
 
     player_obj = get_player_by_id(state, player_id)
@@ -340,7 +236,7 @@ def build_state_sync(
 
     scores = {p.id: p.score for p in state.players}
 
-    return {
+    result = {
         "event_type": "state_sync",
         "seq": seq,
         "game_id": state.game_id,
@@ -366,3 +262,14 @@ def build_state_sync(
             else None
         ),
     }
+
+    # Merge handler-specific reconnection data
+    if round_state and round_type:
+        try:
+            handler = get_handler(RoundType(round_type))
+            extras = handler.build_state_sync_extras(state, player_id)
+            result.update(extras)
+        except (KeyError, ValueError):
+            pass
+
+    return result

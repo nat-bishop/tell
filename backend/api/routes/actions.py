@@ -16,8 +16,8 @@ from backend.services.game_logic import (
     get_player_by_id,
 )
 from backend.services.transitions import (
+    do_active_complete,
     do_prompt_complete,
-    do_vote_complete,
     initialize_and_start_game,
 )
 from schemas.aliases import generate_aliases, generate_player_id
@@ -34,7 +34,7 @@ from schemas.api_models import (
     VoteSubmittedEvent,
 )
 from schemas.constants import NO_RESPONSE
-from schemas.game_state import GamePhase, Player, PlayerRole
+from schemas.game_state import GamePhase, Player, PlayerRole, RoundType
 
 router = APIRouter()
 
@@ -198,8 +198,12 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest):
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.VOTE:
-            raise HTTPException(status_code=400, detail="Not in vote phase")
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        round_state = state.current_round
+        if not round_state or round_state.round_type != RoundType.TASK:
+            raise HTTPException(status_code=400, detail="Not a task round")
 
         player = get_player_by_id(state, req.player_id)
         if not player:
@@ -212,7 +216,6 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest):
         if not target:
             raise HTTPException(status_code=400, detail="Target player not found")
 
-        round_state = state.current_round
         if not round_state:
             raise HTTPException(status_code=400, detail="No active round")
 
@@ -241,7 +244,7 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest):
         # Early complete: all voted
         if vote_count >= total:
             get_timer_manager().cancel_timer(game_id)
-            await do_vote_complete(game_id, session)
+            await do_active_complete(game_id, session)
 
     return {"status": "ok"}
 
@@ -261,16 +264,16 @@ async def submit_brain_test_answer(game_id: str, req: SubmitBrainTestAnswerReque
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.BRAIN_TEST:
-            raise HTTPException(status_code=400, detail="Not in brain test phase")
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        round_state = state.current_round
+        if not round_state or round_state.round_type != RoundType.BRAIN_TEST:
+            raise HTTPException(status_code=400, detail="Not a brain test round")
 
         player = get_player_by_id(state, req.player_id)
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
-
-        round_state = state.current_round
-        if not round_state:
-            raise HTTPException(status_code=400, detail="No active round")
 
         if req.challenge_index >= len(round_state.brain_challenges):
             raise HTTPException(status_code=400, detail="Invalid challenge index")

@@ -1,13 +1,13 @@
 # Tell
 
-Multiplayer social deduction game — reverse Turing test. Players join a group where some are AI, some human. Humans play as themselves. AI players try to pass as human. Everyone votes each matchup on who sounds more human. After 5 rounds: big reveal, highest score wins.
+Multiplayer social deduction game — reverse Turing test. Players join a group where some are AI, some human. Humans play as themselves. AI players try to pass as human. Everyone votes each round on who sounds most human. After 5 rounds: big reveal, highest score wins.
 
 ## Architecture
 
 ```
 schemas/          Shared Pydantic models — the contract between backend + frontend
   game_state.py   GamePhase (LOBBY/PROMPT/ACTIVE/RESULTS/GAME_OVER), Player,
-                  TellGameState, RoundState, Matchup, BrainTestChallenge, NarratorEntry
+                  TellGameState, RoundState, BrainTestChallenge, NarratorEntry
   api_models.py   SSE event types + POST request/response models (incl. matchmaking)
   prompts.py      42 task prompts (7 categories) + brain test challenges (multiple-choice)
                   + select_brain_test_challenges()
@@ -23,26 +23,30 @@ backend/
     routes/
       game.py         POST /games, GET /games/{id}
       events.py       GET /games/{id}/events (SSE stream)
-      actions.py      POST join/start/answer/matchup-vote/brain-test-answer
+      actions.py      POST join/start/answer/vote/brain-test-answer
       matchmaking.py  POST /matchmaking/join|leave, GET /matchmaking/status|events
       debug.py        POST /debug/seed (only when TELL_LOG_LEVEL=DEBUG)
   services/
     connection_manager.py  Per-game asyncio.Queue broadcast + event log + recording buffer
     game_repository.py     In-memory game session store
     recorder.py            Writes completed game JSON to recordings/ on game over
-    game_logic.py          Pure functions: transitions, matchup vote resolution, scoring,
-                           brain test selection, round type cycling,
-                           MinigameMeta/MINIGAMES registry, select_next_round_type(),
-                           resolve_matchup_votes(), score_brain_test(), check_game_over()
+    game_logic.py          Pure functions: phase transitions, tally_gallery_votes, scoring,
+                           round type cycling, get_next_round_type(), check_game_over(),
+                           get_interstitial_hold(), get_phase_duration() (data-driven
+                           from handler metadata), build_state_sync, make_*_event helpers
     timer_manager.py       asyncio.Task per phase timer
-    transitions.py         Async phase transition sequences (start_phase_timer,
+    transitions.py         Minigame-agnostic async phase sequences (start_phase_timer,
                            handle_phase_expiry, do_prompt_complete, do_active_complete,
-                           do_results_complete, _initialize_round(), _start_sub_round_loop(),
-                           _start_matchup_loop, _start_brain_test_loop,
+                           do_results_complete, _start_next_round, _do_game_over,
                            _fire_narration, initialize_and_start_game)
-    ai_scheduler.py        Generate-then-lock AI player scheduling + brain test
-                           sub-rounds; on_brain_test_challenge(), on_matchup_challenge()
+    ai_scheduler.py        Generate-then-lock scheduling; on_phase_change() handles
+                           PROMPT only — ACTIVE scheduling delegated to minigame handlers
     matchmaking.py         Rolling lobby: queue, countdown, solo timeout, fire_game
+  minigames/               Plugin package — one handler per round type
+    base.py                MinigameMeta dataclass + MinigameHandler interface
+    task.py                TaskHandler (gallery vote, score = negative votes received)
+    brain_test.py          BrainTestHandler + score_brain_test()
+    __init__.py            MINIGAME_REGISTRY dict + get_handler() + register()
   llm/
     agents.py              PydanticAI: answer, vote, brain test answer, narration
     personalities.py       5 AI personalities with system prompts + vote styles
@@ -67,25 +71,26 @@ frontend/src/
     FacilityBackground.tsx CSS atmospheric background (radial gradients, ambient glow)
     FacilityProvider.tsx   React context: transition state + snapTo
     useTransitionMachine.ts State machine: idle → lockdown(300ms) → reconfigure → boot(400ms) → idle
-    FacilityScene.tsx      Phase router → facility phase components; `active`/`results` dispatch
-                           by `roundType` (task → FacilityMatchup, brain_test → FacilityBrainTest);
-                           hidden during lockdown/reconfigure
+    usePhaseLayout.ts      Hook: getPhaseLayout(phase, roundType) → PhaseLayout
+    FacilityScene.tsx      Phase router → MINIGAME_COMPONENTS registry (record mapping
+                           round_type → {Active, Results} component pair); hidden during
+                           lockdown/reconfigure
     FacilityGameContent.tsx Main orchestrator: cold open, transition timing, background, Narration
     subjectColors.ts       Player color palette (6 named hues)
     usePlayerColors.ts     Hook: maps player IDs → color values
-    phaseLayouts.ts        `getPhaseLayout(phase, roundType)` — two-tier lookup:
-                           SHARED_LAYOUTS (lobby/prompt/game_over) then
+    phaseLayouts.ts        SHARED_LAYOUTS (lobby/prompt/game_over) +
                            ROUND_LAYOUTS[roundType][phase] for active/results
     FacilityTimer.tsx      Timer as facility gauge with warning/urgent/critical states
     FacilityNarration.tsx  PA ticker at bottom of viewport, auto-dismiss after 6s
-    HudPanel.tsx           Player info readout (replaces PlayerBar)
+    HudPanel.tsx           Player info readout
     TransitionOverlay.tsx  Diegetic interstitial in wall-display panel; 5 voice archetypes cycling
                            by round; shows during "reconfigure" state only
     phases/
       FacilityLobby.tsx    wall-display (title + player list) + desk-terminal (host controls)
       FacilityPrompt.tsx   wall-display (prompt) + desk-terminal (textarea input)
+      FacilityVote.tsx     active phase for task roundType: gallery of all answers, tap to vote
+      FacilityVoteResults.tsx  results phase for task roundType: vote counts per player
       FacilityBrainTest.tsx  active + results phases for brain_test roundType
-      FacilityMatchup.tsx  active phase for task roundType: left-screen + right-screen + readout
       FacilityGameOver.tsx full-screen panel: headline, scoreboard, narration, play again
   components/              Shared primitives — used by app screens and facility phases
     Stage.tsx              Full-screen centered layout wrapper
@@ -97,7 +102,7 @@ frontend/src/
                            roundPayload, roundResults, roundScores
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
-  api/actions.ts           Typed POST helpers (incl. submitMatchupVote,
+  api/actions.ts           Typed POST helpers (incl. submitVote,
                            submitBrainTestAnswer, matchmaking)
   api/events.ts            SSE client with typed event routing
   api/matchmaking-events.ts  SSE client for matchmaking lobby (LobbyStatus, GameAssigned)
@@ -134,7 +139,6 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_AI_MODEL`, `TELL_AI_RETRIES` — override AI model and retry count
 - `TELL_PROMPT_DURATION`, `TELL_TASK_PROMPT_DURATION`, `TELL_PROMPT_READING_DURATION` — prompt phase timing
 - `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing
-- `TELL_MATCHUP_DURATION`, `TELL_MATCHUP_CHALLENGE_DURATION` — matchup safety timer and per-sub-round duration
 - `TELL_TOTAL_ROUNDS` — override fixed game length (default 5)
 - `TELL_MIN_HUMANS`, `TELL_MAX_PLAYERS`, `TELL_MIN_AI`, `TELL_MAX_AI` — player count limits
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
@@ -155,38 +159,59 @@ Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run
 
 ### State machine — two round types
 
-`GamePhase` has 5 values: `LOBBY, PROMPT, ACTIVE, RESULTS, GAME_OVER`. `ACTIVE` and `RESULTS` are generic — behavior dispatches by `round_type`. Phases never grow; adding a minigame only requires a `MinigameMeta` registry entry.
+`GamePhase` has 5 values: `LOBBY, PROMPT, ACTIVE, RESULTS, GAME_OVER`. `ACTIVE` and `RESULTS` are generic — behavior dispatches via `get_handler(round_type)`. Phases never grow; adding a minigame only requires a new handler registered in `backend/minigames/`.
 
-Round types are selected dynamically via `get_next_round_type(state)` (wraps `select_next_round_type`) — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat. `MinigameMeta` in `game_logic.py` stores `min_players`, `has_prompt`, `has_results`, `active_interstitial`, `results_interstitial` per type. Two types: Task (Matchup), Brain Test (Quick Draw).
+Round types are selected dynamically via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat. Two types: Task (gallery vote), Brain Test (Quick Draw).
 
-**Task / Matchup** (constrained creative prompt, 1v1 voting):
+**Task / Gallery Vote** (creative prompt, everyone votes for who sounds most human):
 ```
-PROMPT (45s + 10s reading) → ACTIVE (matchup sub-round loop, 12s each) → RoundResultsEvent → next round
+PROMPT (45s + 5s reading) → ACTIVE (all see all answers, tap to vote) → RoundResultsEvent → RESULTS (vote counts) → next round
 ```
-Players answer the prompt, then are paired for head-to-head voting. Each sub-round broadcasts `SubRoundEvent(round_type="task", ...)`. All players vote on which answer sounds more human. Matchup winner earns +1 point. Odd player out gets a bye. No results phase (`has_results=False`).
+All players vote for one other player who sounds most human. Votes received = negative points (`-1` per vote). Task handler (`task.py`) runs `build_results()` to tally and return score deltas.
 
 **Brain Test / Quick Draw** (multiple-choice challenges, scored by correctness):
 ```
 ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent → RESULTS (15s) → next round
 ```
-Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, 1 point). Results phase used (`has_results=True`).
+Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, +1 point).
 
 **After 5 rounds** (`state.round_number == state.total_rounds`):
 ```
 FinalRevealEvent → GameOverEvent
 ```
-All roles revealed simultaneously with final scores. Highest scorer wins. Ties possible. Winner determined by `check_game_over()` in `game_logic.py`.
+All roles revealed simultaneously with final scores. Highest scorer wins. Ties possible.
 
-Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_expiry`, `do_prompt_complete`, `do_active_complete` (dispatches by round_type), `do_results_complete`, `_initialize_round()`, `_start_sub_round_loop()`, `_fire_narration`. Also `initialize_and_start_game` (shared by host-start and matchmaking) — delegates to `_start_next_round()`. AI scheduler hooks in via `on_phase_change()`, `on_matchup_challenge()`, `on_brain_test_challenge()`.
+Phase transitions are in `transitions.py` (minigame-agnostic): `start_phase_timer`, `handle_phase_expiry`, `do_prompt_complete`, `do_active_complete` (calls `handler.build_results()`, broadcasts `RoundResultsEvent`, then → RESULTS or next round based on `handler.meta.has_results`), `do_results_complete`, `_fire_narration`. Also `initialize_and_start_game` (shared by host-start and matchmaking).
+
+### Minigame handler pattern
+
+Each round type is a `MinigameHandler` subclass in `backend/minigames/`:
+
+```python
+class MinigameHandler:
+    round_type: RoundType
+    meta: MinigameMeta           # min_players, has_prompt, has_results,
+                                 # active_interstitial, results_interstitial
+
+    def setup_round(state, settings)  # mutates state in place
+    def get_active_duration(settings) → int
+    def get_results_duration(settings) → int
+    def active_event_extras(state) → dict  # extra fields on PhaseChangedEvent
+    async def on_active_start(game_id)  # start sub-round loops, schedule AI
+    def build_results(state) → (payload, score_deltas)  # called by do_active_complete
+    def build_state_sync_extras(state, player_id) → dict  # reconnection
+```
+
+To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameHandler`, call `register(MyHandler())` in `backend/minigames/__init__.py`.
 
 ### Scoring
-- **Matchup**: Each voter picks the answer that sounds more human. Winning side gets +1 point per matchup. `resolve_matchup_votes()` returns `(state, matchup_results_list, scores_dict)`.
-- **Brain Test**: Pure correctness — `selected_index == correct_index` → +1 point per challenge.
+- **Task**: Each vote received = **-1 point**. `tally_gallery_votes()` in `game_logic.py`, deltas applied in `TaskHandler.build_results()`.
+- **Brain Test**: Pure correctness — `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
 - Running scores in `Player.score` (int). `scores` dict (player_id → score) carried on `StateSyncEvent`, `RoundResultsEvent`, and `GameOverEvent`.
 - Game over after `total_rounds` (default 5). Winner = highest score; ties produce multiple `winner_ids`.
 
 ### Game logic is pure
-`game_logic.py` contains pure functions (no I/O, no async). State transitions, vote tallying, game-over checks, assignment logic, client state sanitization. Routes call these under the lock.
+`game_logic.py` contains pure functions (no I/O, no async). Phase transitions, vote tallying, game-over checks, sanitization. `get_interstitial_hold()` and `get_phase_duration()` are data-driven from handler metadata via `get_handler()`. Routes call these under the lock.
 
 ### Matchmaking
 `MatchmakingService` (singleton in `deps.py`) maintains a rolling lobby queue. Players join via `POST /matchmaking/join`, connect to `GET /matchmaking/events` SSE for status. When `mm_min_humans` (default 2) are queued, a countdown fires. After `mm_countdown_seconds` (20s), `_fire_game()` pops the queue, creates a real game, adds AI (random count from `mm_min_total`–`mm_max_total`), and calls `initialize_and_start_game()`. All lobby clients receive `game_assigned` event and redirect. Solo player gets a `mm_solo_timeout_seconds` (45s) grace period before starting with AI companions. Frontend: `/queue` page.
@@ -194,8 +219,8 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 ### LLM-powered features
 - **Narrator** (persistent show host): `generate_narration(trigger, context)` fires as a non-blocking background task at: `game_start`, `post_submissions`, `between_rounds`, `game_over`. Dry, literary voice (the robot running the test). 3s timeout for most triggers, 5s for `game_over`. Result stored in `state.narrator_context` (last 5 kept for continuity) and broadcast as `NarrationEvent`. Never blocks game flow. `_fire_narration()` + `_build_narrator_context()` in `transitions.py`.
 - **AI answers** (PROMPT): AI players generate answers trying to pass as human. System prompt is personality-driven via `build_system_prompt()`.
-- **AI matchup votes** (ACTIVE / task): AI votes on which answer sounds more human using `decide_vote()`.
-- **AI brain test** (ACTIVE / brain_test): AI selects a multiple-choice option via stateless `brain_test_agent`.
+- **AI votes** (ACTIVE / task): Scheduled by `TaskHandler.on_active_start()` via `_ai_vote_task()`.
+- **AI brain test** (ACTIVE / brain_test): Scheduled by `BrainTestHandler._brain_loop()` via `on_brain_test_challenge()`.
 
 ## Gotchas
 
@@ -204,22 +229,25 @@ Phase transitions are in `transitions.py`: `start_phase_timer`, `handle_phase_ex
 - **`from __future__ import annotations`** used in all Python files. Use `datetime.now(UTC)`, never `datetime.utcnow()`.
 - **`schemas/` is top-level**: Imported by both `backend/` and `scripts/`. Don't nest under `backend/`.
 - **No database**: All state is in-memory. Server restart kills all games. Completed games are recorded to `recordings/{game_id}.json` (toggle with `TELL_RECORD_GAMES=false`).
-- **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init.
+- **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init. Also: `BrainTestHandler._brain_loop` imports `do_active_complete` at runtime for the same reason.
 - **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
-- **Matchup pairings**: Players paired in order — player `i` vs player `i+1`. Odd player out gets `bye_player_id` on `RoundState` and skips the current matchup loop iteration. Pairs determined in `transition_to_matchup()` in `game_logic.py`.
-- **Sub-round loops**: `_start_matchup_loop` and `_start_brain_test_loop` background tasks cycle sequentially through sub-rounds. Each iteration broadcasts a `SubRoundEvent(round_type, sub_round_index, payload)`. Dispatched by `_start_sub_round_loop()`. When all sub-rounds complete, calls `do_active_complete()`.
-- **`do_active_complete` dispatches by round_type**: Scores the round, broadcasts `RoundResultsEvent`, then either transitions to `RESULTS` phase (if `meta.has_results`) or calls `_start_next_round()` directly.
-- **`do_results_complete`**: Ends the RESULTS phase — checks game over or starts next round. Only reached for round types with `has_results=True` (Brain Test).
-- **Brain test scoring**: `score_brain_test()` in `game_logic.py`. Pure correctness: `selected_index == correct_index` awards 1 point. Responses store an int (selected option index), not a string.
-- **Action routes check ACTIVE + round_type**: `/matchup-vote` requires `phase == ACTIVE` and `round_type == TASK`; `/brain-test-answer` requires `phase == ACTIVE` and `round_type == BRAIN_TEST`.
-- **No elimination**: No `ELIMINATION` phase. No spectator mode. All players participate all 5 rounds.
-- **Game ends by round count**: `check_game_over()` returns `None` until `state.round_number >= state.total_rounds`. Then returns winner info. Ties produce multiple `winner_ids`.
-- **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` (roles + scores revealed) then `GameOverEvent`. Frontend shows reveal screen first.
-- **total_rounds is 5**: Fixed game length — not a safety cap. No early exit by player count.
-- **Task prompts use separate pool**: `used_task_prompt_indices` + `last_task_prompt_category` tracked separately. `select_task_prompt()` in `prompts.py`.
-- **Round types selected dynamically**: `get_next_round_type(state)` (wraps `select_next_round_type`) called at the start of each round. `state.round_types` grows as rounds are played. Only rule: no consecutive repeat.
-- **Matchmaking join window**: `MatchmakingService._join_window_open` event blocks new joins while a game is being fired. Clears after lobby SSE clients are disconnected.
-- **Narrator fires non-blocking**: `_fire_narration()` uses `asyncio.create_task()`. It acquires the lock only for the state read and write — LLM call is outside the lock. If the game ends before the narration resolves, it exits silently.
+- **Task scoring is negative**: Votes received = **negative** points. Players avoid being the most-suspected human/bot. High score means fewer suspicion votes.
+- **Gallery vote route**: `/vote` (not `/matchup-vote`). Requires `phase == ACTIVE` and `round_type == TASK`. Votes are changeable (overwrite allowed).
+- **Brain test route**: `/brain-test-answer` requires `phase == ACTIVE` and `round_type == BRAIN_TEST`.
+- **Sub-round loop in handler**: `BrainTestHandler._brain_loop` is an `asyncio.Task` started by `on_active_start()`. Each iteration broadcasts `SubRoundEvent`, calls `on_brain_test_challenge()` for AI scheduling, sleeps `sub_duration`. After all challenges, cancels safety timer and calls `do_active_complete`.
+- **`do_active_complete` is minigame-agnostic**: Calls `handler.build_results()`, applies score deltas, broadcasts `RoundResultsEvent`, then either → RESULTS (if `meta.has_results`) or next round.
+- **`do_results_complete`**: Only reached for round types with `has_results=True`. Checks game over or starts next round.
+- **Brain test scoring**: `score_brain_test()` in `brain_test.py`. Pure correctness: `selected_index == correct_index` awards 1 point. Responses store an int, not a string.
+- **No elimination**: No spectator mode. All players participate all 5 rounds.
+- **Game ends by round count**: `check_game_over()` returns `None` until `state.round_number >= state.total_rounds`.
+- **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` (roles + scores revealed) then `GameOverEvent`.
+- **total_rounds is 5**: Fixed game length — not a safety cap. No early exit.
+- **Task prompts**: `used_prompt_indices` + `last_prompt_category` tracked on `TellGameState`. `select_duel_prompt()` in `prompts.py` (no-repeat, no-same-category).
+- **Round types selected dynamically**: `get_next_round_type(state)` called at the start of each round. Only rule: no consecutive repeat.
+- **Matchmaking join window**: `MatchmakingService._join_window_open` event blocks new joins while a game is being fired.
+- **Narrator fires non-blocking**: `_fire_narration()` uses `asyncio.create_task()`. LLM call is outside the lock. Exits silently if game ends first.
+- **MinigameMeta lives in `backend/minigames/base.py`**: Not in `game_logic.py`. `game_logic.py` imports `MINIGAME_REGISTRY` and `get_handler` from `backend.minigames`.
+- **FacilityScene uses component registry**: `MINIGAME_COMPONENTS` maps `round_type → {Active, Results}` component pairs. Adding a new frontend round type only requires adding an entry here and a handler entry in `backend/minigames/`.
 
 ## Code Conventions
 

@@ -101,7 +101,7 @@ class TestStartGame:
 
 class TestSubmitAnswer:
     async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.VOTE)
+        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
         resp = await client.post(
             f"/games/{game_id}/answer",
             json={"player_id": "h1", "answer": "test"},
@@ -144,7 +144,7 @@ class TestSubmitAnswer:
 
 class TestGalleryVote:
     async def test_success(self, client, mock_ai):
-        game_id, session, _ = seed_game(GamePhase.VOTE, round_type=RoundType.TASK)
+        game_id, session, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "a1"},
@@ -159,10 +159,19 @@ class TestGalleryVote:
             json={"player_id": "h1", "voted_for_player_id": "a1"},
         )
         assert resp.status_code == 400
-        assert "vote" in resp.json()["detail"].lower()
+        assert "active" in resp.json()["detail"].lower()
+
+    async def test_wrong_round_type(self, client, mock_ai):
+        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.BRAIN_TEST)
+        resp = await client.post(
+            f"/games/{game_id}/vote",
+            json={"player_id": "h1", "voted_for_player_id": "a1"},
+        )
+        assert resp.status_code == 400
+        assert "task" in resp.json()["detail"].lower()
 
     async def test_vote_for_self(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.VOTE, round_type=RoundType.TASK)
+        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "h1"},
@@ -171,7 +180,7 @@ class TestGalleryVote:
         assert "yourself" in resp.json()["detail"].lower()
 
     async def test_duplicate_vote_overwrites(self, client, mock_ai):
-        game_id, session, _ = seed_game(GamePhase.VOTE, round_type=RoundType.TASK)
+        game_id, session, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
         # First vote
         resp = await client.post(
             f"/games/{game_id}/vote",
@@ -189,7 +198,7 @@ class TestGalleryVote:
         assert session.state.current_round.gallery_votes["h1"] == "a2"
 
     async def test_invalid_target(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.VOTE, round_type=RoundType.TASK)
+        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "nonexistent"},

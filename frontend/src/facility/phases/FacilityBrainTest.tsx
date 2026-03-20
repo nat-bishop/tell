@@ -9,31 +9,34 @@ import { SystemText } from "@/components/SystemText";
 export function FacilityBrainTest() {
   const gameId = useGameStore((s) => s.gameId);
   const playerId = useGameStore((s) => s.playerId);
-  const brainTestQuestion = useGameStore((s) => s.brainTestQuestion);
-  const brainTestChallengeIndex = useGameStore((s) => s.brainTestChallengeIndex);
-  const brainTestChallengeType = useGameStore((s) => s.brainTestChallengeType);
-  const brainTestOptions = useGameStore((s) => s.brainTestOptions);
-  const brainTestResults = useGameStore((s) => s.brainTestResults);
-  const brainTestScores = useGameStore((s) => s.brainTestScores);
+  const subRoundPayload = useGameStore((s) => s.subRoundPayload);
+  const roundResults = useGameStore((s) => s.roundResults);
+  const roundScores = useGameStore((s) => s.roundScores);
   const players = useGameStore((s) => s.players);
   const phase = useGameStore((s) => s.phase);
   const scores = useGameStore((s) => s.scores);
+
+  // Extract brain test fields from generic payload
+  const challengeIndex = subRoundPayload?.challenge_index ?? 0;
+  const challengeType = subRoundPayload?.challenge_type ?? null;
+  const question = subRoundPayload?.question ?? null;
+  const options = subRoundPayload?.options ?? [];
 
   const [submitted, setSubmitted] = useState<Record<number, number>>({});
 
   const handleSelect = useCallback(
     async (optionIndex: number) => {
       if (!gameId || !playerId) return;
-      if (submitted[brainTestChallengeIndex] !== undefined) return;
+      if (submitted[challengeIndex] !== undefined) return;
 
       try {
-        await submitBrainTestAnswer(gameId, playerId, optionIndex, brainTestChallengeIndex);
-        setSubmitted((prev) => ({ ...prev, [brainTestChallengeIndex]: optionIndex }));
+        await submitBrainTestAnswer(gameId, playerId, optionIndex, challengeIndex);
+        setSubmitted((prev) => ({ ...prev, [challengeIndex]: optionIndex }));
       } catch {
         // Silently handle — already submitted or phase changed
       }
     },
-    [gameId, playerId, brainTestChallengeIndex, submitted],
+    [gameId, playerId, challengeIndex, submitted],
   );
 
   const aliasById = useMemo(() => {
@@ -43,10 +46,11 @@ export function FacilityBrainTest() {
   }, [players]);
 
   // Results view
-  if (phase === "brain_test_results" && brainTestResults) {
+  if (phase === "results" && roundResults && roundResults.round_type === "brain_test") {
+    const brainTestResults = roundResults.results;
     const sortedEntries = Object.entries(brainTestResults).sort(([aId], [bId]) => {
-      const aScore = brainTestScores?.[aId] ?? 0;
-      const bScore = brainTestScores?.[bId] ?? 0;
+      const aScore = roundScores?.[aId] ?? 0;
+      const bScore = roundScores?.[bId] ?? 0;
       return bScore - aScore;
     });
 
@@ -59,7 +63,7 @@ export function FacilityBrainTest() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {sortedEntries.map(([pid, answers]) => {
-              const score = brainTestScores?.[pid] ?? 0;
+              const score = roundScores?.[pid] ?? 0;
               const runningScore = scores[pid] ?? 0;
               return (
                 <div key={pid} className="card p-4">
@@ -104,22 +108,22 @@ export function FacilityBrainTest() {
   }
 
   // Challenge view
-  const alreadySubmitted = submitted[brainTestChallengeIndex] !== undefined;
+  const alreadySubmitted = submitted[challengeIndex] !== undefined;
 
   return (
     <>
       {/* Main screen — challenge type + question */}
       <Panel zone="main-screen">
         <div className="flex flex-col items-center justify-center h-full gap-4">
-          {brainTestChallengeType && (
+          {challengeType && (
             <p className="font-system text-[0.65rem] text-cold tracking-[0.2em] uppercase">
-              {brainTestChallengeType.replace("_", " ")}
+              {challengeType.replace("_", " ")}
             </p>
           )}
 
-          {brainTestQuestion ? (
+          {question ? (
             <p className="font-literary text-[1.2rem] text-ink text-center leading-[1.6] max-w-md">
-              {brainTestQuestion}
+              {question}
             </p>
           ) : (
             <p className="font-system text-[0.85rem] text-dim tracking-wider uppercase">
@@ -132,15 +136,15 @@ export function FacilityBrainTest() {
       {/* Center area — options */}
       <Panel zone="center-area">
         <div className="flex flex-col items-center justify-center h-full gap-2">
-          {brainTestQuestion && brainTestOptions.length > 0 && (
+          {question && options.length > 0 && (
             <>
               {alreadySubmitted ? (
                 <div className="w-full max-w-sm flex flex-col gap-2">
-                  {brainTestOptions.map((opt, i) => (
+                  {options.map((opt, i) => (
                     <div
                       key={i}
                       className={`px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-center transition-colors ${
-                        i === submitted[brainTestChallengeIndex]
+                        i === submitted[challengeIndex]
                           ? "bg-raised text-ink border border-cold/40"
                           : "bg-surface text-dim"
                       }`}
@@ -154,7 +158,7 @@ export function FacilityBrainTest() {
                 </div>
               ) : (
                 <div className="w-full max-w-sm flex flex-col gap-2">
-                  {brainTestOptions.map((opt, i) => (
+                  {options.map((opt, i) => (
                     <button
                       key={i}
                       onClick={() => handleSelect(i)}

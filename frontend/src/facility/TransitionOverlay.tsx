@@ -80,26 +80,26 @@ interface Directive {
   subtitle: string;
 }
 
-function getDirective(phase: GamePhase): Directive | null {
-  switch (phase) {
-    case "vote":
-      return {
-        text: "DETECTION SCAN",
-        subtitle: "who sounds most human?",
-      };
-    case "vote_results":
-      return {
-        text: "RESULTS INCOMING",
-        subtitle: "scan complete",
-      };
-    default:
-      return null;
+function getDirective(phase: GamePhase, roundType: string | null): Directive | null {
+  if (phase === "active" && roundType === "task") {
+    return {
+      text: "DETECTION SCAN",
+      subtitle: "who sounds most human?",
+    };
   }
+  if (phase === "results") {
+    return {
+      text: "RESULTS INCOMING",
+      subtitle: "scan complete",
+    };
+  }
+  return null;
 }
 
 // ─── Situation Lines ───
 
-const INTERSTITIAL_PHASES = new Set<GamePhase>(["prompt", "brain_test"]);
+// Phases that represent a new round start (show round label)
+const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "active"]);
 
 function getSituationLine(
   roundNumber: number,
@@ -146,7 +146,13 @@ function TransitionOverlayContent() {
   const scores = useGameStore((s) => s.scores);
   const players = useGameStore((s) => s.players);
 
-  const isRoundStart = INTERSTITIAL_PHASES.has(phase);
+  // "prompt" is always a round start; "active" is a round start only for
+  // non-prompt minigames (brain_test). For task rounds, "active" follows
+  // "prompt" and shows a directive instead.
+  const isRoundStart =
+    phase === "prompt" ||
+    (phase === "active" && roundType === "brain_test");
+
   const voice = getVoice(roundNumber);
 
   let text: string;
@@ -158,7 +164,7 @@ function TransitionOverlayContent() {
     subtitle = voice.typeLabel(roundType);
     situationLine = getSituationLine(roundNumber, totalRounds, scores, players);
   } else {
-    const directive = getDirective(phase);
+    const directive = getDirective(phase, roundType);
     if (directive) {
       text = directive.text;
       subtitle = directive.subtitle;

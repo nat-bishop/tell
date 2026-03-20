@@ -1,9 +1,11 @@
 "use client";
 
 import { useGameStore } from "@/hooks/useGameStore";
+import { usePlayerColors } from "./usePlayerColors";
 
 export function HudPanel() {
   const { players, phase, roundNumber, scores } = useGameStore();
+  const colorMap = usePlayerColors();
 
   if (phase === "lobby" || phase === "game_over") return null;
 
@@ -20,9 +22,13 @@ export function HudPanel() {
 
       {players.map((p) => {
         const playerScore = scores[p.id] ?? 0;
+        const color = colorMap[p.id] ?? "var(--cold)";
         return (
           <div key={p.id} className="flex items-center gap-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-cold" />
+            <span
+              className="inline-block w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+            />
             <span className="font-system text-[0.6rem] tracking-[0.1em] uppercase text-ink">
               {p.alias}
             </span>

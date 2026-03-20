@@ -86,11 +86,6 @@ body::before {
   }
 }
 
-@keyframes interstitial-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
-}
-
 /* Scan-line sweep for interstitials */
 @keyframes scan-line {
   from {
@@ -105,10 +100,6 @@ body::before {
 
 .animate-interstitial-in {
   animation: interstitial-in 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.animate-interstitial-out {
-  animation: interstitial-out 300ms ease both;
 }
 
 /* Scan-line pseudo-element for interstitials */
@@ -402,15 +393,28 @@ input:focus, textarea:focus {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes panel-exit {
-  from { opacity: 1; transform: translateY(0); }
-  to { opacity: 0; transform: translateY(-4px); }
-}
-
 .animate-panel-enter {
   animation: panel-enter 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.animate-panel-exit {
-  animation: panel-exit 300ms ease both;
+/* ─── Facility background ─── */
+
+.facility-bg {
+  transition: background 1.5s ease;
+}
+
+@keyframes particle-float {
+  0% { transform: translateY(0); opacity: 0.4; }
+  50% { opacity: 0.7; }
+  100% { transform: translateY(-110vh); opacity: 0; }
+}
+
+.facility-particle {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: var(--cold);
+  mix-blend-mode: screen;
+  animation: particle-float linear infinite;
 }

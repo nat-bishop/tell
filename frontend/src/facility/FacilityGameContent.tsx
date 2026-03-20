@@ -7,22 +7,18 @@ import { FacilityNarration } from "@/facility/FacilityNarration";
 import { HudPanel } from "@/facility/HudPanel";
 import { useTimer } from "@/hooks/useTimer";
 import { FacilityProvider, useFacilityContext } from "@/facility/FacilityProvider";
-import { FacilityViewport } from "@/facility/FacilityViewport";
 import { FacilityScene } from "@/facility/FacilityScene";
 import { TransitionOverlay } from "@/facility/TransitionOverlay";
-import { RiveScene } from "@/facility/RiveScene";
-import { useFacilityCharacters } from "@/facility/useFacilityCharacters";
+import { FacilityBackground } from "@/facility/FacilityBackground";
 
 const INTERSTITIAL_PHASES = new Set<GamePhase>([
-  "prompt", "brain_test", "brain_test_results", "vote",
+  "prompt", "active", "results",
 ]);
 
 const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
   prompt: 45,
-  brain_test: 12,
-  brain_test_results: 15,
-  vote: 25,
-  vote_results: 8,
+  active: 25,
+  results: 15,
 };
 
 function ColdOpen({ playerCount }: { playerCount: number }) {
@@ -57,8 +53,7 @@ function FacilityInner() {
     phase, phaseDeadline, phaseDuration, players, actionStartsAt,
   } = useGameStore();
   const remaining = useTimer(phaseDeadline);
-  const { rive, setRive, transitionState, startTransition, snapTo } = useFacilityContext();
-  useFacilityCharacters(rive);
+  const { transitionState, startTransition, snapTo } = useFacilityContext();
 
   // Cold open state -- show once when game transitions from lobby to first round
   const [showColdOpen, setShowColdOpen] = useState(false);
@@ -118,20 +113,23 @@ function FacilityInner() {
   const hideTimer = phase === "lobby" || phase === "game_over" || showColdOpen || transitionState !== "idle";
 
   return (
-    <FacilityViewport>
-      <RiveScene onRiveReady={setRive} />
-      {!hideTimer && <FacilityTimer remaining={remaining} total={total} />}
-      <HudPanel />
-      <FacilityNarration />
-      <TransitionOverlay />
-      {showColdOpen ? (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <ColdOpen playerCount={players.length} />
-        </div>
-      ) : (
-        <FacilityScene />
-      )}
-    </FacilityViewport>
+    <div className="facility-viewport">
+      <div className="facility-vignette" />
+      <div style={{ position: "relative", zIndex: 10, width: "100%", height: "100%" }}>
+        <FacilityBackground />
+        {!hideTimer && <FacilityTimer remaining={remaining} total={total} />}
+        <HudPanel />
+        <FacilityNarration />
+        <TransitionOverlay />
+        {showColdOpen ? (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <ColdOpen playerCount={players.length} />
+          </div>
+        ) : (
+          <FacilityScene />
+        )}
+      </div>
+    </div>
   );
 }
 

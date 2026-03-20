@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from backend.minigames.brain_test import score_brain_test
 from backend.services.game_logic import (
     build_state_sync,
     check_game_over,
@@ -13,13 +14,9 @@ from backend.services.game_logic import (
     get_phase_duration,
     make_game_over_event,
     make_phase_changed_event,
-    resolve_gallery_votes,
     sanitize_players_for_client,
-    score_brain_test,
     select_next_round_type,
-    transition_to_task_prompt,
-    transition_to_vote,
-    transition_to_vote_results,
+    tally_gallery_votes,
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
@@ -147,28 +144,19 @@ class TestPhaseTransitions:
             results.add(rt)
         assert results == {RoundType.TASK, RoundType.BRAIN_TEST}
 
-    def test_transition_to_task_prompt(self):
+    def test_task_handler_setup_round(self):
+        from backend.minigames.task import TaskHandler
+
+        handler = TaskHandler()
         state, _ = make_standard_game()
         state.round_number = 0
-        result = transition_to_task_prompt(state, 45)
-        assert result.phase == GamePhase.PROMPT
-        assert result.round_number == 1
-        assert result.current_round is not None
-        assert result.current_round.round_type == RoundType.TASK
-        assert result.current_round.prompt_text is not None
-        assert len(result.used_prompt_indices) >= 1
-
-    def test_transition_to_vote(self):
-        state, _ = make_standard_game()
-        result = transition_to_vote(state, 25)
-        assert result.phase == GamePhase.VOTE
-        assert result.phase_deadline is not None
-
-    def test_transition_to_vote_results(self):
-        state, _ = make_standard_game()
-        result = transition_to_vote_results(state, 8)
-        assert result.phase == GamePhase.VOTE_RESULTS
-        assert result.phase_deadline is not None
+        settings = SimpleNamespace(prompt_duration=45)
+        handler.setup_round(state, settings)
+        assert state.round_number == 1
+        assert state.current_round is not None
+        assert state.current_round.round_type == RoundType.TASK
+        assert state.current_round.prompt_text is not None
+        assert len(state.used_prompt_indices) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -240,15 +228,15 @@ class TestStateSanitization:
         assert sync["answers"] == {}  # all answers hidden during PROMPT
         assert sync["my_answer"] == "my answer"  # own answer visible
 
-    def test_build_state_sync_shows_answers_in_vote(self):
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
+    def test_build_state_sync_shows_answers_in_active(self):
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["answers"] == {"h1": "my answer", "h2": "other"}
 
-    def test_build_state_sync_includes_my_vote_during_vote(self):
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
+    def test_build_state_sync_includes_my_vote_during_active_task(self):
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.gallery_votes = {"h1": "a1"}
 
         sync = build_state_sync(state, "h1", seq=1)
@@ -284,9 +272,9 @@ class TestStateSanitization:
         assert event.scores["h1"] == 3
 
     def test_make_phase_changed_event(self):
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         event = make_phase_changed_event(state, seq=5)
-        assert event.phase == "vote"
+        assert event.phase == "active"
         assert event.round_number == 1
         assert event.seq == 5
 
@@ -298,10 +286,14 @@ class TestStateSanitization:
 
 class TestDuelPrompts:
     def test_duel_prompt_indices_tracked(self):
+        from backend.minigames.task import TaskHandler
+
+        handler = TaskHandler()
         state, _ = make_standard_game()
         state.round_number = 0
-        result = transition_to_task_prompt(state, 45)
-        assert len(result.used_prompt_indices) >= 1
+        settings = SimpleNamespace(prompt_duration=45)
+        handler.setup_round(state, settings)
+        assert len(state.used_prompt_indices) >= 1
 
 
 # ---------------------------------------------------------------------------
@@ -326,17 +318,17 @@ class TestGetPhaseDuration:
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.PROMPT) == 45
 
-    def test_vote(self):
+    def test_active_task(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.VOTE) == 25
+        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.TASK) == 25
 
-    def test_vote_results(self):
+    def test_results_task(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.VOTE_RESULTS) == 8
+        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.TASK) == 8
 
-    def test_brain_test(self):
+    def test_active_brain_test(self):
         s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.BRAIN_TEST) == 85
+        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.BRAIN_TEST) == 85
 
     def test_unknown_phase(self):
         s = _mock_settings()
@@ -423,41 +415,41 @@ class TestScoreBrainTest:
 
 
 class TestGalleryVoteScoring:
-    def _seq_fn(self):
-        n = 0
-
-        def fn():
-            nonlocal n
-            n += 1
-            return n
-
-        return fn
-
-    def test_resolve_gallery_votes_basic(self):
-        """3 votes for player a1 → a1 gets -3."""
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
+    def test_tally_gallery_votes_basic(self):
+        """3 votes for player a1."""
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
 
-        state, results_event = resolve_gallery_votes(state, self._seq_fn())
-        a1 = next(p for p in state.players if p.id == "a1")
-        assert a1.score == -3
-        assert results_event.vote_counts["a1"] == 3
-        assert results_event.scores["a1"] == -3
+        vote_counts = tally_gallery_votes(state)
+        assert vote_counts["a1"] == 3
 
-    def test_resolve_gallery_votes_no_votes(self):
-        """Nobody voted → no score changes."""
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
+    def test_task_handler_build_results(self):
+        """3 votes for player a1 → a1 gets -3."""
+        from backend.minigames.task import TaskHandler
+
+        handler = TaskHandler()
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+        state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
+
+        payload, score_deltas = handler.build_results(state)
+        assert payload["vote_counts"]["a1"] == 3
+        assert score_deltas["a1"] == -3
+
+    def test_tally_gallery_votes_no_votes(self):
+        """Nobody voted → all counts 0."""
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.gallery_votes = {}
 
-        state, results_event = resolve_gallery_votes(state, self._seq_fn())
-        for p in state.players:
-            assert p.score == 0
-        for _pid, count in results_event.vote_counts.items():
+        vote_counts = tally_gallery_votes(state)
+        for _pid, count in vote_counts.items():
             assert count == 0
 
-    def test_resolve_gallery_votes_spread(self):
+    def test_task_handler_build_results_spread(self):
         """Votes spread across players."""
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
+        from backend.minigames.task import TaskHandler
+
+        handler = TaskHandler()
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         state.current_round.gallery_votes = {
             "h1": "a1",
             "h2": "a2",
@@ -465,20 +457,20 @@ class TestGalleryVoteScoring:
             "a2": "h2",
         }
 
-        state, _results_event = resolve_gallery_votes(state, self._seq_fn())
+        _payload, score_deltas = handler.build_results(state)
         # Each got 1 vote = -1
         for pid in ("h1", "h2", "a1", "a2"):
-            p = next(pp for pp in state.players if pp.id == pid)
-            assert p.score == -1
+            assert score_deltas[pid] == -1
 
-    def test_resolve_gallery_votes_all_on_one(self):
+    def test_task_handler_build_results_all_on_one(self):
         """7 votes on one player → -7."""
-        state, _ = make_standard_game(phase=GamePhase.VOTE)
-        # All 7 other players vote for h1
+        from backend.minigames.task import TaskHandler
+
+        handler = TaskHandler()
+        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
         other_ids = [p.id for p in state.players if p.id != "h1"]
         state.current_round.gallery_votes = dict.fromkeys(other_ids, "h1")
 
-        state, results_event = resolve_gallery_votes(state, self._seq_fn())
-        h1 = next(p for p in state.players if p.id == "h1")
-        assert h1.score == -7
-        assert results_event.vote_counts["h1"] == 7
+        payload, score_deltas = handler.build_results(state)
+        assert payload["vote_counts"]["h1"] == 7
+        assert score_deltas["h1"] == -7
