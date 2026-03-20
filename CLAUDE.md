@@ -254,16 +254,52 @@ All scores are integers scaled by 100 for granularity without floats.
 ### Matchmaking
 `MatchmakingService` (singleton in `deps.py`) maintains a rolling lobby queue. Players join via `POST /matchmaking/join`, connect to `GET /matchmaking/events` SSE for status. When `mm_min_humans` (default 2) are queued, a countdown fires. After `mm_countdown_seconds` (20s), `_fire_game()` pops the queue (capped at `mm_max_humans`), creates a real game, fills to 8 total with AI, and calls `initialize_and_start_game()`. All lobby clients receive `game_assigned` event and redirect. Frontend: `/queue` page.
 
-### LLM-powered features
-- **Narrator** (persistent show host): `generate_narration(trigger, context)` fires as a non-blocking background task at: `game_start`, `post_submissions`, `between_rounds`, `game_over`. Dry, literary voice (the robot running the test). 3s timeout for most triggers, 5s for `game_over`. Result stored in `state.narrator_context` (last 5 kept for continuity) and broadcast as `NarrationEvent`. Never blocks game flow. `_fire_narration()` + `_build_narrator_context()` in `transitions.py`.
-- **AI answers** (PROMPT): AI players generate answers trying to pass as human. System prompt is personality-driven via `build_system_prompt()`.
-- **AI votes** (ACTIVE / task): Scheduled by `TaskHandler.on_active_start()` via `_ai_vote_task()`.
-- **AI brain test** (ACTIVE / brain_test): Scheduled by `BrainTestHandler._brain_loop()` via `on_brain_test_challenge()`.
-- **AI wager guesses** (ACTIVE / wager): Character agent with `WagerGuessResponse` structured output, maintains conversation history. Scheduled by `WagerHandler._wager_loop()` via `on_wager_guess()`.
-- **AI wager bets** (ACTIVE / wager): Character agent with `WagerBetResponse` structured output, maintains conversation history. Scheduled via `on_wager_bet()`.
-- **AI signal transform** (PROMPT / signal): `_ai_answer_task` detects `round_type == SIGNAL` and uses `build_signal_transform_prompt` instead of `build_answer_prompt`.
-- **AI signal guess** (ACTIVE / signal): `on_signal_sub_round()` schedules `_ai_signal_guess_task` for each non-featured AI player.
-- **Signal judging** (after all sub-rounds): `judge_signal_guesses()` batch-judges via LLM with Y/N format, parallelized per featured player via `asyncio.gather`.
+### AI agent architecture
+
+All AI player actions go through a single `ai_agent` (`Agent[AICallContext, str]`) with per-player conversation history. Each AI player is one coherent person who remembers all their previous actions across the game.
+
+**Prompt structure** (cacheable system prompt + volatile user message):
+- **System prompt** (stable per-player): `get_personality_instructions(name)` returns `GAME_PREMISE + CHARACTER_RULES + PERSONALITY_BEHAVIOR[name]`. Computed once at game start, stored in `_personality_instructions` dict in `ai_scheduler.py`. Passed to every `ai_agent.run()` via `instructions=`.
+- **User message** (volatile per-call): Built by `build_*_prompt()` functions in `prompts.py`. Includes round context (alias, round number, players) + action-specific content.
+
+**Structured output with validation_context**:
+PydanticAI's `validation_context` is a **constructor** parameter, not a `run()` parameter. To inject per-call validation data (valid indices for brain test, valid aliases for vote/bet), use a lightweight deps dataclass:
+```python
+@dataclass
+class AICallContext:
+    valid: list | None = None  # valid indices or aliases for validators
+
+ai_agent: Agent[AICallContext, str] = Agent(
+    ...,
+    deps_type=AICallContext,
+    validation_context=lambda ctx: ctx.deps.valid,  # reads from deps at call time
+)
+
+# At call site:
+result = await ai_agent.run(
+    user_prompt, instructions=instructions, output_type=BrainTestResponse,
+    deps=AICallContext(valid=[0, 1, 2, 3]),  # per-call validation data
+)
+```
+Validators check `info.context is not None` before validating. PydanticAI auto-retries on validation failure (up to `retries=N`). This replaces manual string parsing and fuzzy matching.
+
+**Conversation history**: Stored per AI player per game in `_conversation_history` (ai_scheduler.py). Every generate function returns `(result, updated_history)`. History is written inside the lock after the state mutation. All action types (answer, vote, brain test, wager, signal guess) share one history per player.
+
+**Three agents**:
+- `ai_agent` — All player actions. Personality via `instructions=`. History via `message_history=`. Validation via `deps=AICallContext(valid=...)`.
+- `judge_agent` — Signal judging only. System-level, not a player. `SignalJudgment` structured output. No personality or history.
+- `narrator_agent` — Narrator. Own per-game history. Static `NARRATOR_SYSTEM_PROMPT`.
+
+**LLM-powered features**:
+- **Narrator**: `generate_narration(trigger, context)` fires non-blocking at: `game_start`, `post_submissions`, `between_rounds`, `game_over`. 3s/5s timeout. `_fire_narration()` in `transitions.py`.
+- **AI answers** (PROMPT): `generate_answer()` with personality. For signal, only transmitter AIs answer.
+- **AI votes** (ACTIVE / task): `decide_gallery_vote()` with `PlayerPickResponse` + `validation_context`. Personality `vote_strategy` injected into prompt.
+- **AI brain test** (ACTIVE / brain_test): `generate_brain_test_answer()` with `BrainTestResponse` + `validation_context`.
+- **AI wager guesses** (ACTIVE / wager): `generate_wager_guess()` with `WagerGuessResponse`.
+- **AI wager bets** (ACTIVE / wager): `generate_wager_bet()` with `PlayerPickResponse` + `validation_context`.
+- **AI signal transform** (PROMPT / signal): `generate_answer()` with `build_signal_transform_prompt`. Only for transmitter AIs.
+- **AI signal guess** (ACTIVE / signal): `generate_signal_guess()` with `SignalGuessResponse`. For all non-transmitter AIs.
+- **Signal judging** (after all sub-rounds): `judge_signal_guesses()` via `judge_agent` with `SignalJudgment` structured output (graded 0/1/2). Parallelized per transmitter. `_fuzzy_match` fallback.
 
 ## Gotchas
 
@@ -273,14 +309,15 @@ All scores are integers scaled by 100 for granularity without floats.
 - **`schemas/` is top-level**: Imported by both `backend/` and `scripts/`. Don't nest under `backend/`.
 - **No database**: All state is in-memory. Server restart kills all games. Completed games are recorded to `recordings/{game_id}.json` (toggle with `TELL_RECORD_GAMES=false`).
 - **Circular import between ai_scheduler and transitions**: Both import each other's functions inside async functions (not at top level) to avoid circular dependency at module init. Also: `BrainTestHandler._brain_loop`, `WagerHandler._wager_loop`, and `SignalHandler._signal_loop` all import `do_active_complete` at runtime for the same reason.
-- **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities. Must be called before `on_phase_change()`.
-- **Task scoring is negative**: Votes received = **negative** points. Players avoid being the most-suspected human/bot. High score means fewer suspicion votes.
+- **AI personalities assigned at game start**: `assign_personalities()` in `ai_scheduler.py` maps player IDs to personalities and pre-computes stable `instructions` strings. Must be called before `on_phase_change()`.
+- **AI conversation history is shared across all action types**: One history per player per game. Answer, vote, brain test, wager, and signal guess all append to the same history. This lets AI "remember" previous actions.
+- **Task scoring is negative**: Votes received = **-100** points. Players avoid being the most-suspected human/bot. High score means fewer suspicion votes.
 - **Gallery vote route**: `/vote` (not `/matchup-vote`). Requires `phase == ACTIVE` and `round_type == TASK`. Votes are changeable (overwrite allowed).
 - **Brain test route**: `/brain-test-answer` requires `phase == ACTIVE` and `round_type == BRAIN_TEST`.
 - **Sub-round loop in handler**: `BrainTestHandler._brain_loop` is an `asyncio.Task` started by `on_active_start()`. Each iteration broadcasts `SubRoundEvent`, calls `on_brain_test_challenge()` for AI scheduling, sleeps `sub_duration`. After all challenges, cancels safety timer and calls `do_active_complete`.
 - **`do_active_complete` is minigame-agnostic**: Calls `handler.build_results()`, applies score deltas, broadcasts `RoundResultsEvent`, then either → RESULTS (if `meta.has_results`) or next round.
 - **`do_results_complete`**: Only reached for round types with `has_results=True`. Checks game over or starts next round.
-- **Brain test scoring**: `score_brain_test()` in `brain_test.py`. Pure correctness: `selected_index == correct_index` awards 1 point. Responses store an int, not a string.
+- **Brain test scoring**: `score_brain_test()` in `brain_test.py`. Pure correctness: `selected_index == correct_index` awards 100 points. Responses store an int, not a string.
 - **No elimination**: No spectator mode. All players participate all 5 rounds.
 - **Game ends by round count**: `check_game_over()` returns `None` until `state.round_number >= state.total_rounds`.
 - **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` (roles + scores revealed) then `GameOverEvent`.
@@ -296,13 +333,16 @@ All scores are integers scaled by 100 for granularity without floats.
 - **Wager routes validate sub-round phase**: Guess route rejects during bet sub-rounds and vice versa. Routes check `current_sub_round % 2` and `current_sub_round // 2`.
 - **Wager bet route validates target has a guess**: `target_player_id` must be in `q.guesses` for the current question. Prevents betting on a player who timed out.
 - **`WagerHandler._wager_loop`** imports `do_active_complete` at runtime to avoid circular dep (same pattern as `_brain_loop`).
-- **Signal phrase route**: `GET /{game_id}/signal-phrase?player_id=X` returns per-player secret phrase + constraint. Only works during PROMPT phase for signal rounds.
-- **Signal guess route**: `POST /{game_id}/signal-guess` requires `phase == ACTIVE`, `round_type == SIGNAL`. Featured player cannot guess their own phrase. Overwrites allowed.
-- **Signal sub-round loop**: `SignalHandler._signal_loop` iterates `signal_player_order`, broadcasting `SubRoundEvent` per player. After all sub-rounds, calls `_judge_all_guesses` (parallelized LLM) then `do_active_complete`.
+- **Signal: 3 transmitters per round**: `setup_round()` selects 3 random transmitters (not all players). `used_signal_transmitter_ids` on `TellGameState` tracks who has transmitted to avoid repeats across rounds. Resets when all players have been used.
+- **Signal phrase route**: `GET /{game_id}/signal-phrase?player_id=X` returns phrase + constraint. Only works for transmitters during PROMPT phase.
+- **Signal answer route**: `POST /answer` rejects non-transmitters during signal PROMPT phase.
+- **Signal guess route**: `POST /{game_id}/signal-guess` requires `phase == ACTIVE`, `round_type == SIGNAL`. Transmitters cannot guess. Overwrites allowed.
+- **Signal sub-round loop**: `SignalHandler._signal_loop` iterates 3 transmitters in `signal_player_order`, broadcasting `SubRoundEvent` per transmitter. After all 3 sub-rounds, calls `_judge_all_guesses` (parallelized LLM with graded 0/1/2 scoring) then `do_active_complete`.
+- **Signal judgments are graded ints**: `signal_judgments: dict[str, dict[str, int]]` — 0 (wrong), 1 (close), 2 (correct). Not booleans.
 - **Signal guesses/judgments keyed by featured_player_id**: Not sub-round index. JSON serializes int keys as strings — player ID avoids this.
 - **Signal PROMPT duration is 20s**: Shorter than Task (45s). `get_prompt_duration()` on the handler is used by `_start_next_round` and `get_phase_duration`.
 - **Signal prompts are concrete scenarios**: "a dog chasing a squirrel", not idioms. Must be visually evocable for constraint-based transformation.
-- **Signal `signal_player_order`**: Snapshot at `setup_round` time. Without this, player list order shifts (disconnect/reconnect) could break sub-round iteration.
+- **Signal `signal_player_order`**: Contains only the 3 transmitter IDs. Snapshot at `setup_round` time.
 
 ## Code Conventions
 
