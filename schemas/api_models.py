@@ -50,6 +50,8 @@ class StateSyncEvent(GameEvent):
     total_rounds: int = 5
     # Gallery vote state (reconnection)
     my_vote: str | None = None
+    # Signal reconnection
+    signal_phrase: str | None = None
     # Generic reconnection state
     sub_round_index: int | None = None
     sub_round_payload: dict | None = None
@@ -178,6 +180,21 @@ class SubmitWagerBetRequest(BaseModel):
     player_id: str
     question_index: int
     target_player_id: str
+
+
+class SubmitSignalGuessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
+    guess: str
+    sub_round_index: int
+
+
+class SignalPhraseResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phrase: str
+    constraint: str
 
 
 # --- Response models ---

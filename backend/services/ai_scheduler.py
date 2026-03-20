@@ -22,6 +22,7 @@ from backend.llm.agents import (
 from backend.llm.personalities import PERSONALITIES, Personality
 from backend.llm.prompts import (
     build_answer_prompt,
+    build_signal_transform_prompt,
 )
 from backend.services.game_logic import (
     fill_missing_answers,
@@ -251,7 +252,20 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         deps = _build_deps(game_id, player_id)
         if not deps:
             return None
-        deps.action_prompt = build_answer_prompt(deps)
+
+        if deps.round_type == RoundType.SIGNAL:
+            # Signal: transform the secret phrase under the constraint
+            repo = get_game_repository()
+            session = repo.get(game_id)
+            if not session or not session.state.current_round:
+                return None
+            rs = session.state.current_round
+            phrase = rs.signal_phrases.get(player_id, "")
+            constraint = rs.signal_constraint
+            deps.action_prompt = build_signal_transform_prompt(phrase, constraint)
+        else:
+            deps.action_prompt = build_answer_prompt(deps)
+
         return await generate_answer(deps, history)
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
@@ -652,6 +666,76 @@ async def _ai_wager_bet_task(
             game_id=game_id,
             player_id=player_id,
         )
+
+
+async def on_signal_sub_round(game_id: str, sub_round_index: int, featured_player_id: str) -> None:
+    """Schedule AI guess tasks for a Signal sub-round."""
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        return
+
+    ai_players = [
+        p for p in session.state.players if p.role == PlayerRole.AI and p.id != featured_player_id
+    ]
+    if not ai_players:
+        return
+
+    tasks: list[asyncio.Task] = []
+    for player in ai_players:
+        delay = random.uniform(2, 8)
+        task = asyncio.create_task(
+            _ai_signal_guess_task(game_id, player.id, featured_player_id, sub_round_index, delay)
+        )
+        tasks.append(task)
+    _ai_tasks.setdefault(game_id, []).extend(tasks)
+
+
+async def _ai_signal_guess_task(
+    game_id: str,
+    player_id: str,
+    featured_player_id: str,
+    sub_round_index: int,
+    delay: float,
+) -> None:
+    """AI player guesses the original phrase in a Signal sub-round."""
+
+    async def generate() -> str | None:
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session:
+            return None
+        rs = session.state.current_round
+        if not rs or rs.current_sub_round != sub_round_index:
+            return None
+        existing = rs.signal_guesses.get(featured_player_id, {})
+        if player_id in existing:
+            return None
+
+        transformation = rs.answers.get(featured_player_id, "")
+        constraint = rs.signal_constraint
+
+        from backend.llm.agents import generate_signal_guess
+
+        return await generate_signal_guess(transformation, constraint, game_id=game_id)
+
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        rs = session.state.current_round
+        if not rs or rs.current_sub_round != sub_round_index:
+            return
+        if featured_player_id not in rs.signal_guesses:
+            rs.signal_guesses[featured_player_id] = {}
+        rs.signal_guesses[featured_player_id][player_id] = result
+        log.info(
+            "ai_signal_guess",
+            game_id=game_id,
+            player_id=player_id,
+            sub_round_index=sub_round_index,
+        )
+
+    await _run_ai_task(
+        game_id, player_id, delay, GamePhase.ACTIVE, generate, apply, "ai_signal_guess"
+    )
 
 
 def get_narrator_history(game_id: str) -> list[ModelMessage]:

@@ -138,12 +138,17 @@ class TestPhaseTransitions:
             assert rt != RoundType.BRAIN_TEST
 
     def test_select_next_round_type_all_types(self):
-        """All round types can be selected."""
+        """All registered round types can be selected."""
         results = set()
-        for _ in range(200):
+        for _ in range(300):
             rt = select_next_round_type(None)
             results.add(rt)
-        assert results == {RoundType.TASK, RoundType.BRAIN_TEST, RoundType.WAGER}
+        assert results == {RoundType.TASK, RoundType.BRAIN_TEST, RoundType.WAGER, RoundType.SIGNAL}
+
+    def test_select_next_round_type_no_repeat_signal(self):
+        for _ in range(50):
+            rt = select_next_round_type(RoundType.SIGNAL)
+            assert rt != RoundType.SIGNAL
 
     def test_task_handler_setup_round(self):
         from backend.minigames.task import TaskHandler
@@ -313,6 +318,10 @@ def _mock_settings(**overrides):
         "wager_sub_round_duration": 15,
         "wager_questions": 3,
         "wager_results_duration": 15,
+        "signal_prompt_duration": 20,
+        "signal_safety_duration": 120,
+        "signal_results_duration": 15,
+        "signal_sub_round_duration": 12,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -342,6 +351,18 @@ class TestGetPhaseDuration:
     def test_results_wager(self):
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.RESULTS, RoundType.WAGER) == 15
+
+    def test_prompt_signal(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.PROMPT, RoundType.SIGNAL) == 20
+
+    def test_active_signal(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.SIGNAL) == 120
+
+    def test_results_signal(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.SIGNAL) == 15
 
     def test_unknown_phase(self):
         s = _mock_settings()

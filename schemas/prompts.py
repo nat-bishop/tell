@@ -622,6 +622,142 @@ DUEL_PROMPTS: list[DuelPrompt] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Signal constraints + phrases
+# ---------------------------------------------------------------------------
+
+
+class SignalConstraint(BaseModel):
+    text: str
+    instruction: str  # what the player must do
+
+
+SIGNAL_CONSTRAINTS: list[SignalConstraint] = [
+    SignalConstraint(
+        text="Only questions",
+        instruction="Describe the phrase using only questions. No statements allowed.",
+    ),
+    SignalConstraint(
+        text="No nouns",
+        instruction="Describe the phrase without using any nouns.",
+    ),
+    SignalConstraint(
+        text="Opposite day",
+        instruction="Describe the opposite of the phrase. Everything is reversed.",
+    ),
+    SignalConstraint(
+        text="One word at a time",
+        instruction="Describe the phrase using exactly five words, separated by periods.",
+    ),
+    SignalConstraint(
+        text="As a recipe",
+        instruction="Describe the phrase as if it were a cooking recipe.",
+    ),
+    SignalConstraint(
+        text="News headline",
+        instruction="Describe the phrase as a breaking news headline.",
+    ),
+    SignalConstraint(
+        text="Movie trailer voice",
+        instruction="Describe the phrase as a dramatic movie trailer narrator would.",
+    ),
+    SignalConstraint(
+        text="Complaint letter",
+        instruction="Describe the phrase as a formal complaint letter.",
+    ),
+    SignalConstraint(
+        text="Children's story",
+        instruction="Describe the phrase as the opening of a children's book.",
+    ),
+    SignalConstraint(
+        text="Text message",
+        instruction="Describe the phrase as a casual text message to a friend. Use abbreviations.",
+    ),
+    SignalConstraint(
+        text="Nature documentary",
+        instruction="Describe the phrase as a nature documentary narrator would.",
+    ),
+    SignalConstraint(
+        text="As instructions",
+        instruction="Describe the phrase as a set of step-by-step instructions.",
+    ),
+    SignalConstraint(
+        text="Poetry",
+        instruction="Describe the phrase as a short poem (2-4 lines).",
+    ),
+    SignalConstraint(
+        text="Sports commentary",
+        instruction="Describe the phrase as live sports commentary.",
+    ),
+    SignalConstraint(
+        text="Whisper",
+        instruction="Describe the phrase as quietly and mysteriously as possible.",
+    ),
+]
+
+
+SIGNAL_PHRASES: list[str] = [
+    "a dog chasing a squirrel",
+    "forgetting someone's name at a party",
+    "burning dinner",
+    "a cat knocking things off a table",
+    "getting stuck in an elevator",
+    "finding money in your old jacket",
+    "a kid refusing to eat vegetables",
+    "being the last one picked for a team",
+    "waking up five minutes before your alarm",
+    "stepping on a Lego barefoot",
+    "trying to parallel park while people watch",
+    "realizing you left your phone at home",
+    "a bird stealing food from your plate",
+    "getting caught in the rain without an umbrella",
+    "the first sip of coffee in the morning",
+    "a toddler discovering bubbles",
+    "your WiFi cutting out during a video call",
+    "finding the last slice of pizza",
+    "accidentally waving back at a stranger",
+    "a squirrel raiding a bird feeder",
+    "trying to stay awake during a boring meeting",
+    "the moment you realize the milk is expired",
+    "a dog meeting its reflection for the first time",
+    "losing your keys and finding them in your hand",
+    "someone singing in the shower",
+    "running to catch a bus and missing it",
+    "a cat sitting in a box that's too small",
+    "getting a paper cut",
+    "the awkward silence in an elevator with strangers",
+    "watching someone trip and pretending you didn't see",
+    "a kid discovering snow for the first time",
+    "burning your tongue on hot food",
+    "trying to open a pickle jar",
+    "a raccoon going through garbage cans",
+    "falling asleep on public transport and missing your stop",
+    "the relief of finding a public restroom",
+    "a baby laughing at peek-a-boo",
+    "your favorite song coming on the radio",
+    "stepping in a puddle with fresh socks",
+    "trying to fold a fitted sheet",
+]
+
+
+def select_signal_constraint(used_indices: list[int]) -> tuple[int, SignalConstraint]:
+    """Select a signal constraint that hasn't been used yet."""
+    valid = [(i, c) for i, c in enumerate(SIGNAL_CONSTRAINTS) if i not in used_indices]
+    if not valid:
+        valid = list(enumerate(SIGNAL_CONSTRAINTS))
+    idx, constraint = random.choice(valid)
+    return idx, constraint
+
+
+def select_signal_phrases(count: int, used_indices: list[int]) -> list[tuple[int, str]]:
+    """Select unique signal phrases that haven't been used yet."""
+    valid = [(i, p) for i, p in enumerate(SIGNAL_PHRASES) if i not in used_indices]
+    if len(valid) < count:
+        # Not enough unused — reset and pick from all
+        valid = list(enumerate(SIGNAL_PHRASES))
+    return random.sample(valid, min(count, len(valid)))
+
+
 def select_duel_prompt(
     used_indices: list[int],
     last_category: str | None,

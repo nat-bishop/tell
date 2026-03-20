@@ -44,6 +44,8 @@ export interface StateSyncData {
   scores: Record<string, number>;
   total_rounds: number;
   my_vote?: string | null;
+  // Signal reconnection
+  signal_phrase?: string | null;
   // Reconnection state
   sub_round_index?: number | null;
   sub_round_payload?: SubRoundPayload | null;
@@ -115,6 +117,13 @@ export type SubRoundPayload =
       unit: string;
       total_questions: number;
       guesses?: Record<string, number>;
+    }
+  | {
+      round_type: "signal";
+      featured_player_id: string;
+      featured_alias: string;
+      transformation: string;
+      constraint: string;
     };
 
 // Generic round results payload (discriminated by round_type in the event)
@@ -144,6 +153,18 @@ export type RoundResultsPayload =
         guesses: Record<string, number>;
         bets: Record<string, string>;
         closest_ids: string[];
+      }>;
+    }
+  | {
+      round_type: "signal";
+      constraint: string;
+      results: Record<string, {
+        original_phrase: string;
+        transformation: string;
+        featured_alias: string;
+        guesses: Record<string, string>;
+        judgments: Record<string, boolean>;
+        transmitter_bonus: boolean;
       }>;
     };
 
@@ -232,6 +253,9 @@ interface GameState {
   roundResults: RoundResultsPayload | null;
   roundScores: Record<string, number> | null;
 
+  // Signal
+  signalPhrase: string | null;
+
   // Gallery vote
   votedForId: string | null;
   voteCount: number;
@@ -291,6 +315,7 @@ const initialState = {
   subRoundPayload: null as SubRoundPayload | null,
   roundResults: null as RoundResultsPayload | null,
   roundScores: null as Record<string, number> | null,
+  signalPhrase: null as string | null,
   votedForId: null as string | null,
   voteCount: 0,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
@@ -321,6 +346,7 @@ export const useGameStore = create<GameState>((set) => ({
       scores: data.scores || {},
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
+      signalPhrase: data.signal_phrase ?? null,
       votedForId: data.my_vote ?? null,
       subRoundPayload: data.sub_round_payload ?? null,
       subRoundIndex: data.sub_round_index ?? 0,
@@ -385,6 +411,7 @@ export const useGameStore = create<GameState>((set) => ({
         narrationTrigger: stale ? null : s.narrationTrigger,
         narrationReceivedAt: stale ? null : s.narrationReceivedAt,
         // Generic round state reset
+        signalPhrase: null,
         subRoundPayload: null,
         subRoundIndex: 0,
         roundResults: null,

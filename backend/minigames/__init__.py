@@ -23,12 +23,14 @@ def get_handler(round_type: RoundType) -> MinigameHandler:
 
 def _register_builtins() -> None:
     from backend.minigames.brain_test import BrainTestHandler
+    from backend.minigames.signal import SignalHandler
     from backend.minigames.task import TaskHandler
     from backend.minigames.wager import WagerHandler
 
     register(TaskHandler())
     register(BrainTestHandler())
     register(WagerHandler())
+    register(SignalHandler())
 
 
 _register_builtins()

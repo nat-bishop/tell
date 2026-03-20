@@ -9,11 +9,15 @@ import { FacilityVoteResults } from "@/facility/phases/FacilityVoteResults";
 import { FacilityGameOver } from "@/facility/phases/FacilityGameOver";
 import { FacilityBrainTest } from "@/facility/phases/FacilityBrainTest";
 import { FacilityWager } from "@/facility/phases/FacilityWager";
+import { FacilitySignalPrompt } from "@/facility/phases/FacilitySignalPrompt";
+import { FacilitySignalActive } from "@/facility/phases/FacilitySignalActive";
+import { FacilitySignalResults } from "@/facility/phases/FacilitySignalResults";
 
-const MINIGAME_COMPONENTS: Record<string, { Active: React.FC; Results: React.FC }> = {
+const MINIGAME_COMPONENTS: Record<string, { Active: React.FC; Results: React.FC; Prompt?: React.FC }> = {
   task: { Active: FacilityVote, Results: FacilityVoteResults },
   brain_test: { Active: FacilityBrainTest, Results: FacilityBrainTest },
   wager: { Active: FacilityWager, Results: FacilityWager },
+  signal: { Active: FacilitySignalActive, Results: FacilitySignalResults, Prompt: FacilitySignalPrompt },
 };
 
 export function FacilityScene() {
@@ -28,7 +32,7 @@ export function FacilityScene() {
   return (
     <>
       {phase === "lobby" && <FacilityLobby />}
-      {phase === "prompt" && <FacilityPrompt />}
+      {phase === "prompt" && (minigame?.Prompt ? <minigame.Prompt /> : <FacilityPrompt />)}
       {phase === "active" && minigame?.Active && <minigame.Active />}
       {phase === "results" && minigame?.Results && <minigame.Results />}
       {phase === "game_over" && <FacilityGameOver />}

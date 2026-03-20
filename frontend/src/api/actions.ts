@@ -108,6 +108,38 @@ export function submitWagerBet(
   });
 }
 
+// --- Signal ---
+
+export interface SignalPhraseResponse {
+  phrase: string;
+  constraint: string;
+}
+
+export function getSignalPhrase(
+  gameId: string,
+  playerId: string,
+): Promise<SignalPhraseResponse> {
+  return apiFetch<SignalPhraseResponse>(
+    `/games/${gameId}/signal-phrase?player_id=${playerId}`,
+  );
+}
+
+export function submitSignalGuess(
+  gameId: string,
+  playerId: string,
+  guess: string,
+  subRoundIndex: number,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/signal-guess`, {
+    method: "POST",
+    body: JSON.stringify({
+      player_id: playerId,
+      guess,
+      sub_round_index: subRoundIndex,
+    }),
+  });
+}
+
 // --- Matchmaking ---
 
 export interface MatchmakingJoinResponse {

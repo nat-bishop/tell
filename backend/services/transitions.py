@@ -442,7 +442,8 @@ async def _start_next_round(game_id: str, session: TellGameSession) -> None:
     state.round_types.append(next_round_type)
 
     if handler.meta.has_prompt:
-        transition_to_phase(state, GamePhase.PROMPT, settings.prompt_duration)
+        prompt_dur = handler.get_prompt_duration(settings)
+        transition_to_phase(state, GamePhase.PROMPT, prompt_dur)
         round_state = state.current_round
         await cm.broadcast(
             game_id,
@@ -455,7 +456,7 @@ async def _start_next_round(game_id: str, session: TellGameSession) -> None:
                 round_type=next_round_type,
             ),
         )
-        await start_phase_timer(game_id, GamePhase.PROMPT)
+        await start_phase_timer(game_id, GamePhase.PROMPT, next_round_type)
         await _notify_ai(game_id, GamePhase.PROMPT)
     else:
         transition_to_phase(

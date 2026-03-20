@@ -26,10 +26,12 @@ from schemas.api_models import (
     JoinGameRequest,
     JoinGameResponse,
     PlayerJoinedEvent,
+    SignalPhraseResponse,
     StartGameRequest,
     StatusResponse,
     SubmitAnswerRequest,
     SubmitBrainTestAnswerRequest,
+    SubmitSignalGuessRequest,
     SubmitVoteRequest,
     SubmitWagerBetRequest,
     SubmitWagerGuessRequest,
@@ -407,6 +409,84 @@ async def submit_wager_bet(game_id: str, req: SubmitWagerBetRequest) -> dict[str
             player_id=req.player_id,
             question_index=req.question_index,
             target=req.target_player_id,
+        )
+
+    return {"status": "ok"}
+
+
+@router.get("/{game_id}/signal-phrase", response_model=SignalPhraseResponse)
+async def get_signal_phrase(game_id: str, player_id: str) -> SignalPhraseResponse:
+    """Get the player's secret phrase and constraint for a Signal round."""
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Game not found")
+
+    state = session.state
+    if state.phase != GamePhase.PROMPT:
+        raise HTTPException(status_code=400, detail="Not in prompt phase")
+
+    rs = state.current_round
+    if not rs or rs.round_type != RoundType.SIGNAL:
+        raise HTTPException(status_code=400, detail="Not a signal round")
+
+    phrase = rs.signal_phrases.get(player_id)
+    if not phrase:
+        raise HTTPException(status_code=400, detail="Player not in this round")
+
+    return SignalPhraseResponse(phrase=phrase, constraint=rs.signal_constraint)
+
+
+@router.post("/{game_id}/signal-guess", response_model=StatusResponse)
+async def submit_signal_guess(game_id: str, req: SubmitSignalGuessRequest) -> dict[str, str]:
+    """Submit a guess for the current Signal sub-round."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        rs = state.current_round
+        if not rs or rs.round_type != RoundType.SIGNAL:
+            raise HTTPException(status_code=400, detail="Not a signal round")
+
+        player = get_player_by_id(state, req.player_id)
+        if not player:
+            raise HTTPException(status_code=400, detail="Player not found")
+
+        if req.sub_round_index != rs.current_sub_round:
+            raise HTTPException(status_code=400, detail="Wrong sub-round")
+
+        if req.sub_round_index >= len(rs.signal_player_order):
+            raise HTTPException(status_code=400, detail="Invalid sub-round index")
+
+        featured_pid = rs.signal_player_order[req.sub_round_index]
+
+        if req.player_id == featured_pid:
+            raise HTTPException(status_code=400, detail="Cannot guess your own phrase")
+
+        guess_text = req.guess.strip()
+        if not guess_text:
+            raise HTTPException(status_code=400, detail="Guess cannot be empty")
+
+        # Overwrite allowed (free revision)
+        if featured_pid not in rs.signal_guesses:
+            rs.signal_guesses[featured_pid] = {}
+        rs.signal_guesses[featured_pid][req.player_id] = guess_text
+
+        log.info(
+            "signal_guess_submitted",
+            player_id=req.player_id,
+            sub_round_index=req.sub_round_index,
         )
 
     return {"status": "ok"}

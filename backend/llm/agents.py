@@ -314,6 +314,84 @@ async def generate_wager_bet(
         return "", message_history or []
 
 
+async def generate_signal_guess(
+    transformation: str,
+    constraint: str,
+    *,
+    game_id: str | None = None,
+) -> str | None:
+    """AI guesses the original phrase from a transformation. Returns guess or None."""
+    from backend.llm.prompts import build_signal_guess_prompt
+
+    prompt = build_signal_guess_prompt(transformation, constraint)
+    result = await _run_system_call(
+        brain_test_agent,
+        prompt,
+        timeout=3.0,
+        game_id=game_id,
+        instructions="You are guessing what secret phrase was transformed. "
+        "Reply with ONLY your guess — a short phrase describing a scene or situation.",
+    )
+    return result.strip() if result else None
+
+
+def _fuzzy_match(guess: str, original: str) -> bool:
+    """Case-insensitive containment check as fallback for LLM judging."""
+    g = guess.lower().strip()
+    o = original.lower().strip()
+    return g in o or o in g
+
+
+async def judge_signal_guesses(
+    original_phrase: str,
+    guesses: dict[str, str],
+    *,
+    game_id: str | None = None,
+) -> dict[str, bool]:
+    """Batch-judge all guesses for one sub-round. Returns {guesser_id: correct?}."""
+    if not guesses:
+        return {}
+
+    # Build numbered list for LLM
+    guesser_ids = list(guesses.keys())
+    guesses_text = "\n".join(f"{i + 1}. {guesses[gid]}" for i, gid in enumerate(guesser_ids))
+
+    prompt = (
+        f'The original phrase was: "{original_phrase}"\n\n'
+        f"Here are the guesses:\n{guesses_text}\n\n"
+        "For each guess, reply Y if it captures the same idea as the original phrase "
+        "(doesn't need to be exact wording), or N if not.\n"
+        f"Reply with exactly {len(guesser_ids)} letters separated by commas. "
+        "Example: Y,N,Y"
+    )
+
+    result = await _run_system_call(
+        brain_test_agent,
+        prompt,
+        timeout=5.0,
+        game_id=game_id,
+        instructions="Judge whether each guess matches the original phrase in meaning. "
+        "Reply with ONLY Y or N for each, comma-separated.",
+    )
+
+    judgments: dict[str, bool] = {}
+
+    if result:
+        # Parse Y/N response
+        parts = [p.strip().upper() for p in result.split(",")]
+        for i, gid in enumerate(guesser_ids):
+            if i < len(parts):
+                judgments[gid] = parts[i].startswith("Y")
+            else:
+                judgments[gid] = _fuzzy_match(guesses[gid], original_phrase)
+    else:
+        # LLM failed — fall back to fuzzy match
+        for gid, guess in guesses.items():
+            judgments[gid] = _fuzzy_match(guess, original_phrase)
+
+    return judgments
+
+
 # ---------------------------------------------------------------------------
 # Narrator — owns its own conversation history per game
 # ---------------------------------------------------------------------------

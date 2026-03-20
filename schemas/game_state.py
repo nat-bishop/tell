@@ -20,6 +20,7 @@ class RoundType(enum.StrEnum):
     TASK = "task"
     BRAIN_TEST = "brain_test"
     WAGER = "wager"
+    SIGNAL = "signal"
 
 
 class PlayerRole(enum.StrEnum):
@@ -76,6 +77,12 @@ class RoundState(BaseModel):
     gallery_votes: dict[str, str] = Field(default_factory=dict)
     # Wager
     wager_questions: list[WagerQuestion] = Field(default_factory=list)
+    # Signal
+    signal_constraint: str = ""
+    signal_player_order: list[str] = Field(default_factory=list)
+    signal_phrases: dict[str, str] = Field(default_factory=dict)
+    signal_guesses: dict[str, dict[str, str]] = Field(default_factory=dict)
+    signal_judgments: dict[str, dict[str, bool]] = Field(default_factory=dict)
 
 
 class NarratorEntry(BaseModel):
@@ -98,6 +105,8 @@ class TellGameState(BaseModel):
     round_types: list[RoundType] = Field(default_factory=list)
     used_prompt_indices: list[int] = Field(default_factory=list)
     last_prompt_category: str | None = None
+    used_signal_phrase_indices: list[int] = Field(default_factory=list)
+    used_signal_constraint_indices: list[int] = Field(default_factory=list)
     winner: str | None = None
     winner_ids: list[str] = Field(default_factory=list)
     phase_deadline: datetime | None = None

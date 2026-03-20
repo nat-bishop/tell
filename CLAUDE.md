@@ -93,7 +93,13 @@ frontend/src/
       FacilityVote.tsx     active phase for task roundType: gallery of all answers, tap to vote
       FacilityVoteResults.tsx  results phase for task roundType: vote counts per player
       FacilityBrainTest.tsx  active + results phases for brain_test roundType
+<<<<<<< HEAD
       FacilityWager.tsx   active + results phases for wager roundType (number line + betting)
+=======
+      FacilitySignalPrompt.tsx  custom prompt: fetches per-player phrase, shows constraint
+      FacilitySignalActive.tsx  sub-round guessing UI with auto-submit on transition
+      FacilitySignalResults.tsx results: phrase/guess/judgment cards per player
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
       FacilityGameOver.tsx full-screen panel: headline, scoreboard, narration, play again
   components/              Shared primitives — used by app screens and facility phases
     Stage.tsx              Full-screen centered layout wrapper
@@ -106,7 +112,12 @@ frontend/src/
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
   api/actions.ts           Typed POST helpers (incl. submitVote,
+<<<<<<< HEAD
                            submitBrainTestAnswer, submitWagerGuess, submitWagerBet, matchmaking)
+=======
+                           submitBrainTestAnswer, submitSignalGuess,
+                           getSignalPhrase, matchmaking)
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
   api/events.ts            SSE client with typed event routing
   api/matchmaking-events.ts  SSE client for matchmaking lobby (LobbyStatus, GameAssigned)
   api/client.ts            API_URL config + base fetch wrapper
@@ -142,7 +153,11 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_AI_MODEL`, `TELL_AI_RETRIES` — override AI model and retry count
 - `TELL_PROMPT_DURATION`, `TELL_TASK_PROMPT_DURATION`, `TELL_PROMPT_READING_DURATION` — prompt phase timing
 - `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing
+<<<<<<< HEAD
 - `TELL_WAGER_DURATION`, `TELL_WAGER_SUB_ROUND_DURATION`, `TELL_WAGER_QUESTIONS`, `TELL_WAGER_RESULTS_DURATION` — wager timing
+=======
+- `TELL_SIGNAL_PROMPT_DURATION`, `TELL_SIGNAL_SUB_ROUND_DURATION`, `TELL_SIGNAL_RESULTS_DURATION`, `TELL_SIGNAL_SAFETY_DURATION` — signal timing
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
 - `TELL_TOTAL_ROUNDS` — override fixed game length (default 5)
 - `TELL_MIN_HUMANS`, `TELL_MAX_PLAYERS`, `TELL_MIN_AI`, `TELL_MAX_AI` — player count limits
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
@@ -165,7 +180,11 @@ Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run
 
 `GamePhase` has 5 values: `LOBBY, PROMPT, ACTIVE, RESULTS, GAME_OVER`. `ACTIVE` and `RESULTS` are generic — behavior dispatches via `get_handler(round_type)`. Phases never grow; adding a minigame only requires a new handler registered in `backend/minigames/`.
 
+<<<<<<< HEAD
 Round types are selected dynamically via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat. Three types: Task (gallery vote), Brain Test (Quick Draw), Wager (estimation + betting).
+=======
+Round types are selected dynamically via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat. Three types: Task (gallery vote), Brain Test (Quick Draw), Signal (Drawful-style).
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
 
 **Task / Gallery Vote** (creative prompt, everyone votes for who sounds most human):
 ```
@@ -179,11 +198,22 @@ ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent → RE
 ```
 Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, +1 point).
 
+<<<<<<< HEAD
 **Wager** (numerical estimation + social betting):
 ```
 ACTIVE (100s safety, 3 questions × [GUESS 15s + BET 15s]) → RoundResultsEvent → RESULTS (15s) → next round
 ```
 Each question has two sub-rounds: GUESS (place a marker on a number line) and BET (pick whose guess is closest). Scoring: +1 for closest guess, +1 for betting on a closest guesser. Self-bet allowed. Max 2 per question, 6 total across 3 questions.
+=======
+**Signal** (Drawful-style: transform a phrase under a constraint, others guess the original):
+```
+PROMPT (20s + 5s reading — each player gets a secret phrase + shared constraint, submits transformation)
+→ ACTIVE (120s safety timer, N sub-rounds × 12s each — one per player)
+→ LLM batch-judges all guesses (parallelized)
+→ RoundResultsEvent → RESULTS (15s) → next round
+```
+Each sub-round broadcasts `SubRoundEvent(round_type="signal", ...)` showing one player's transformation. Others guess the original phrase. Scoring: guesser +1 per correct guess; transmitter +1 if >= half of guessers got it right. Signal has a custom PROMPT component (`FacilitySignalPrompt`) that fetches per-player phrases via `GET /signal-phrase`. Guesses submitted via `POST /signal-guess`. LLM judging uses batch Y/N format with `_fuzzy_match` fallback.
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
 
 **After 5 rounds** (`state.round_number == state.total_rounds`):
 ```
@@ -204,6 +234,7 @@ class MinigameHandler:
                                  # active_interstitial, results_interstitial
 
     def setup_round(state, settings)  # mutates state in place
+    def get_prompt_duration(settings) → int  # default: settings.prompt_duration
     def get_active_duration(settings) → int
     def get_results_duration(settings) → int
     def active_event_extras(state) → dict  # extra fields on PhaseChangedEvent
@@ -217,7 +248,11 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 ### Scoring
 - **Task**: Each vote received = **-1 point**. `tally_gallery_votes()` in `game_logic.py`, deltas applied in `TaskHandler.build_results()`.
 - **Brain Test**: Pure correctness — `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
+<<<<<<< HEAD
 - **Wager**: +1 for closest guess, +1 for betting on a closest guesser. Self-bet allowed. Max 2 per question, 6 total across 3 questions. `score_wager()` in `wager.py`.
+=======
+- **Signal**: Guesser +1 per correct guess. Transmitter +1 if >= half of guessers got it right. LLM-judged with fuzzy match fallback.
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
 - Running scores in `Player.score` (int). `scores` dict (player_id → score) carried on `StateSyncEvent`, `RoundResultsEvent`, and `GameOverEvent`.
 - Game over after `total_rounds` (default 5). Winner = highest score; ties produce multiple `winner_ids`.
 
@@ -232,8 +267,14 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 - **AI answers** (PROMPT): AI players generate answers trying to pass as human. System prompt is personality-driven via `build_system_prompt()`.
 - **AI votes** (ACTIVE / task): Scheduled by `TaskHandler.on_active_start()` via `_ai_vote_task()`.
 - **AI brain test** (ACTIVE / brain_test): Scheduled by `BrainTestHandler._brain_loop()` via `on_brain_test_challenge()`.
+<<<<<<< HEAD
 - **AI wager guesses** (ACTIVE / wager): Character agent with `WagerGuessResponse` structured output, maintains conversation history. Scheduled by `WagerHandler._wager_loop()` via `on_wager_guess()`.
 - **AI wager bets** (ACTIVE / wager): Character agent with `WagerBetResponse` structured output, maintains conversation history. Scheduled via `on_wager_bet()`.
+=======
+- **AI signal transform** (PROMPT / signal): `_ai_answer_task` detects `round_type == SIGNAL` and uses `build_signal_transform_prompt` instead of `build_answer_prompt`.
+- **AI signal guess** (ACTIVE / signal): `on_signal_sub_round()` schedules `_ai_signal_guess_task` for each non-featured AI player.
+- **Signal judging** (after all sub-rounds): `judge_signal_guesses()` batch-judges via LLM with Y/N format, parallelized per featured player via `asyncio.gather`.
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
 
 ## Gotchas
 
@@ -260,12 +301,23 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 - **Matchmaking join window**: `MatchmakingService._join_window_open` event blocks new joins while a game is being fired.
 - **Narrator fires non-blocking**: `_fire_narration()` uses `asyncio.create_task()`. LLM call is outside the lock. Exits silently if game ends first.
 - **MinigameMeta lives in `backend/minigames/base.py`**: Not in `game_logic.py`. `game_logic.py` imports `MINIGAME_REGISTRY` and `get_handler` from `backend.minigames`.
+<<<<<<< HEAD
 - **FacilityScene uses component registry**: `MINIGAME_COMPONENTS` maps `round_type → {Active, Results}` component pairs. Adding a new frontend round type only requires adding an entry here and a handler entry in `backend/minigames/`.
 - **Wager self-bet is allowed**: Unlike gallery vote which rejects self-votes, wager bet route accepts `target_player_id == player_id`.
 - **Wager loop controls timing**: No early completion on all-submitted — the wager loop drives sub-round timing.
 - **Wager routes validate sub-round phase**: Guess route rejects during bet sub-rounds and vice versa. Routes check `current_sub_round % 2` and `current_sub_round // 2`.
 - **Wager bet route validates target has a guess**: `target_player_id` must be in `q.guesses` for the current question. Prevents betting on a player who timed out.
 - **`WagerHandler._wager_loop`** imports `do_active_complete` at runtime to avoid circular dep (same pattern as `_brain_loop`).
+=======
+- **FacilityScene uses component registry**: `MINIGAME_COMPONENTS` maps `round_type → {Active, Results, Prompt?}` component pairs. Signal uses a custom `Prompt` component. Adding a new frontend round type only requires adding an entry here and a handler entry in `backend/minigames/`.
+- **Signal phrase route**: `GET /{game_id}/signal-phrase?player_id=X` returns per-player secret phrase + constraint. Only works during PROMPT phase for signal rounds.
+- **Signal guess route**: `POST /{game_id}/signal-guess` requires `phase == ACTIVE`, `round_type == SIGNAL`. Featured player cannot guess their own phrase. Overwrites allowed.
+- **Signal sub-round loop**: `SignalHandler._signal_loop` iterates `signal_player_order`, broadcasting `SubRoundEvent` per player. After all sub-rounds, calls `_judge_all_guesses` (parallelized LLM) then `do_active_complete`.
+- **Signal guesses/judgments keyed by featured_player_id**: Not sub-round index. JSON serializes int keys as strings — player ID avoids this.
+- **Signal PROMPT duration is 20s**: Shorter than Task (45s). `get_prompt_duration()` on the handler is used by `_start_next_round` and `get_phase_duration`.
+- **Signal prompts are concrete scenarios**: "a dog chasing a squirrel", not idioms. Must be visually evocable for constraint-based transformation.
+- **Signal `signal_player_order`**: Snapshot at `setup_round` time. Without this, player list order shifts (disconnect/reconnect) could break sub-round iteration.
+>>>>>>> 7889f32 (Add Signal minigame: Drawful-style phrase transformation round type)
 
 ## Code Conventions
 

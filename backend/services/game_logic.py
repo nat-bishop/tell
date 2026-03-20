@@ -78,6 +78,8 @@ def get_phase_duration(
 ) -> int | None:
     """Get the duration for a given phase."""
     if phase == GamePhase.PROMPT:
+        if round_type:
+            return get_handler(round_type).get_prompt_duration(settings)
         return settings.prompt_duration
     if round_type:
         handler = get_handler(round_type)

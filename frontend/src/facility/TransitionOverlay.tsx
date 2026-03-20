@@ -18,11 +18,13 @@ const VOICES: Record<VoiceId, Voice> = {
     roundLabel: (n, type) => {
       if (type === "wager") return `TEST SEQUENCE ${n} / ESTIMATION PROTOCOL`;
       if (type === "brain_test") return `TEST SEQUENCE ${n} / RAPID ASSESSMENT`;
+      if (type === "signal") return `TEST SEQUENCE ${n} / SIGNAL INTERCEPT`;
       return `TEST SEQUENCE ${n} / DETECTION SCAN`;
     },
     typeLabel: (type) => {
       if (type === "wager") return "PLACE YOUR BETS";
       if (type === "brain_test") return "QUICK DRAW";
+      if (type === "signal") return "DECODE THE SIGNAL";
       return "IDENTIFY THE HUMAN";
     },
   },
@@ -30,11 +32,13 @@ const VOICES: Record<VoiceId, Voice> = {
     roundLabel: (n, type) => {
       if (type === "wager") return `FORM 12C: NUMERICAL ASSESSMENT ${n}`;
       if (type === "brain_test") return `PLEASE PROCEED TO ASSESSMENT ${n}`;
+      if (type === "signal") return `ASSESSMENT ${n} / SIGNAL DECODE`;
       return `ASSESSMENT ${n} / VERIFICATION TASK`;
     },
     typeLabel: (type) => {
       if (type === "wager") return "ESTIMATE AND WAGER";
       if (type === "brain_test") return "FORM 9D: RAPID RESPONSE";
+      if (type === "signal") return "FORM 12C: SIGNAL ANALYSIS";
       return "FORM 7B: DETECTION PROTOCOL";
     },
   },
@@ -42,11 +46,13 @@ const VOICES: Record<VoiceId, Voice> = {
     roundLabel: (n, type) => {
       if (type === "wager") return `OPERATION ${n} / FIELD ESTIMATION`;
       if (type === "brain_test") return `OPERATION ${n} / SNAP JUDGMENT`;
+      if (type === "signal") return `OPERATION ${n} / INTERCEPT`;
       return `OPERATION ${n} / SWEEP SCAN`;
     },
     typeLabel: (type) => {
       if (type === "wager") return "CONFIDENCE CHECK";
       if (type === "brain_test") return "RAPID FIRE";
+      if (type === "signal") return "DECODE TRANSMISSION";
       return "WHO DOESN'T BELONG?";
     },
   },
@@ -54,11 +60,13 @@ const VOICES: Record<VoiceId, Voice> = {
     roundLabel: (n, type) => {
       if (type === "wager") return `R-R-ROUND ${n} / N-NUMBER... LINE`;
       if (type === "brain_test") return `R-R-ROUND ${n} / Q-QUICK... DRAW`;
+      if (type === "signal") return `R-R-ROUND ${n} / S-SIGNAL [garbled]`;
       return `R-R-ROUND ${n} / SC-SCAN [retry]`;
     },
     typeLabel: (type) => {
       if (type === "wager") return "GUESS\u2014 GUESS THE NUMBER. [overflow]";
       if (type === "brain_test") return "PICK\u2014 PICK AN OPTION. [retry]";
+      if (type === "signal") return "DECODE THE\u2014 THE SIGNAL. [static]";
       return "FIND THE\u2014 THE HUMAN. [buffer overflow]";
     },
   },
@@ -66,11 +74,13 @@ const VOICES: Record<VoiceId, Voice> = {
     roundLabel: (n, type) => {
       if (type === "wager") return `round ${n}! estimation time :)`;
       if (type === "brain_test") return `round ${n}! quick quiz time :)`;
+      if (type === "signal") return `round ${n}! signal time :)`;
       return `round ${n}! detection time :)`;
     },
     typeLabel: (type) => {
       if (type === "wager") return "guess and bet!";
       if (type === "brain_test") return "quick draw";
+      if (type === "signal") return "decode the signal";
       return "who sounds most human?";
     },
   },
@@ -95,6 +105,12 @@ function getDirective(phase: GamePhase, roundType: string | null): Directive | n
     return {
       text: "DETECTION SCAN",
       subtitle: "who sounds most human?",
+    };
+  }
+  if (phase === "active" && roundType === "signal") {
+    return {
+      text: "SIGNAL INTERCEPT",
+      subtitle: "decode the transmission",
     };
   }
   if (phase === "results") {

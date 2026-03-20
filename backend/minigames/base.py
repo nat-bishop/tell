@@ -27,6 +27,10 @@ class MinigameHandler:
         """Initialize round state (mutates in place)."""
         raise NotImplementedError
 
+    def get_prompt_duration(self, settings: Settings) -> int:
+        """Duration for the PROMPT phase. Override for round-type-specific timing."""
+        return settings.prompt_duration
+
     def get_active_duration(self, settings: Settings) -> int:
         raise NotImplementedError
 

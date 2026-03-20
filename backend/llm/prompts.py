@@ -141,3 +141,34 @@ NARRATOR_SYSTEM_PROMPT = (
     "- Comment on vote results, score shifts, and close calls.\n\n"
     "Write ONLY the narration line. No labels, no quotes, no meta-commentary."
 )
+
+
+def build_narration_prompt(trigger: str, context: str) -> str:
+    """User message for narrator — wraps trigger + context."""
+    return f"[{trigger}]\n{context}"
+
+
+# ---------------------------------------------------------------------------
+# Signal prompt builders
+# ---------------------------------------------------------------------------
+
+
+def build_signal_transform_prompt(phrase: str, constraint: str) -> str:
+    """User message for AI to transform a phrase under a constraint."""
+    return (
+        f'Your secret phrase is: "{phrase}"\n'
+        f"Constraint: {constraint}\n\n"
+        "Transform the phrase following the constraint. "
+        "The other players will try to guess your original phrase from your transformation. "
+        "Be creative but make it possible to guess. 1-2 sentences max."
+    )
+
+
+def build_signal_guess_prompt(transformation: str, constraint: str) -> str:
+    """User message for AI to guess the original phrase."""
+    return (
+        f'Someone transformed a secret phrase using this constraint: "{constraint}"\n'
+        f'Their transformation: "{transformation}"\n\n'
+        "What was the original phrase? Reply with ONLY your guess — "
+        "a short phrase describing a concrete scene or situation. No explanation."
+    )

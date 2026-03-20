@@ -88,6 +88,32 @@ class Settings:
             )
         )
 
+        # Signal
+        self.signal_prompt_duration: int = int(
+            os.environ.get(
+                "TELL_SIGNAL_PROMPT_DURATION",
+                game.get("signal_prompt_duration", 20),
+            )
+        )
+        self.signal_sub_round_duration: int = int(
+            os.environ.get(
+                "TELL_SIGNAL_SUB_ROUND_DURATION",
+                game.get("signal_sub_round_duration", 12),
+            )
+        )
+        self.signal_results_duration: int = int(
+            os.environ.get(
+                "TELL_SIGNAL_RESULTS_DURATION",
+                game.get("signal_results_duration", 15),
+            )
+        )
+        self.signal_safety_duration: int = int(
+            os.environ.get(
+                "TELL_SIGNAL_SAFETY_DURATION",
+                game.get("signal_safety_duration", 120),
+            )
+        )
+
         # Player limits
         self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))
         self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 2)))
