@@ -17,7 +17,8 @@ This project has layered documentation:
 - **CLAUDE.md** (project root): The authoritative quick-reference for developers/AI. Contains architecture overview, running instructions, code conventions, critical patterns, gotchas, and pointers to detailed docs. This is the primary source of truth for how things work.
 - **docs/ARCHITECTURE.md**: System architecture deep-dive — real-time SSE system, state machine, AI scheduling, frontend architecture. Covers the *how* of implementation.
 - **docs/GAME_DESIGN.md**: Game design document organized around the three self-contained game types (Task, Interrogation, Word Chain). Each section covers flow, prompt categories, what makes it fun, and what skill it tests. Also covers aesthetics, shared mechanics (voting, elimination, AI personalities), and edge cases.
-- **docs/RESEARCH.md**: Compiled research for game design — pacing, social deduction, information asymmetry, humor, AI detection, cultural context, the Jack Principles, design principles, and game ideas for future round types.
+- **docs/DESIGN_PRINCIPLES.md**: 16 design principles in 5 pillars (Flow, Detection, Humor, Simplicity, AI Integration). The checklist for evaluating new features, round types, and mechanic changes.
+- **docs/RESEARCH.md**: Compiled research for game design — pacing, social deduction, information asymmetry, humor, AI detection, cultural context, the Jack Principles, and game ideas for future round types.
 
 ## Key Principles
 

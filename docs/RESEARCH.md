@@ -323,41 +323,11 @@ Source: Harry Gottlieb / Jellyvision, "The Jack Principles of the Interactive Co
 
 ---
 
-## 10. Design Principles
-
-Research-backed rules for evaluating new ideas. Each references findings from earlier sections.
-
-### Game Mechanics
-
-1. **Every round type must test a different skill.** If a new round tests the same thing as an existing one, it's a variant, not a new type. Current axes: creative writing + head-to-head judgment (Matchup/Task), knowledge/speed (Brain Test/Quick Draw).
-
-2. **Every round must produce legible evidence.** Evidence must be visible and comparable — answer pairs in Matchup, correctness grids in Brain Test. If you can't display the evidence clearly, the round doesn't work. (Section 3: information must be legible to drive deduction.)
-
-3. **Speed > complexity.** The best rounds need the fewest instructions. Brain Test needs zero explanation. The Jack Principles (Section 9) demand one task at a time with obvious next steps.
-
-### Information Design
-
-4. **5-8 explanations per event.** (Section 3, Information Funnel.) If only 1 explanation exists for a player's answer, the game is solved. If infinite, players disengage. The sweet spot: every answer should have multiple plausible interpretations.
-
-5. **Bidirectional viability.** (Section 3.) Every answer should plausibly be human OR AI depending on interpretation. The head-to-head format gives every answer dual plausible deniability — the same answer could be "human being casual" or "AI mimicking human casualness."
-
-6. **LLM advantages should create information, not replace players.** The Narrator surfaces patterns and names moments — it doesn't decide votes. Future LLM features should give players information to act on, not act for them.
-
-### Humor & Fun
-
-7. **The game makes the player look funny.** (Section 4, Jackbox Principle.) Prompts are the setup, players are the punchline. Never add a feature that competes with the players for laughs.
-
-8. **Screenshottable moments > interesting systems.** (Section 8.) If a feature doesn't produce something you'd show a friend, it's probably not worth building.
-
-9. **Contrast over monotony.** (Section 1, Contrast-Based Intensity.) Alternate fast/slow, tense/relaxed, individual/group. Never sustain maximum tension. The oscillation between round types is what keeps attention.
-
-### Process Over Output
-
-10. **Behavioral process > produced output.** The best minigames generate evidence about *how* players interact (timing, drawing strokes, click patterns, bidding sequences), not just *what* they produce (text, answers). AI using tools to draw, click, or place markers creates fundamentally different behavioral signatures than humans — and those signatures are visually presentable as evidence during discussion. Browser bot detection research confirms: mouse movement, reaction time distributions, and interaction patterns are the hardest things for automation to fake convincingly.
+Design principles derived from this research: see [DESIGN_PRINCIPLES.md](DESIGN_PRINCIPLES.md).
 
 ---
 
-## 11. Game Ideas
+## 10. Game Ideas
 
 Eight ideas for new round types, plus two round modifiers that layer on top of existing types. Each standalone idea tests a different behavioral axis, uses a different interaction modality, and is inspired by a proven popular game. All follow the Jack Principles (one task, efficient input, auto-advance) and produce evidence that's legible during discussion.
 
