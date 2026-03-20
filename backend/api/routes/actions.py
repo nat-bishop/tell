@@ -281,7 +281,7 @@ async def submit_brain_test_answer(
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
 
-        if req.challenge_index >= len(round_state.brain_challenges):
+        if not (0 <= req.challenge_index < len(round_state.brain_challenges)):
             raise HTTPException(status_code=400, detail="Invalid challenge index")
 
         if req.selected_index < 0 or req.selected_index > 3:
@@ -327,7 +327,7 @@ async def submit_wager_guess(game_id: str, req: SubmitWagerGuessRequest) -> dict
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
 
-        if req.question_index >= len(round_state.wager_questions):
+        if not (0 <= req.question_index < len(round_state.wager_questions)):
             raise HTTPException(status_code=400, detail="Invalid question index")
 
         # Validate sub-round: must be a guess sub-round for this question
@@ -378,7 +378,7 @@ async def submit_wager_bet(game_id: str, req: SubmitWagerBetRequest) -> dict[str
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
 
-        if req.question_index >= len(round_state.wager_questions):
+        if not (0 <= req.question_index < len(round_state.wager_questions)):
             raise HTTPException(status_code=400, detail="Invalid question index")
 
         # Validate sub-round: must be a bet sub-round for this question

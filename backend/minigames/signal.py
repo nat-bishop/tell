@@ -290,7 +290,13 @@ class SignalHandler(MinigameHandler):
                 featured_pid = rs.signal_player_order[idx]
                 alias_map = {p.id: p.alias for p in state.players}
                 transformation = rs.answers.get(featured_pid, NO_RESPONSE)
+                # Only reveal transformations for sub-rounds already broadcast
+                revealed_pids = set(rs.signal_player_order[: idx + 1])
+                filtered_answers = {
+                    pid: ans for pid, ans in rs.answers.items() if pid in revealed_pids
+                }
                 return {
+                    "answers": filtered_answers,
                     "sub_round_index": idx,
                     "sub_round_payload": {
                         "round_type": "signal",
@@ -301,4 +307,4 @@ class SignalHandler(MinigameHandler):
                     },
                 }
 
-        return {}
+        return super().build_state_sync_extras(state, player_id)

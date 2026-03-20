@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitAnswer } from "@/api/actions";
 import { Panel } from "@/facility/Panel";
@@ -19,13 +19,13 @@ export function FacilityPrompt() {
   } = useGameStore();
 
   const [answer, setAnswer] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const pendingRef = useRef(false);
 
-  const hasSubmitted = submitted || myAnswer !== null;
+  const hasSubmitted = myAnswer !== null;
 
   const handleSubmit = async () => {
-    if (gameId && playerId && !hasSubmitted) {
-      setSubmitted(true);
+    if (gameId && playerId && !hasSubmitted && !pendingRef.current) {
+      pendingRef.current = true;
       await submitAnswer(gameId, playerId, answer);
     }
   };

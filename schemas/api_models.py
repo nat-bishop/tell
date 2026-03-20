@@ -52,6 +52,7 @@ class StateSyncEvent(GameEvent):
     my_vote: str | None = None
     # Signal reconnection
     signal_phrase: str | None = None
+    action_starts_at: str | None = None
     # Generic reconnection state
     sub_round_index: int | None = None
     sub_round_payload: dict | None = None
@@ -186,7 +187,7 @@ class SubmitSignalGuessRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
-    guess: str
+    guess: str = Field(max_length=500)
     sub_round_index: int
 
 
@@ -221,7 +222,7 @@ class CreateGameResponse(BaseModel):
 class JoinGameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    player_name: str
+    player_name: str = Field(max_length=50)
 
 
 class JoinGameResponse(BaseModel):
@@ -240,7 +241,7 @@ class SubmitAnswerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
-    answer: str = ""
+    answer: str = Field(default="", max_length=500)
 
 
 class GameInfoResponse(BaseModel):

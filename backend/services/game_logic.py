@@ -55,7 +55,7 @@ def select_next_round_type(
         eligible.append(rt)
 
     if not eligible:
-        return RoundType.TASK
+        return random.choice(list(MINIGAME_REGISTRY.keys()))
 
     return random.choice(eligible)
 

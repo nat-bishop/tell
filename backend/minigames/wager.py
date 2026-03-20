@@ -232,4 +232,5 @@ class WagerHandler(MinigameHandler):
                         q, q_idx, len(rs.wager_questions), phase
                     ),
                 }
-        return {}
+
+        return super().build_state_sync_extras(state, player_id)

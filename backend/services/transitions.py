@@ -315,7 +315,7 @@ async def do_active_complete(game_id: str, session: TellGameSession) -> None:
     if round_type == RoundType.TASK:
         alias_map = {p.id: p.alias for p in state.players}
         vote_counts = payload.get("vote_counts", {})
-        most_voted = max(vote_counts, key=vote_counts.get, default=None)  # type: ignore[arg-type]
+        most_voted = max(vote_counts, key=vote_counts.get, default=None)
         most_alias = alias_map.get(most_voted, "someone") if most_voted else "someone"
         most_count = vote_counts.get(most_voted, 0) if most_voted else 0
         zero_aliases = [alias_map.get(pid, pid) for pid, c in vote_counts.items() if c == 0]
@@ -366,7 +366,8 @@ async def _do_game_over(
 
     log.info("game_over", winner=winner, winner_ids=winner_ids)
 
-    # Fire narrator: game over wrap-up (non-blocking background task)
+    # Fire narrator: game over wrap-up (non-blocking background task).
+    # Narration arrives via NarrationEvent; we don't block here waiting for it.
     top_players = [p for p in state.players if p.id in winner_ids]
     top_info = ", ".join(f"{p.alias} ({_role_label(p.role)}, score {p.score})" for p in top_players)
     humans = [p for p in state.players if p.role == PlayerRole.HUMAN]
@@ -377,16 +378,6 @@ async def _do_game_over(
         "Deliver a final verdict on this experiment."
     )
     await _fire_narration(game_id, "game_over", narr_msg)
-
-    # Brief wait for narration to potentially resolve
-    await asyncio.sleep(1.5)
-
-    # Grab latest narrator text (if narration resolved in time)
-    narrator_text = None
-    if state.narrator_context:
-        last_entry = state.narrator_context[-1]
-        if last_entry.trigger == "game_over":
-            narrator_text = last_entry.text
 
     # Broadcast FinalRevealEvent with all players revealed
     final_players = [
@@ -404,7 +395,6 @@ async def _do_game_over(
             seq=session.next_seq(),
             players=final_players,
             winner_ids=winner_ids,
-            narrator_text=narrator_text,
         ),
     )
 

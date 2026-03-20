@@ -72,6 +72,7 @@ export function FacilityVote() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (newVote) {
         debounceRef.current = setTimeout(() => {
+          if (useGameStore.getState().phase !== "active") return;
           submitVote(gameId, playerId, newVote).catch(() => {});
         }, 300);
       }

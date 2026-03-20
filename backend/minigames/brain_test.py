@@ -201,4 +201,5 @@ class BrainTestHandler(MinigameHandler):
                         "options": ch.options,
                     },
                 }
-        return {}
+
+        return super().build_state_sync_extras(state, player_id)

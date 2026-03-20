@@ -49,5 +49,17 @@ class MinigameHandler:
         raise NotImplementedError
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
-        """Extra fields for reconnection StateSyncEvent."""
+        """Extra fields for reconnection StateSyncEvent.
+
+        Default handles RESULTS phase (shared by all handlers with has_results=True).
+        Subclasses override for ACTIVE/PROMPT-specific extras and call super() as fallback.
+        """
+        from schemas.game_state import GamePhase
+
+        if state.phase == GamePhase.RESULTS:
+            payload, _ = self.build_results(state)
+            return {
+                "round_results_payload": payload,
+                "round_scores": {p.id: p.score for p in state.players},
+            }
         return {}

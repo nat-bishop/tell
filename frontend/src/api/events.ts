@@ -37,10 +37,11 @@ export function connectGameEvents(
   gameId: string,
   playerId: string,
   callbacks: GameEventCallbacks,
-  lastSeq: number = 0,
+  getLastSeq: () => number,
 ): { close: () => void } {
-  const url = `${API_URL}/games/${gameId}/events?player_id=${playerId}&last_seq=${lastSeq}`;
-  const es = new EventSource(url);
+  let es: EventSource | null = null;
+  let closed = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const eventMap: Record<string, (data: any) => void> = {
@@ -60,25 +61,46 @@ export function connectGameEvents(
     final_reveal: callbacks.onFinalReveal,
   };
 
-  for (const [eventType, handler] of Object.entries(eventMap)) {
-    es.addEventListener(eventType, (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data);
-        handler(data);
-      } catch {
-        console.error(`Failed to parse ${eventType} event`, e.data);
+  function connect() {
+    if (closed) return;
+
+    const lastSeq = getLastSeq();
+    const url = `${API_URL}/games/${gameId}/events?player_id=${playerId}&last_seq=${lastSeq}`;
+    es = new EventSource(url);
+
+    for (const [eventType, handler] of Object.entries(eventMap)) {
+      es.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          handler(data);
+        } catch {
+          console.error(`Failed to parse ${eventType} event`, e.data);
+        }
+      });
+    }
+
+    es.onopen = () => {
+      callbacks.onOpen();
+    };
+
+    es.onerror = () => {
+      console.warn("SSE connection error, reconnecting...");
+      callbacks.onError();
+      es?.close();
+      es = null;
+      if (!closed) {
+        reconnectTimer = setTimeout(connect, 2000);
       }
-    });
+    };
   }
 
-  es.onopen = () => {
-    callbacks.onOpen();
-  };
+  connect();
 
-  es.onerror = () => {
-    console.warn("SSE connection error, will auto-reconnect");
-    callbacks.onError();
+  return {
+    close: () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    },
   };
-
-  return { close: () => es.close() };
 }

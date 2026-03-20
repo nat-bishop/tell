@@ -13,7 +13,7 @@ export function useTimer(deadline: string | null): number {
 
     const update = () => {
       const diff = new Date(deadline).getTime() - Date.now();
-      setRemaining(Math.max(0, Math.ceil(diff / 1000)));
+      setRemaining(Math.max(0, Math.floor(diff / 1000)));
     };
 
     update();

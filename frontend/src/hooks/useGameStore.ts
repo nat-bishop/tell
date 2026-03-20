@@ -195,7 +195,6 @@ export interface FinalRevealData {
   seq: number;
   players: RevealedPlayer[];
   winner_ids: string[];
-  narrator_text: string | null;
 }
 
 export interface SeqData {
@@ -485,9 +484,6 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       revealedPlayers: data.players,
       winnerIds: data.winner_ids || [],
-      narrationText: data.narrator_text,
-      narrationTrigger: "game_over",
-      narrationReceivedAt: Date.now(),
       lastSeq: data.seq,
     }),
 

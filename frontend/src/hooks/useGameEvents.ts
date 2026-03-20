@@ -10,9 +10,6 @@ export function useGameEvents(gameId: string, playerId: string) {
   useEffect(() => {
     if (!gameId || !playerId) return;
 
-    const store = useGameStore.getState();
-    const lastSeq = store.lastSeq;
-
     connectionRef.current = connectGameEvents(gameId, playerId, {
       onStateSync: useGameStore.getState().onStateSync,
       onPlayerJoined: useGameStore.getState().onPlayerJoined,
@@ -30,7 +27,7 @@ export function useGameEvents(gameId: string, playerId: string) {
       onFinalReveal: useGameStore.getState().onFinalReveal,
       onOpen: useGameStore.getState().onOpen,
       onError: useGameStore.getState().onError,
-    }, lastSeq);
+    }, () => useGameStore.getState().lastSeq);
 
     return () => {
       connectionRef.current?.close();

@@ -61,6 +61,12 @@ class TaskHandler(MinigameHandler):
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
         rs = state.current_round
-        if rs and player_id in rs.gallery_votes:
-            return {"my_vote": rs.gallery_votes[player_id]}
-        return {}
+        if not rs:
+            return {}
+
+        extras: dict = {}
+        if player_id in rs.gallery_votes:
+            extras["my_vote"] = rs.gallery_votes[player_id]
+
+        extras.update(super().build_state_sync_extras(state, player_id))
+        return extras

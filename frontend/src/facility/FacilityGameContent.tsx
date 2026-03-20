@@ -58,7 +58,7 @@ function FacilityInner() {
   // Cold open state -- show once when game transitions from lobby to first round
   const [showColdOpen, setShowColdOpen] = useState(false);
   const [coldOpenDone, setColdOpenDone] = useState(false);
-  const prevPhaseForColdRef = useRef<GamePhase>("lobby");
+  const prevPhaseForColdRef = useRef<GamePhase>(phase);
 
   useEffect(() => {
     if (

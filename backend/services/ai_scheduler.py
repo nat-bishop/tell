@@ -164,7 +164,7 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
             delay = random.uniform(3, 20)
             tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
 
-    _ai_tasks[game_id] = tasks
+    _ai_tasks.setdefault(game_id, []).extend(tasks)
 
 
 def register_task(game_id: str, task: asyncio.Task) -> None:
@@ -736,16 +736,6 @@ async def _ai_signal_guess_task(
     await _run_ai_task(
         game_id, player_id, delay, GamePhase.ACTIVE, generate, apply, "ai_signal_guess"
     )
-
-
-def get_narrator_history(game_id: str) -> list[ModelMessage]:
-    """Get narrator conversation history for a game."""
-    return _narrator_history.get(game_id, [])
-
-
-def set_narrator_history(game_id: str, history: list[ModelMessage]) -> None:
-    """Store updated narrator conversation history for a game."""
-    _narrator_history[game_id] = history
 
 
 def cleanup_game(game_id: str) -> None:
