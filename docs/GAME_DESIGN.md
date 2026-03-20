@@ -66,7 +66,7 @@ Each creates different pressure. Gallery Vote exposes voice and judgment simulta
 
 ### Gallery Vote — Find the AI
 
-A linguistic task prompt. Everyone answers simultaneously. Then all answers are shown at once and everyone votes for the player who sounds most human. Votes received = negative points (−1 per vote). Being suspected costs you.
+A linguistic task prompt. Everyone answers simultaneously. Then all answers are shown at once and everyone votes for the player who sounds most human. Votes received = negative points (−100 per vote). Being suspected costs you.
 
 ```
 PROMPT (45s) → ACTIVE (all answers visible, tap to vote)
@@ -93,7 +93,7 @@ Each category exploits a different AI blindspot:
 
 #### How the Gallery Vote Works
 
-All answers are shown at once with player aliases visible. Each player taps one answer — voting for the player who sounds most human. You cannot vote for yourself. Votes are changeable until the timer expires or all votes are in. After voting, `TaskHandler.build_results()` tallies `gallery_votes` and returns score deltas: `−1` for each vote received.
+All answers are shown at once with player aliases visible. Each player taps one answer — voting for the player who sounds most human. You cannot vote for yourself. Votes are changeable until the timer expires or all votes are in. After voting, `TaskHandler.build_results()` tallies `gallery_votes` and returns score deltas: `−100` for each vote received.
 
 #### What Makes It Fun
 
@@ -122,7 +122,7 @@ ACTIVE (5 challenges × 12s each, 75s safety timer) → RESULTS (15s) → next r
 
 #### Scoring
 
-Pure correctness: `selected_index == correct_index` → 1 point per challenge. No fuzzy matching.
+Pure correctness: `selected_index == correct_index` → 100 points per challenge. No fuzzy matching.
 
 #### The 4 Challenge Types
 
@@ -162,7 +162,7 @@ ACTIVE: 3 questions × [GUESS 15s → BET 15s], 100s safety timer
 
 #### Scoring
 
-+1 for having the closest guess. +1 for betting on a player with the closest guess. Max 2 points per question, 6 total. Ties in closest guess: all tied players get the +1.
++100 for having the closest guess. +100 for betting on a player with the closest guess. Max 200 per question, 600 total across 3 questions. Ties in closest guess: all tied players get the +100.
 
 #### The 6 Question Categories
 
@@ -178,26 +178,27 @@ The bet phase creates a reveal moment mid-round. You see your opponents' guesses
 
 ### Signal — Phrase Transformation
 
-Drawful-style. Each player gets a secret phrase and everyone uses the same constraint to transform it. Others try to guess the original.
+Drawful-style. 3 randomly selected transmitters each get a secret phrase and everyone uses the same constraint to transform it. Non-transmitters try to guess the original.
 
 ```
-PROMPT (20s — each player sees their secret phrase + shared constraint, submits transformation)
-→ ACTIVE: N sub-rounds × 12s each — one featured player's transformation per sub-round
+PROMPT (20s — 3 transmitters each see their secret phrase + shared constraint, submit transformation)
+→ ACTIVE: 3 sub-rounds × 12s each — one transmitter's transformation featured per sub-round,
+          all non-transmitters guess simultaneously
 → LLM batch-judges all guesses → RESULTS (15s) → next round
 ```
 
-~90-120 seconds per round depending on player count.
+~90-100 seconds per round. Transmitters are tracked across rounds to avoid repeats (`used_signal_transmitter_ids`).
 
 #### How It Works
 
-1. During PROMPT: each player sees their secret phrase (e.g., "a dog chasing a squirrel") and the shared constraint (e.g., "Only questions — describe using only questions, no statements"). They write their transformation.
-2. During ACTIVE: one player's transformation is featured per sub-round. All other players read it and type their guess at the original phrase.
-3. After all sub-rounds: LLM judges all guesses via batch Y/N format (parallelized per featured player). Fuzzy match fallback if LLM fails.
-4. RESULTS: shows phrase / transformation / all guesses with correct/incorrect judgment cards per player.
+1. During PROMPT: 3 transmitters (randomly selected) each see their secret phrase (e.g., "a dog chasing a squirrel") and the shared constraint (e.g., "Only questions — describe using only questions, no statements"). They write their transformation. Non-transmitters wait.
+2. During ACTIVE: one transmitter's transformation is featured per sub-round. All non-transmitters read it and type their guess at the original phrase. Transmitters cannot guess during their own sub-round.
+3. After all 3 sub-rounds: LLM judges all guesses on a 0/1/2 scale (parallelized per transmitter). Fuzzy match fallback if LLM fails.
+4. RESULTS: shows phrase / transformation / all guesses with graded judgment cards per player.
 
 #### Scoring
 
-+1 per correct guess (guesser). +1 for the transmitter if >= half of guessers got it right. LLM judging uses semantic equivalence — not exact wording.
+LLM grades each guess 0/1/2. Guesser earns `score × 50` points (0, 50, or 100). Transmitter earns the integer average of all their guessers' points. LLM judging uses semantic equivalence — close paraphrases score 2.
 
 #### The Constraints
 
@@ -287,11 +288,11 @@ Players join via URL, receive robot aliases (UNIT-7, BOT-42 — assigned, not ch
 
 ### Voting (Task / Gallery Vote)
 
-All answers are shown at once during the ACTIVE phase. Each player taps one answer — voting for the player who sounds most human. Cannot vote for yourself. Vote is changeable until time expires or all votes are in. Votes received = −1 point each.
+All answers are shown at once during the ACTIVE phase. Each player taps one answer — voting for the player who sounds most human. Cannot vote for yourself. Vote is changeable until time expires or all votes are in. Votes received = −100 points each.
 
 ### Scores
 
-Running scores are visible throughout the game in the HUD panel. `Player.score` is a cumulative int. After each round, `RoundResultsEvent` carries the updated `scores` dict (player_id → score). Final scores shown in the reveal.
+Running scores are visible throughout the game in the HUD panel. `Player.score` is a cumulative int (in units of 100). After each round, `RoundResultsEvent` carries the updated `scores` dict (player_id → score). Final scores shown in the reveal.
 
 ### AI Personalities
 
@@ -323,8 +324,8 @@ The narrator knows everyone's role. It never reveals that directly — but the w
 - **Gallery vote: no votes on a player**: Zero vote count shown in results. No score change for that player.
 - **Brain Test: no response to a challenge**: Shown as blank in results grid. No point.
 - **Wager: player misses guess window**: Cannot be a bet target (route validates target has a guess).
-- **Signal: featured player cannot guess their own phrase**: Route rejects `player_id == featured_pid`.
-- **Signal: LLM judge fails**: Falls back to fuzzy match (case-insensitive substring containment).
-- **Signal: no guesses for a featured player**: Score deltas are empty for that sub-round; transmitter gets no bonus.
+- **Signal: transmitters cannot guess, non-transmitters cannot submit answers**: Route validates role based on `signal_player_order`.
+- **Signal: LLM judge fails**: Falls back to fuzzy match (case-insensitive substring containment, binary 0/2).
+- **Signal: no guesses for a transmitter**: Score deltas are empty for that sub-round; transmitter gets 0 bonus.
 - **All players tie at game end**: `winner_ids` contains all tied player IDs.
 - **Matchmaking queue drop**: Player disconnecting from SSE auto-removes them from the queue.

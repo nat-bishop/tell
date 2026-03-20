@@ -73,7 +73,7 @@ Four round types selected dynamically at the start of each round via `get_next_r
 PROMPT (45s + 5s interstitial) → ACTIVE (all see all answers, tap to vote)
   → RoundResultsEvent → RESULTS (vote counts, 8s) → next round
 ```
-During ACTIVE, all players see all answers and vote for the player who sounds most human. Votes received = negative points (−1 per vote). `TaskHandler.on_active_start()` schedules AI vote tasks. Early-complete fires when all players have voted.
+During ACTIVE, all players see all answers and vote for the player who sounds most human. Votes received = negative points (−100 per vote). `TaskHandler.on_active_start()` schedules AI vote tasks. Early-complete fires when all players have voted.
 
 **Quick Draw / Brain Test** (multiple-choice speed quiz, scored by correctness):
 ```
@@ -87,15 +87,15 @@ ACTIVE (75s safety timer, 5 challenges × 12s each) → RoundResultsEvent
 ACTIVE (100s safety, 3 questions × [GUESS 15s + BET 15s]) → RoundResultsEvent
   → RESULTS (15s) → next round
 ```
-`WagerHandler._wager_loop` iterates each question in two sub-rounds: GUESS (place marker on number line) then BET (pick whose guess is closest). Each sub-round broadcasts `SubRoundEvent(round_type="wager", ...)`. Scoring: +1 for closest guess, +1 for betting on a closest guesser; self-bet allowed. `score_wager()` in `wager.py`.
+`WagerHandler._wager_loop` iterates each question in two sub-rounds: GUESS (place marker on number line) then BET (pick whose guess is closest). Each sub-round broadcasts `SubRoundEvent(round_type="wager", ...)`. Scoring: +100 for closest guess, +100 for betting on a closest guesser; self-bet allowed. `score_wager()` in `wager.py`.
 
 **Signal** (Drawful-style phrase transformation + guessing):
 ```
-PROMPT (20s — each player gets a secret phrase + shared constraint, submits transformation)
-→ ACTIVE (120s safety, N sub-rounds × 12s each — one per player)
+PROMPT (20s — 3 random transmitters each get a secret phrase + shared constraint, submit transformation)
+→ ACTIVE (120s safety, 3 sub-rounds × 12s each — one per transmitter, all non-transmitters guess simultaneously)
 → LLM batch-judges all guesses → RoundResultsEvent → RESULTS (15s) → next round
 ```
-`SignalHandler._signal_loop` iterates `signal_player_order`, broadcasting `SubRoundEvent(round_type="signal", ...)` showing one player's transformation. Others submit guesses via `POST /signal-guess`. After all sub-rounds, `_judge_all_guesses` parallelizes LLM judging via `asyncio.gather`. Scoring: guesser +1 per correct guess; transmitter +1 if >= half guessers correct. Signal uses a custom PROMPT component (`FacilitySignalPrompt`) that fetches per-player phrases via `GET /signal-phrase`.
+`SignalHandler.setup_round` selects 3 random transmitters (tracked in `used_signal_transmitter_ids` to avoid repeats across rounds); only they get phrases and answer during PROMPT. `_signal_loop` iterates `signal_player_order` (transmitters only), broadcasting `SubRoundEvent(round_type="signal", ...)` per transmitter. All non-transmitters submit guesses via `POST /signal-guess`; transmitters cannot guess their own phrase. After all sub-rounds, `_judge_all_guesses` parallelizes LLM judging via `asyncio.gather`. LLM scoring is graded 0/1/2 per guess. Signal uses a custom PROMPT component (`FacilitySignalPrompt`) that fetches per-player phrases via `GET /signal-phrase`.
 
 **After `total_rounds` (default 5)**:
 ```
@@ -127,11 +127,12 @@ Checked in `game_logic.check_game_over()` after each round completes. Returns `N
 
 ### Scoring
 
-- `Player.score` (int) accumulates across rounds.
-- **Task**: votes received = **−1 per vote** via `TaskHandler.build_results()`. `tally_gallery_votes()` in `game_logic.py`.
-- **Brain Test**: `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
-- **Wager**: +1 for closest guess, +1 for betting on a closest guesser. `score_wager()` in `wager.py`.
-- **Signal**: guesser +1 per correct guess; transmitter +1 if >= half guessers got it right. LLM-judged with fuzzy match fallback. `SignalHandler.build_results()`.
+All scores are in units of 100 for granularity. `Player.score` (int) accumulates across rounds.
+
+- **Task**: votes received = **−100 per vote** via `TaskHandler.build_results()`. `tally_gallery_votes()` in `game_logic.py`.
+- **Brain Test**: `selected_index == correct_index` → +100 per challenge. `score_brain_test()` in `brain_test.py`.
+- **Wager**: +100 for closest guess, +100 for betting on a closest guesser. Max 200 per question, 600 across 3 questions. `score_wager()` in `wager.py`.
+- **Signal**: LLM judges each guess 0/1/2. Guesser earns `score * 50` (0/50/100). Transmitter earns the integer average of all their guessers' points. LLM `judge_agent` with fuzzy match fallback. `SignalHandler.build_results()`.
 - `scores` dict (player_id → score) carried on `RoundResultsEvent`, `StateSyncEvent`, `GameOverEvent`.
 
 ## Matchmaking
@@ -150,7 +151,7 @@ The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game
 
 ```
 1. Sleep random delay (varies by phase)
-2. Build AIPlayerDeps snapshot (reads state WITHOUT lock — stale is fine)
+2. Read state snapshot outside lock (stale is fine)
 3. Call LLM (PydanticAI agent) — may take 1-5 seconds
 4. Acquire lock
 5. Check phase hasn't changed (if it has, discard result)
@@ -162,35 +163,53 @@ The `MATCHMAKING_LOBBY_ID = "_matchmaking"` constant is used as a synthetic game
 - **Task**: `TaskHandler.on_active_start()` schedules `_ai_vote_task` for each AI player.
 - **Brain Test**: `BrainTestHandler._brain_loop` calls `on_brain_test_challenge()` per challenge.
 - **Wager**: `WagerHandler._wager_loop` calls `on_wager_guess()`/`on_wager_bet()` per sub-round.
-- **Signal (PROMPT)**: `_ai_answer_task` detects `round_type == SIGNAL` and uses `build_signal_transform_prompt` instead of `build_answer_prompt`.
-- **Signal (ACTIVE)**: `SignalHandler._signal_loop` calls `on_signal_sub_round()` each sub-round, scheduling `_ai_signal_guess_task` for each non-featured AI player.
+- **Signal (PROMPT)**: `_ai_answer_task` detects `round_type == SIGNAL` and only schedules AI transmitters; uses `build_signal_transform_prompt`.
+- **Signal (ACTIVE)**: `SignalHandler._signal_loop` calls `on_signal_sub_round()` each sub-round, scheduling `_ai_signal_guess_task` for each non-transmitter AI player.
 
 All tasks stored in `_ai_tasks[game_id]` and cancelled on phase change via `cancel_all()`. `register_task()` allows handlers to register external tasks for cleanup.
 
-**Conversation history**: Each AI player has a `message_history` (PydanticAI `ModelMessage` list) stored in `_conversation_history`. History is threaded through `generate_answer`, `generate_wager_guess`, and `generate_wager_bet` calls, giving AI players memory within a game. Stateless agents (gallery vote, brain test, signal guess) do not use history.
+**Conversation history**: Each AI player has a `message_history` (PydanticAI `ModelMessage` list) stored in `_conversation_history`. History is threaded through every `_run_ai_agent` call — answers, votes, brain test answers, wager guesses, wager bets, and signal guesses — giving AI players memory across all rounds of the game.
 
 **Fallback**: If LLM fails, personality's `fallback_response` is used.
 
 ## AI Agent Architecture
 
-Single module-level `ai_agent: Agent[AIPlayerDeps, str]` in `agents.py`. System prompt built dynamically from `@ai_agent.instructions` — personality template + game context (all players, round, answers). Model passed per-call via `model=settings.ai_model`.
+Three agents in `agents.py`:
+- **`ai_agent`** — all player actions (answers, votes, guesses, bets). `deps_type=AICallContext`.
+- **`narrator_agent`** — show host narration, maintains per-game history.
+- **`judge_agent`** — signal judging only; not a player action.
 
-Two agent tiers:
-- **Character agents** (`ai_agent`, `narrator_agent`) — personality-driven, maintain message history.
-- **Utility agents** (`brain_test_agent`) — stateless one-shot calls with fixed purpose.
+**Stable system prompt / volatile user message**: `get_personality_instructions(name)` returns a cacheable per-personality string passed as `instructions=` to each `ai_agent.run()` call. Volatile context (round, answers, other players) goes in the user message built by `build_*_prompt()` functions.
 
-**Agent functions in `agents.py`**:
+**Structured output with auto-retry**: Each action type has a Pydantic output model with `field_validator`. `validation_context` on `ai_agent` is a lambda that reads from `deps.valid` at call time — PydanticAI re-runs validation on retry, so invalid choices (wrong index, unknown alias) auto-retry up to 2 times.
 
-| Function | Phase | Notes |
-|---|---|---|
-| `generate_answer` | PROMPT / task+signal | For signal: uses `build_signal_transform_prompt`. For task: `build_answer_prompt` |
-| `decide_gallery_vote` | ACTIVE / task | Picks which player sounds most human; uses stateless `brain_test_agent`. Fallback: random |
-| `generate_brain_test_answer` | ACTIVE / brain_test | Picks from 4 options. Uses stateless `brain_test_agent`. 3s timeout |
-| `generate_wager_guess` | ACTIVE / wager | `WagerGuessResponse` structured output; personality-driven with history |
-| `generate_wager_bet` | ACTIVE / wager | `WagerBetResponse` structured output; personality-driven with history |
-| `generate_signal_guess` | ACTIVE / signal | Stateless — guesses original phrase from transformation. 3s timeout |
-| `judge_signal_guesses` | post-ACTIVE / signal | Batch Y/N LLM judging, parallelized per featured player. 5s timeout. Fuzzy match fallback |
-| `generate_narration` | Transition hooks | Uses `narrator_agent` + message history. 3s timeout (5s for game_over) |
+```python
+@dataclass
+class AICallContext:
+    valid: list | None = None   # valid indices or aliases; checked by field_validator
+
+ai_agent = Agent(
+    output_type=str,
+    deps_type=AICallContext,
+    retries=2,
+    validation_context=lambda ctx: ctx.deps.valid,
+)
+```
+
+**Conversation history**: All player actions (answers, votes, brain test, wager, signal guess) thread `message_history` through `_run_ai_agent` and store updated history in `_conversation_history[game_id][player_id]`. Gives AI players in-game memory across rounds.
+
+**Agent functions in `agents.py`** (all through `_run_ai_agent`):
+
+| Function | Output model | Phase | Notes |
+|---|---|---|---|
+| `generate_answer` | `str` | PROMPT | Signal uses `build_signal_transform_prompt`; task uses `build_answer_prompt` |
+| `decide_gallery_vote` | `PlayerPickResponse` | ACTIVE / task | `valid=` list of aliases; auto-retries on invalid alias. Fallback: random |
+| `generate_brain_test_answer` | `BrainTestResponse` | ACTIVE / brain_test | `valid=` list of valid indices; auto-retries on out-of-range. Fallback: random |
+| `generate_wager_guess` | `WagerGuessResponse` | ACTIVE / wager | No `valid=`; personality-driven with history |
+| `generate_wager_bet` | `PlayerPickResponse` | ACTIVE / wager | `valid=` list of aliases; auto-retries on invalid alias |
+| `generate_signal_guess` | `SignalGuessResponse` | ACTIVE / signal | Non-transmitters only. Fallback: `None` (no guess) |
+| `judge_signal_guesses` | `SignalJudgment` | post-ACTIVE / signal | Uses `judge_agent`. Graded 0/1/2 per guess. 5s timeout. Fuzzy match fallback |
+| `generate_narration` | `str` | Transition hooks | Uses `narrator_agent` + message history. 3s timeout (5s for game_over) |
 
 5 personalities: anxious, chill, earnest, eccentric, sardonic. Each has `description`, `vote_strategy`, and `fallback_response`.
 
