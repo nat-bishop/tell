@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import random
 from typing import Any
-
-import structlog
 
 from backend.minigames.base import MinigameHandler, MinigameMeta
 from schemas.game_state import RoundState, RoundType, TellGameState
-
-log = structlog.get_logger(__name__)
 
 
 class TaskHandler(MinigameHandler):
@@ -49,47 +44,16 @@ class TaskHandler(MinigameHandler):
 
     async def on_active_start(self, game_id: str) -> None:
         """Schedule AI vote tasks."""
-        import asyncio
+        from backend.services.ai_scheduler import schedule_ai_votes
 
-        from backend.api.deps import get_game_repository
-        from backend.services.ai_scheduler import (
-            _ai_tasks,
-            _ai_vote_task,
-        )
-
-        repo = get_game_repository()
-        session = repo.get(game_id)
-        if not session:
-            return
-
-        state = session.state
-        from schemas.game_state import PlayerRole
-
-        ai_players = [p for p in state.players if p.role == PlayerRole.AI]
-        if not ai_players:
-            return
-
-        tasks: list[asyncio.Task] = []
-        for player in ai_players:
-            delay = random.uniform(2, 8)
-            tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
-        _ai_tasks.setdefault(game_id, []).extend(tasks)
+        await schedule_ai_votes(game_id)
 
     def build_results(self, state: TellGameState) -> tuple[dict, dict[str, int]]:
         """Tally gallery votes. Each vote received = -1 point."""
-        vote_counts: dict[str, int] = {p.id: 0 for p in state.players}
-        rs = state.current_round
-        if rs:
-            for target_id in rs.gallery_votes.values():
-                if target_id in vote_counts:
-                    vote_counts[target_id] += 1
+        from backend.services.game_logic import tally_gallery_votes
 
-        # Score deltas: votes received = negative points
-        score_deltas: dict[str, int] = {}
-        for pid, count in vote_counts.items():
-            if count > 0:
-                score_deltas[pid] = -count
-
+        vote_counts = tally_gallery_votes(state)
+        score_deltas = {pid: -count for pid, count in vote_counts.items() if count > 0}
         return {"vote_counts": vote_counts}, score_deltas
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:

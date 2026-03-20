@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from datetime import UTC, datetime, timedelta
 
 from backend.minigames import MINIGAME_REGISTRY, get_handler
@@ -41,8 +42,6 @@ def select_next_round_type(
     - No repeat of previous round type
     - Random from remaining eligible types
     """
-    import random
-
     eligible: list[RoundType] = []
 
     for rt in MINIGAME_REGISTRY:
@@ -84,7 +83,7 @@ def get_phase_duration(
     return None
 
 
-def _transition_to_phase(
+def transition_to_phase(
     state: TellGameState,
     phase: GamePhase,
     duration: int,

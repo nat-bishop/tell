@@ -16,11 +16,12 @@ export function FacilityBrainTest() {
   const phase = useGameStore((s) => s.phase);
   const scores = useGameStore((s) => s.scores);
 
-  // Extract brain test fields from generic payload
-  const challengeIndex = subRoundPayload?.challenge_index ?? 0;
-  const challengeType = subRoundPayload?.challenge_type ?? null;
-  const question = subRoundPayload?.question ?? null;
-  const options = subRoundPayload?.options ?? [];
+  // Extract brain test fields from generic payload (guard round_type)
+  const isBrainTest = subRoundPayload?.round_type === "brain_test";
+  const challengeIndex = isBrainTest ? subRoundPayload.challenge_index : 0;
+  const challengeType = isBrainTest ? subRoundPayload.challenge_type : null;
+  const question = isBrainTest ? subRoundPayload.question : null;
+  const options = isBrainTest ? subRoundPayload.options : [];
 
   const [submitted, setSubmitted] = useState<Record<number, number>>({});
 

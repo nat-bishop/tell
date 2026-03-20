@@ -172,6 +172,24 @@ def register_task(game_id: str, task: asyncio.Task) -> None:
     _ai_tasks.setdefault(game_id, []).append(task)
 
 
+async def schedule_ai_votes(game_id: str) -> None:
+    """Schedule AI vote tasks for a task/matchup round."""
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        return
+
+    ai_players = [p for p in session.state.players if p.role == PlayerRole.AI]
+    if not ai_players:
+        return
+
+    tasks: list[asyncio.Task] = []
+    for player in ai_players:
+        delay = random.uniform(2, 8)
+        tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
+    _ai_tasks.setdefault(game_id, []).extend(tasks)
+
+
 def cancel_all(game_id: str) -> None:
     """Cancel all pending AI tasks for a game."""
     tasks = _ai_tasks.pop(game_id, [])

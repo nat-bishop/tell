@@ -15,7 +15,6 @@ from backend.api.deps import (
 )
 from backend.minigames import get_handler
 from backend.services.game_logic import (
-    _transition_to_phase,
     check_game_over,
     fill_missing_answers,
     get_interstitial_hold,
@@ -24,6 +23,7 @@ from backend.services.game_logic import (
     make_game_over_event,
     make_phase_changed_event,
     tally_gallery_votes,
+    transition_to_phase,
 )
 from schemas.aliases import generate_aliases
 from schemas.api_models import (
@@ -213,7 +213,7 @@ async def do_prompt_complete(game_id: str, session) -> None:
     handler = get_handler(round_type)
 
     # Transition to ACTIVE
-    _transition_to_phase(state, GamePhase.ACTIVE, handler.get_active_duration(settings), round_type)
+    transition_to_phase(state, GamePhase.ACTIVE, handler.get_active_duration(settings), round_type)
     extras = handler.active_event_extras(state)
     await cm.broadcast(
         game_id,
@@ -269,7 +269,7 @@ async def do_active_complete(game_id: str, session) -> None:
     log.info("round_results", round_type=round_type, scores=scores)
 
     if handler.meta.has_results:
-        _transition_to_phase(
+        transition_to_phase(
             state, GamePhase.RESULTS, handler.get_results_duration(settings), round_type
         )
         await cm.broadcast(
@@ -393,7 +393,7 @@ async def _start_next_round(game_id: str, session) -> None:
     state.round_types.append(next_round_type)
 
     if handler.meta.has_prompt:
-        _transition_to_phase(state, GamePhase.PROMPT, settings.prompt_duration)
+        transition_to_phase(state, GamePhase.PROMPT, settings.prompt_duration)
         round_state = state.current_round
         await cm.broadcast(
             game_id,
@@ -409,7 +409,7 @@ async def _start_next_round(game_id: str, session) -> None:
         await start_phase_timer(game_id, GamePhase.PROMPT)
         await _notify_ai(game_id, GamePhase.PROMPT)
     else:
-        _transition_to_phase(
+        transition_to_phase(
             state, GamePhase.ACTIVE, handler.get_active_duration(settings), next_round_type
         )
         await cm.broadcast(
