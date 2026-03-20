@@ -51,6 +51,21 @@ def _role_label(role: PlayerRole) -> str:
     return "human" if role == PlayerRole.HUMAN else "AI"
 
 
+def _detect_drama(players: list) -> str | None:
+    """Detect score drama signals (tied, close race, runaway leader)."""
+    sorted_players = sorted(players, key=lambda p: p.score, reverse=True)
+    if len(sorted_players) < 2:
+        return None
+    gap = sorted_players[0].score - sorted_players[1].score
+    if gap == 0:
+        return f"Drama: tied at the top ({sorted_players[0].alias}, {sorted_players[1].alias})."
+    if gap == 1:
+        return f"Drama: close race — {sorted_players[0].alias} leads by {gap}."
+    if gap >= 3:
+        return f"Drama: {sorted_players[0].alias} running away with it (+{gap})."
+    return None
+
+
 def _build_narrator_context(state: TellGameState) -> str:
     """Build a context string for the narrator from game state."""
     parts: list[str] = []
@@ -69,18 +84,9 @@ def _build_narrator_context(state: TellGameState) -> str:
     score_parts = [f"{p.alias}: {p.score}" for p in state.players]
     parts.append(f"Players: {', '.join(score_parts)}.")
 
-    # Drama signals
-    sorted_players = sorted(state.players, key=lambda p: p.score, reverse=True)
-    if len(sorted_players) >= 2:
-        gap = sorted_players[0].score - sorted_players[1].score
-        if gap == 0:
-            parts.append(
-                f"Drama: tied at the top ({sorted_players[0].alias}, {sorted_players[1].alias})."
-            )
-        elif gap == 1:
-            parts.append(f"Drama: close race — {sorted_players[0].alias} leads by {gap}.")
-        elif gap >= 3:
-            parts.append(f"Drama: {sorted_players[0].alias} running away with it (+{gap}).")
+    drama = _detect_drama(state.players)
+    if drama:
+        parts.append(drama)
 
     rs = state.current_round
     if rs:

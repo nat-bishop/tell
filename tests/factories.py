@@ -84,7 +84,7 @@ def _make_step_defs_for_round_type(round_type: RoundType) -> list[dict]:
         )
     elif round_type == RoundType.SIGNAL:
         steps = [
-            StepDef(name="compose", duration=20, component="signal_compose"),
+            StepDef(name="signal_compose", duration=20, component="signal_compose"),
             StepDef(name="signal_guess_0", duration=12, component="signal_guess"),
             StepDef(name="signal_guess_1", duration=12, component="signal_guess"),
             StepDef(name="signal_guess_2", duration=12, component="signal_guess"),

@@ -66,3 +66,43 @@ class MinigameHandler:
                 "round_scores": {p.id: p.score for p in state.players},
             }
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers — used by handler subclasses to reduce boilerplate
+# ---------------------------------------------------------------------------
+
+
+def get_step_context(game_id: str, step_index: int):
+    """Fetch session + round + step safely. Returns ``(session, rs, step_def)`` or ``None``."""
+    from backend.api.deps import get_game_repository
+
+    session = get_game_repository().get(game_id)
+    if not session:
+        return None
+    rs = session.state.current_round
+    if not rs:
+        return None
+    steps = session.state.round_step_defs
+    if not steps or step_index >= len(steps):
+        return None
+    return session, rs, steps[step_index]
+
+
+def get_step_info(state: TellGameState, step_index: int):
+    """Get round state and step def from state. Returns ``(rs, step_def)`` or ``None``."""
+    rs = state.current_round
+    if not rs:
+        return None
+    steps = state.round_step_defs
+    if not steps or step_index >= len(steps):
+        return None
+    return rs, steps[step_index]
+
+
+def parse_sub_index(step_name: str) -> int | None:
+    """Extract numeric suffix from step names like ``challenge_2``, ``signal_guess_0``."""
+    try:
+        return int(step_name.rsplit("_", 1)[-1])
+    except (ValueError, IndexError):
+        return None

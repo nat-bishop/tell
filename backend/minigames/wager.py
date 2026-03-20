@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from backend.config import Settings
 
-from backend.minigames.base import MinigameHandler, StepDef
+from backend.minigames.base import (
+    MinigameHandler,
+    StepDef,
+    get_step_context,
+    get_step_info,
+    parse_sub_index,
+)
 from schemas.game_state import (
     RoundState,
     RoundType,
@@ -101,58 +107,42 @@ class WagerHandler(MinigameHandler):
         return steps
 
     async def on_step_start(self, game_id: str, step_index: int) -> None:
-        from backend.api.deps import get_game_repository
-
-        session = get_game_repository().get(game_id)
-        if not session:
+        ctx = get_step_context(game_id, step_index)
+        if not ctx:
             return
-        rs = session.state.current_round
-        if not rs:
-            return
-
-        steps = session.state.round_step_defs
-        if step_index >= len(steps):
-            return
-        step = steps[step_index]
+        _session, rs, step = ctx
         step_name = step["name"]
+        q_idx = parse_sub_index(step_name)
+        if q_idx is None:
+            return
+
+        rs.current_sub_round = step_index
 
         if step_name.startswith("guess_"):
-            q_idx = int(step_name.split("_")[1])
-            # Set current_sub_round for route validation
-            rs.current_sub_round = step_index
-            # Schedule AI guesses
             from backend.services.ai_scheduler import on_wager_guess
 
             await on_wager_guess(game_id, q_idx)
 
         elif step_name.startswith("bet_"):
-            q_idx = int(step_name.split("_")[1])
-            rs.current_sub_round = step_index
-            # Schedule AI bets
             from backend.services.ai_scheduler import on_wager_bet
 
             await on_wager_bet(game_id, q_idx)
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
-        rs = state.current_round
-        if not rs:
+        info = get_step_info(state, step_index)
+        if not info:
             return {}
-        steps = state.round_step_defs
-        if step_index >= len(steps):
-            return {}
-        step = steps[step_index]
+        rs, step = info
         step_name = step["name"]
+        q_idx = parse_sub_index(step_name)
+        if q_idx is None or q_idx >= len(rs.wager_questions):
+            return {}
 
+        q = rs.wager_questions[q_idx]
         if step_name.startswith("guess_"):
-            q_idx = int(step_name.split("_")[1])
-            if q_idx < len(rs.wager_questions):
-                q = rs.wager_questions[q_idx]
-                return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "guess")
+            return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "guess")
         elif step_name.startswith("bet_"):
-            q_idx = int(step_name.split("_")[1])
-            if q_idx < len(rs.wager_questions):
-                q = rs.wager_questions[q_idx]
-                return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "bet")
+            return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "bet")
         return {}
 
     def build_results(self, state: TellGameState) -> tuple[dict, dict[str, int]]:
@@ -179,25 +169,20 @@ class WagerHandler(MinigameHandler):
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
         """Provide current sub-round info for reconnection during gameplay steps."""
-        rs = state.current_round
-        if not rs:
-            return {}
-
-        steps = state.round_step_defs
-        idx = state.current_step_index
-        if not steps or idx >= len(steps):
+        info = get_step_info(state, state.current_step_index)
+        if not info:
             return super().build_state_sync_extras(state, player_id)
 
-        step = steps[idx]
+        rs, step = info
         step_name = step["name"]
 
         if step_name.startswith(("guess_", "bet_")):
-            q_idx = int(step_name.split("_")[1])
-            if q_idx < len(rs.wager_questions):
+            q_idx = parse_sub_index(step_name)
+            if q_idx is not None and q_idx < len(rs.wager_questions):
                 q = rs.wager_questions[q_idx]
                 phase = "guess" if step_name.startswith("guess") else "bet"
                 return {
-                    "sub_round_index": idx,
+                    "sub_round_index": state.current_step_index,
                     "sub_round_payload": _build_sub_round_payload(
                         q, q_idx, len(rs.wager_questions), phase
                     ),

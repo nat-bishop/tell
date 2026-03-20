@@ -32,7 +32,7 @@ from schemas.api_models import (
     AnswerSubmittedEvent,
     VoteSubmittedEvent,
 )
-from schemas.game_state import GamePhase, PlayerRole, RoundType
+from schemas.game_state import PlayerRole, RoundType
 
 # Type alias for apply callbacks used in _run_ai_task
 _ApplyFn = Callable[..., Coroutine[Any, Any, None]]
@@ -418,16 +418,32 @@ async def _schedule_ai_sub_tasks(
     extra_args: tuple,
     delay_range: tuple[float, float],
 ) -> None:
-    """Schedule per-AI-player tasks with random delays."""
+    """Schedule per-AI-player tasks with random delays.
+
+    Captures ``expected_round`` and ``expected_step`` from current state and
+    appends them to each task call so ``_run_ai_task`` can detect stale tasks.
+    """
     repo = get_game_repository()
     session = repo.get(game_id)
     if not session:
         return
-    ai_players = [p for p in session.state.players if p.role == PlayerRole.AI]
+    state = session.state
+    ai_players = [p for p in state.players if p.role == PlayerRole.AI]
     if not ai_players:
         return
+    expected_round = state.round_number
+    expected_step = state.current_step_index
     tasks = [
-        asyncio.create_task(task_fn(game_id, p.id, *extra_args, random.uniform(*delay_range)))
+        asyncio.create_task(
+            task_fn(
+                game_id,
+                p.id,
+                *extra_args,
+                random.uniform(*delay_range),
+                expected_round,
+                expected_step,
+            )
+        )
         for p in ai_players
     ]
     _ai_tasks.setdefault(game_id, []).extend(tasks)
@@ -439,29 +455,30 @@ async def on_brain_test_challenge(game_id: str, challenge_index: int) -> None:
 
 
 async def _ai_brain_test_task(
-    game_id: str, player_id: str, challenge_index: int, delay: float
+    game_id: str,
+    player_id: str,
+    challenge_index: int,
+    delay: float,
+    expected_round: int,
+    expected_step: int,
 ) -> None:
     """AI player selects an option for a brain test challenge after a delay."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[int, list[ModelMessage]] | None:
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.ROUND:
-            return
-
+        if not session:
+            return None
         state = session.state
         rs = state.current_round
         if not rs or challenge_index >= len(rs.brain_challenges):
-            return
-
+            return None
         ch = rs.brain_challenges[challenge_index]
         if player_id in ch.responses:
-            return
-
+            return None
         player = get_player_by_id(state, player_id)
         if not player:
-            return
+            return None
 
         instructions = get_personality_instructions(get_personality(game_id, player_id).name)
         history = _get_history(game_id, player_id)
@@ -472,7 +489,7 @@ async def _ai_brain_test_task(
 
         from backend.llm.agents import generate_brain_test_answer
 
-        selected, updated_history = await generate_brain_test_answer(
+        return await generate_brain_test_answer(
             user_prompt,
             instructions,
             history,
@@ -480,38 +497,34 @@ async def _ai_brain_test_task(
             log_fields=_log_fields(game_id, player_id),
         )
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
-
-        async with lock:
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.ROUND:
-                return
-            rs = session.state.current_round
-            if not rs or challenge_index >= len(rs.brain_challenges):
-                return
-            ch = rs.brain_challenges[challenge_index]
-            if player_id in ch.responses:
-                return
-            ch.responses[player_id] = selected
-            _set_history(game_id, player_id, updated_history)
-
-            log.info(
-                "ai_brain_test_answer",
-                game_id=game_id,
-                player_id=player_id,
-                challenge_index=challenge_index,
-                selected_index=selected,
-            )
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception(
-            "ai_brain_test_error",
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        selected, updated_history = result
+        rs = session.state.current_round
+        if not rs or challenge_index >= len(rs.brain_challenges):
+            return
+        ch = rs.brain_challenges[challenge_index]
+        if player_id in ch.responses:
+            return
+        ch.responses[player_id] = selected
+        _set_history(game_id, player_id, updated_history)
+        log.info(
+            "ai_brain_test_answer",
             game_id=game_id,
             player_id=player_id,
+            challenge_index=challenge_index,
+            selected_index=selected,
         )
+
+    await _run_ai_task(
+        game_id,
+        player_id,
+        delay,
+        expected_round,
+        expected_step,
+        generate,
+        apply,
+        "ai_brain_test_task",
+    )
 
 
 async def on_wager_guess(game_id: str, question_index: int) -> None:
@@ -520,31 +533,32 @@ async def on_wager_guess(game_id: str, question_index: int) -> None:
 
 
 async def _ai_wager_guess_task(
-    game_id: str, player_id: str, question_index: int, delay: float
+    game_id: str,
+    player_id: str,
+    question_index: int,
+    delay: float,
+    expected_round: int,
+    expected_step: int,
 ) -> None:
     """AI player submits a guess for a wager question after a delay."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[int, list[ModelMessage]] | None:
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.ROUND:
-            return
-
+        if not session:
+            return None
         state = session.state
         rs = state.current_round
         if not rs or rs.round_type != RoundType.WAGER:
-            return
+            return None
         if question_index >= len(rs.wager_questions):
-            return
-
+            return None
         q = rs.wager_questions[question_index]
         if player_id in q.guesses:
-            return
-
+            return None
         player = get_player_by_id(state, player_id)
         if not player:
-            return
+            return None
 
         instructions = get_personality_instructions(get_personality(game_id, player_id).name)
         history = _get_history(game_id, player_id)
@@ -562,44 +576,40 @@ async def _ai_wager_guess_task(
             range_max=q.range_max,
             log_fields=_log_fields(game_id, player_id),
         )
-
         # Clamp to range
         value = max(q.range_min, min(q.range_max, value))
+        return value, updated_history
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
-
-        async with lock:
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.ROUND:
-                return
-            rs = session.state.current_round
-            if not rs or rs.round_type != RoundType.WAGER:
-                return
-            if question_index >= len(rs.wager_questions):
-                return
-            q = rs.wager_questions[question_index]
-            if player_id in q.guesses:
-                return
-            q.guesses[player_id] = value
-            _set_history(game_id, player_id, updated_history)
-
-            log.info(
-                "ai_wager_guess",
-                game_id=game_id,
-                player_id=player_id,
-                question_index=question_index,
-                value=value,
-            )
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception(
-            "ai_wager_guess_error",
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        value, updated_history = result
+        rs = session.state.current_round
+        if not rs or rs.round_type != RoundType.WAGER:
+            return
+        if question_index >= len(rs.wager_questions):
+            return
+        q = rs.wager_questions[question_index]
+        if player_id in q.guesses:
+            return
+        q.guesses[player_id] = value
+        _set_history(game_id, player_id, updated_history)
+        log.info(
+            "ai_wager_guess",
             game_id=game_id,
             player_id=player_id,
+            question_index=question_index,
+            value=value,
         )
+
+    await _run_ai_task(
+        game_id,
+        player_id,
+        delay,
+        expected_round,
+        expected_step,
+        generate,
+        apply,
+        "ai_wager_guess_task",
+    )
 
 
 async def on_wager_bet(game_id: str, question_index: int) -> None:
@@ -608,31 +618,32 @@ async def on_wager_bet(game_id: str, question_index: int) -> None:
 
 
 async def _ai_wager_bet_task(
-    game_id: str, player_id: str, question_index: int, delay: float
+    game_id: str,
+    player_id: str,
+    question_index: int,
+    delay: float,
+    expected_round: int,
+    expected_step: int,
 ) -> None:
     """AI player places a bet on a wager question after a delay."""
-    try:
-        await asyncio.sleep(delay)
 
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.ROUND:
-            return
-
+        if not session:
+            return None
         state = session.state
         rs = state.current_round
         if not rs or rs.round_type != RoundType.WAGER:
-            return
+            return None
         if question_index >= len(rs.wager_questions):
-            return
-
+            return None
         q = rs.wager_questions[question_index]
         if player_id in q.bets:
-            return
-
+            return None
         player = get_player_by_id(state, player_id)
         if not player:
-            return
+            return None
 
         # Build alias maps
         alias_to_id: dict[str, str] = {}
@@ -666,52 +677,46 @@ async def _ai_wager_bet_task(
             log_fields=_log_fields(game_id, player_id),
         )
 
-        # Resolve alias → player_id
+        # Resolve alias → player_id, fallback to random guesser
         target_id = alias_to_id.get(target_alias)
-
-        # Validate target has a guess
         if not target_id or target_id not in q.guesses:
             guessers = list(q.guesses.keys())
             if not guessers:
-                return
+                return None
             target_id = random.choice(guessers)
 
-        cm = get_connection_manager()
-        lock = cm.get_lock(game_id)
+        return target_id, updated_history
 
-        async with lock:
-            session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.ROUND:
-                return
-            rs = session.state.current_round
-            if not rs or rs.round_type != RoundType.WAGER:
-                return
-            if question_index >= len(rs.wager_questions):
-                return
-            q = rs.wager_questions[question_index]
-            if player_id in q.bets:
-                return
-            if target_id not in q.guesses:
-                return
-            q.bets[player_id] = target_id
-            _set_history(game_id, player_id, updated_history)
-
-            log.info(
-                "ai_wager_bet",
-                game_id=game_id,
-                player_id=player_id,
-                question_index=question_index,
-                target=target_id,
-            )
-
-    except asyncio.CancelledError:
-        pass
-    except Exception:
-        log.exception(
-            "ai_wager_bet_error",
+    async def apply(cm: Any, session: Any, result: Any) -> None:
+        target_id, updated_history = result
+        rs = session.state.current_round
+        if not rs or rs.round_type != RoundType.WAGER:
+            return
+        if question_index >= len(rs.wager_questions):
+            return
+        q = rs.wager_questions[question_index]
+        if player_id in q.bets or target_id not in q.guesses:
+            return
+        q.bets[player_id] = target_id
+        _set_history(game_id, player_id, updated_history)
+        log.info(
+            "ai_wager_bet",
             game_id=game_id,
             player_id=player_id,
+            question_index=question_index,
+            target=target_id,
         )
+
+    await _run_ai_task(
+        game_id,
+        player_id,
+        delay,
+        expected_round,
+        expected_step,
+        generate,
+        apply,
+        "ai_wager_bet_task",
+    )
 
 
 async def on_signal_sub_round(game_id: str, sub_round_index: int, featured_player_id: str) -> None:
@@ -724,20 +729,31 @@ async def on_signal_sub_round(game_id: str, sub_round_index: int, featured_playe
     if not session:
         return
 
-    rs = session.state.current_round
+    state = session.state
+    rs = state.current_round
     transmitter_ids = set(rs.signal_player_order) if rs else set()
 
     ai_players = [
-        p for p in session.state.players if p.role == PlayerRole.AI and p.id not in transmitter_ids
+        p for p in state.players if p.role == PlayerRole.AI and p.id not in transmitter_ids
     ]
     if not ai_players:
         return
 
+    expected_round = state.round_number
+    expected_step = state.current_step_index
     tasks: list[asyncio.Task] = []
     for player in ai_players:
         delay = random.uniform(2, 8)
         task = asyncio.create_task(
-            _ai_signal_guess_task(game_id, player.id, featured_player_id, sub_round_index, delay)
+            _ai_signal_guess_task(
+                game_id,
+                player.id,
+                featured_player_id,
+                sub_round_index,
+                delay,
+                expected_round,
+                expected_step,
+            )
         )
         tasks.append(task)
     _ai_tasks.setdefault(game_id, []).extend(tasks)
@@ -749,6 +765,8 @@ async def _ai_signal_guess_task(
     featured_player_id: str,
     sub_round_index: int,
     delay: float,
+    expected_round: int,
+    expected_step: int,
 ) -> None:
     """AI player guesses the original phrase in a Signal sub-round."""
 
@@ -809,14 +827,6 @@ async def _ai_signal_guess_task(
             player_id=player_id,
             sub_round_index=sub_round_index,
         )
-
-    # Guard: check round_number and step_index
-    repo = get_game_repository()
-    session = repo.get(game_id)
-    if not session:
-        return
-    expected_round = session.state.round_number
-    expected_step = session.state.current_step_index
 
     await _run_ai_task(
         game_id,

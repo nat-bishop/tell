@@ -17,7 +17,13 @@ if TYPE_CHECKING:
 
 import structlog
 
-from backend.minigames.base import MinigameHandler, StepDef
+from backend.minigames.base import (
+    MinigameHandler,
+    StepDef,
+    get_step_context,
+    get_step_info,
+    parse_sub_index,
+)
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
     RoundState,
@@ -94,59 +100,42 @@ class SignalHandler(MinigameHandler):
         return steps
 
     async def on_step_start(self, game_id: str, step_index: int) -> None:
-        from backend.api.deps import get_game_repository
-
-        session = get_game_repository().get(game_id)
-        if not session:
+        ctx = get_step_context(game_id, step_index)
+        if not ctx:
             return
-        state = session.state
-        rs = state.current_round
-        if not rs:
-            return
-
-        steps = state.round_step_defs
-        if step_index >= len(steps):
-            return
-        step = steps[step_index]
+        _session, rs, step = ctx
         step_name = step["name"]
 
         if step_name == "compose":
-            # Schedule AI transmitter answers
             from backend.services.ai_scheduler import schedule_ai_answers
 
             await schedule_ai_answers(game_id)
 
         elif step_name.startswith("signal_guess_"):
-            tx_index = int(step_name.split("_")[-1])
-            rs.current_sub_round = tx_index
-            if tx_index < len(rs.signal_player_order):
-                featured_pid = rs.signal_player_order[tx_index]
-                from backend.services.ai_scheduler import on_signal_sub_round
+            tx_index = parse_sub_index(step_name)
+            if tx_index is not None:
+                rs.current_sub_round = tx_index
+                if tx_index < len(rs.signal_player_order):
+                    featured_pid = rs.signal_player_order[tx_index]
+                    from backend.services.ai_scheduler import on_signal_sub_round
 
-                await on_signal_sub_round(game_id, tx_index, featured_pid)
+                    await on_signal_sub_round(game_id, tx_index, featured_pid)
 
     async def on_step_end(self, game_id: str, step_index: int) -> None:
-        from backend.api.deps import get_game_repository
-        from backend.services.game_logic import fill_missing_answers
-
-        session = get_game_repository().get(game_id)
-        if not session:
+        ctx = get_step_context(game_id, step_index)
+        if not ctx:
             return
-        steps = session.state.round_step_defs
-        if step_index >= len(steps):
-            return
-        step = steps[step_index]
+        session, _rs, step = ctx
         if step["name"] == "compose":
+            from backend.services.game_logic import fill_missing_answers
+
             fill_missing_answers(session.state)
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
-        rs = state.current_round
-        if not rs:
+        info = get_step_info(state, step_index)
+        if not info:
             return {}
-        steps = state.round_step_defs
-        if step_index >= len(steps):
-            return {}
-        step = steps[step_index]
+        rs, step = info
         step_name = step["name"]
 
         if step_name == "compose":
@@ -156,8 +145,8 @@ class SignalHandler(MinigameHandler):
                 "transmitter_ids": rs.signal_player_order,
             }
         elif step_name.startswith("signal_guess_"):
-            tx_index = int(step_name.split("_")[-1])
-            if tx_index < len(rs.signal_player_order):
+            tx_index = parse_sub_index(step_name)
+            if tx_index is not None and tx_index < len(rs.signal_player_order):
                 featured_pid = rs.signal_player_order[tx_index]
                 alias_map = {p.id: p.alias for p in state.players}
                 transformation = rs.answers.get(featured_pid, NO_RESPONSE)
@@ -271,22 +260,15 @@ class SignalHandler(MinigameHandler):
         return payload, score_deltas
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
-        rs = state.current_round
-        if not rs:
-            return {}
-
-        transmitter_ids = set(rs.signal_player_order)
-        steps = state.round_step_defs
-        idx = state.current_step_index
-
-        if not steps or idx >= len(steps):
+        info = get_step_info(state, state.current_step_index)
+        if not info:
             return super().build_state_sync_extras(state, player_id)
 
-        step = steps[idx]
+        rs, step = info
+        transmitter_ids = set(rs.signal_player_order)
         step_name = step["name"]
 
         if step_name == "compose":
-            # Only transmitters get their phrase
             if player_id in transmitter_ids:
                 phrase = rs.signal_phrases.get(player_id, "")
                 if phrase:
@@ -294,8 +276,8 @@ class SignalHandler(MinigameHandler):
             return {"is_transmitter": player_id in transmitter_ids}
 
         if step_name.startswith("signal_guess_"):
-            tx_index = int(step_name.split("_")[-1])
-            if tx_index < len(rs.signal_player_order):
+            tx_index = parse_sub_index(step_name)
+            if tx_index is not None and tx_index < len(rs.signal_player_order):
                 featured_pid = rs.signal_player_order[tx_index]
                 alias_map = {p.id: p.alias for p in state.players}
                 transformation = rs.answers.get(featured_pid, NO_RESPONSE)

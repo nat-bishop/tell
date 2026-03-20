@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from backend.config import Settings
 
-from backend.minigames.base import MinigameHandler, StepDef
+from backend.minigames.base import (
+    MinigameHandler,
+    StepDef,
+    get_step_context,
+    get_step_info,
+    parse_sub_index,
+)
 from schemas.game_state import (
     BrainTestChallenge,
     RoundState,
@@ -68,44 +74,27 @@ class BrainTestHandler(MinigameHandler):
         return steps
 
     async def on_step_start(self, game_id: str, step_index: int) -> None:
-        from backend.api.deps import get_game_repository
-
-        session = get_game_repository().get(game_id)
-        if not session:
+        ctx = get_step_context(game_id, step_index)
+        if not ctx:
             return
-        rs = session.state.current_round
-        if not rs:
-            return
-
-        steps = session.state.round_step_defs
-        if step_index >= len(steps):
-            return
-        step = steps[step_index]
-        if not step["name"].startswith("challenge"):
+        _session, rs, step = ctx
+        challenge_index = parse_sub_index(step["name"])
+        if challenge_index is None:
             return
 
-        # Set current_sub_round for the challenge
-        challenge_index = int(step["name"].split("_")[1])
         rs.current_sub_round = challenge_index
 
-        # Schedule AI for this challenge
         from backend.services.ai_scheduler import on_brain_test_challenge
 
         await on_brain_test_challenge(game_id, challenge_index)
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
-        rs = state.current_round
-        if not rs:
+        info = get_step_info(state, step_index)
+        if not info:
             return {}
-        steps = state.round_step_defs
-        if step_index >= len(steps):
-            return {}
-        step = steps[step_index]
-        if not step["name"].startswith("challenge"):
-            return {}
-
-        challenge_index = int(step["name"].split("_")[1])
-        if challenge_index >= len(rs.brain_challenges):
+        rs, step = info
+        challenge_index = parse_sub_index(step["name"])
+        if challenge_index is None or challenge_index >= len(rs.brain_challenges):
             return {}
         ch = rs.brain_challenges[challenge_index]
         return {
@@ -141,15 +130,11 @@ class BrainTestHandler(MinigameHandler):
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
         """Provide current challenge info for reconnection during challenge steps."""
-        rs = state.current_round
-        if not rs:
-            return {}
-
-        steps = state.round_step_defs
-        idx = state.current_step_index
-        if steps and idx < len(steps) and steps[idx]["name"].startswith("challenge"):
-            challenge_index = int(steps[idx]["name"].split("_")[1])
-            if challenge_index < len(rs.brain_challenges):
+        info = get_step_info(state, state.current_step_index)
+        if info:
+            rs, step = info
+            challenge_index = parse_sub_index(step["name"])
+            if challenge_index is not None and challenge_index < len(rs.brain_challenges):
                 ch = rs.brain_challenges[challenge_index]
                 return {
                     "sub_round_index": challenge_index,
