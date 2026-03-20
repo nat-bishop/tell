@@ -4,9 +4,7 @@ import { create } from "zustand";
 
 export type GamePhase =
   | "lobby"
-  | "prompt"
-  | "active"
-  | "results"
+  | "round"
   | "game_over";
 
 export interface PlayerInfo {
@@ -40,13 +38,16 @@ export interface StateSyncData {
   is_host: boolean;
   phase_deadline: string | null;
   phase_duration: number | null;
-  action_starts_at?: string | null;
   scores: Record<string, number>;
   total_rounds: number;
   my_vote?: string | null;
   // Signal reconnection
   signal_phrase?: string | null;
   is_transmitter?: boolean;
+  // Step fields
+  step_name?: string | null;
+  step_index?: number | null;
+  component?: string | null;
   // Reconnection state
   sub_round_index?: number | null;
   sub_round_payload?: SubRoundPayload | null;
@@ -61,17 +62,17 @@ export interface PlayerEventData {
   player_count?: number;
 }
 
-export interface PhaseChangedData {
+export interface StepChangedData {
   seq: number;
   phase: GamePhase;
+  step_name: string;
+  step_index: number;
+  component: string;
   round_number: number;
-  prompt_text?: string;
-  prompt_category?: string;
-  phase_deadline?: string;
-  phase_duration?: number;
-  answers?: Record<string, string>;
-  round_type?: string;
-  action_starts_at?: string;
+  round_type: string;
+  deadline: string | null;
+  duration: number | null;
+  payload: Record<string, unknown>;
 }
 
 export interface CountData {
@@ -170,15 +171,6 @@ export type RoundResultsPayload =
       }>;
     };
 
-export interface SubRoundData {
-  seq: number;
-  round_type: string;
-  sub_round_index: number;
-  payload: SubRoundPayload;
-  sub_deadline: string | null;
-  phase_duration: number | null;
-}
-
 export interface RoundResultsData {
   seq: number;
   round_type: string;
@@ -228,12 +220,14 @@ interface GameState {
   // Round-specific
   roundType: string | null;
 
+  // Step-based state
+  stepName: string | null;
+  stepIndex: number;
+  component: string | null;
+
   // Timer
   phaseDeadline: string | null;
   phaseDuration: number | null;
-
-  // Interstitial
-  actionStartsAt: string | null;
 
   // Scores
   scores: Record<string, number>;
@@ -271,13 +265,12 @@ interface GameState {
   onPlayerJoined: (data: PlayerEventData) => void;
   onPlayerDisconnected: (data: PlayerEventData) => void;
   onPlayerReconnected: (data: PlayerEventData) => void;
-  onPhaseChanged: (data: PhaseChangedData) => void;
+  onStepChanged: (data: StepChangedData) => void;
   onAnswerSubmitted: (data: CountData) => void;
   onGameOver: (data: GameOverData) => void;
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
   onNarration: (data: NarrationData) => void;
-  onSubRound: (data: SubRoundData) => void;
   onRoundResults: (data: RoundResultsData) => void;
   onVoteSubmitted: (data: VoteSubmittedData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
@@ -303,9 +296,11 @@ const initialState = {
   winner: null as string | null,
   lastSeq: 0,
   roundType: null as string | null,
+  stepName: null as string | null,
+  stepIndex: 0,
+  component: null as string | null,
   phaseDeadline: null as string | null,
   phaseDuration: null as number | null,
-  actionStartsAt: null as string | null,
   scores: {} as Record<string, number>,
   totalRounds: 5,
   winnerIds: [] as string[],
@@ -345,13 +340,15 @@ export const useGameStore = create<GameState>((set) => ({
       isHost: data.is_host,
       phaseDeadline: data.phase_deadline,
       phaseDuration: data.phase_duration ?? null,
-      actionStartsAt: data.action_starts_at ?? null,
       scores: data.scores || {},
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
       signalPhrase: data.signal_phrase ?? null,
       isTransmitter: data.is_transmitter ?? false,
       votedForId: data.my_vote ?? null,
+      stepName: data.step_name ?? null,
+      stepIndex: data.step_index ?? 0,
+      component: data.component ?? null,
       subRoundPayload: data.sub_round_payload ?? null,
       subRoundIndex: data.sub_round_index ?? 0,
       roundResults: data.round_results_payload
@@ -392,37 +389,53 @@ export const useGameStore = create<GameState>((set) => ({
       lastSeq: data.seq,
     })),
 
-  onPhaseChanged: (data) =>
+  onStepChanged: (data) =>
     set((s) => {
+      const isNewRound = data.round_number !== s.roundNumber;
+
       // Only clear narration if it has been visible for 4+ seconds
       const stale =
         s.narrationReceivedAt !== null && Date.now() - s.narrationReceivedAt > 4000;
+
+      // Build sub-round payload from step payload for backwards compat
+      let subRoundPayload: SubRoundPayload | null = null;
+      const p = data.payload;
+      if (p && typeof p === "object" && Object.keys(p).length > 0) {
+        subRoundPayload = p as unknown as SubRoundPayload;
+      }
+
       return {
         phase: data.phase,
         roundNumber: data.round_number,
-        promptText: data.prompt_text || null,
-        promptCategory: data.prompt_category || null,
-        phaseDeadline: data.phase_deadline || null,
-        phaseDuration: data.phase_duration ?? null,
-        actionStartsAt: data.action_starts_at ?? null,
-        answers: data.answers || {},
         roundType: data.round_type || null,
+        stepName: data.step_name,
+        stepIndex: data.step_index,
+        component: data.component,
+        phaseDeadline: data.deadline || null,
+        phaseDuration: data.duration ?? null,
         lastSeq: data.seq,
-        myAnswer: null,
-        answerCount: 0,
-        totalCount: 0,
+        // Payload-derived fields
+        promptText: (p?.prompt_text as string) ?? s.promptText,
+        promptCategory: (p?.prompt_category as string) ?? s.promptCategory,
+        answers: (p?.answers as Record<string, string>) ?? (isNewRound ? {} : s.answers),
+        subRoundPayload,
+        subRoundIndex: (p?.sub_round_index as number) ?? data.step_index,
+        // Clear on new round
+        ...(isNewRound ? {
+          myAnswer: null,
+          answerCount: 0,
+          totalCount: 0,
+          signalPhrase: null,
+          isTransmitter: false,
+          roundResults: null,
+          roundScores: null,
+          votedForId: null,
+          voteCount: 0,
+        } : {}),
+        // Narration
         narrationText: stale ? null : s.narrationText,
         narrationTrigger: stale ? null : s.narrationTrigger,
         narrationReceivedAt: stale ? null : s.narrationReceivedAt,
-        // Generic round state reset
-        signalPhrase: null,
-        isTransmitter: false,
-        subRoundPayload: null,
-        subRoundIndex: 0,
-        roundResults: null,
-        roundScores: null,
-        votedForId: null,
-        voteCount: 0,
       };
     }),
 
@@ -438,15 +451,6 @@ export const useGameStore = create<GameState>((set) => ({
       narrationText: data.text,
       narrationTrigger: data.trigger,
       narrationReceivedAt: Date.now(),
-      lastSeq: data.seq,
-    }),
-
-  onSubRound: (data) =>
-    set({
-      subRoundPayload: data.payload,
-      subRoundIndex: data.sub_round_index,
-      phaseDeadline: data.sub_deadline,
-      phaseDuration: data.phase_duration ?? 12,
       lastSeq: data.seq,
     }),
 

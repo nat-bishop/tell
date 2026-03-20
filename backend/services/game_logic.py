@@ -5,15 +5,11 @@ from __future__ import annotations
 import random
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from backend.minigames import MINIGAME_REGISTRY, get_handler
-
-if TYPE_CHECKING:
-    from backend.config import Settings
 from schemas.api_models import (
     GameOverEvent,
-    PhaseChangedEvent,
 )
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
@@ -29,7 +25,7 @@ def get_player_by_id(state: TellGameState, player_id: str) -> Player | None:
 
 
 def get_answer_total(state: TellGameState) -> int:
-    """How many answers are expected this prompt phase."""
+    """How many answers are expected this compose step."""
     rs = state.current_round
     if rs and rs.round_type == RoundType.SIGNAL:
         return len(rs.signal_player_order)
@@ -68,48 +64,27 @@ def select_next_round_type(
     return random.choice(eligible)
 
 
-def get_interstitial_hold(phase: GamePhase, round_type: RoundType | None = None) -> int:
-    """Extra seconds added to phase deadline for client interstitial overlay."""
-    if phase == GamePhase.PROMPT:
-        return 5
-    if round_type:
-        handler = get_handler(round_type)
-        if phase == GamePhase.ACTIVE:
-            return handler.meta.active_interstitial
-        if phase == GamePhase.RESULTS:
-            return handler.meta.results_interstitial
-    return 0
+def get_current_step(state: TellGameState) -> dict | None:
+    """Get the current step def dict, or None if not in a round."""
+    if not state.round_step_defs or state.current_step_index >= len(state.round_step_defs):
+        return None
+    return state.round_step_defs[state.current_step_index]
 
 
-def get_phase_duration(
-    settings: Settings, phase: GamePhase, round_type: RoundType | None = None
-) -> int | None:
-    """Get the duration for a given phase."""
-    if phase == GamePhase.PROMPT:
-        if round_type:
-            return get_handler(round_type).get_prompt_duration(settings)
-        return settings.prompt_duration
-    if round_type:
-        handler = get_handler(round_type)
-        if phase == GamePhase.ACTIVE:
-            return handler.get_active_duration(settings)
-        if phase == GamePhase.RESULTS:
-            return handler.get_results_duration(settings)
-    return None
+def get_step_name(state: TellGameState) -> str | None:
+    """Get the current step name, or None."""
+    step = get_current_step(state)
+    return step["name"] if step else None
 
 
-def transition_to_phase(
+def transition_to_step(
     state: TellGameState,
-    phase: GamePhase,
-    duration: int,
-    round_type: RoundType | None = None,
-) -> TellGameState:
-    """Move to a phase with a deadline (includes interstitial hold)."""
-    state.phase = phase
-    state.phase_deadline = datetime.now(UTC) + timedelta(
-        seconds=duration + get_interstitial_hold(phase, round_type)
-    )
-    return state
+    step_index: int,
+) -> None:
+    """Move to a step: set step index and deadline from step duration."""
+    state.current_step_index = step_index
+    step = state.round_step_defs[step_index]
+    state.phase_deadline = datetime.now(UTC) + timedelta(seconds=step["duration"])
 
 
 def get_final_rankings(state: TellGameState) -> list[tuple[str, int]]:
@@ -162,23 +137,6 @@ def make_game_over_event(
     )
 
 
-def make_phase_changed_event(
-    state: TellGameState, seq: int, phase_duration: int | None = None, **extra: Any
-) -> PhaseChangedEvent:
-    action_starts_at = None
-    if state.phase_deadline and phase_duration:
-        action_starts_at = (state.phase_deadline - timedelta(seconds=phase_duration)).isoformat()
-    return PhaseChangedEvent(
-        seq=seq,
-        phase=state.phase.value,
-        round_number=state.round_number,
-        phase_deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
-        phase_duration=phase_duration,
-        action_starts_at=action_starts_at,
-        **extra,
-    )
-
-
 def sanitize_players_for_client(state: TellGameState) -> list[dict]:
     result = []
     for p in state.players:
@@ -213,9 +171,7 @@ def tally_gallery_votes(state: TellGameState) -> dict[str, int]:
     return vote_counts
 
 
-def build_state_sync(
-    state: TellGameState, player_id: str, seq: int, phase_duration: int | None = None
-) -> dict:
+def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
     """Build a StateSyncEvent payload for a specific player."""
     round_state = state.current_round
     answers: dict[str, str] = {}
@@ -225,24 +181,27 @@ def build_state_sync(
     round_type: str | None = None
     my_vote: str | None = None
 
+    step = get_current_step(state)
+    step_name = step["name"] if step else None
+
     if round_state:
         prompt_text = round_state.prompt_text
         prompt_category = round_state.prompt_category
         round_type = round_state.round_type
 
-        # Answers visible during ACTIVE (task), RESULTS, and GAME_OVER
-        if state.phase in (GamePhase.ACTIVE, GamePhase.RESULTS, GamePhase.GAME_OVER):
+        # Answers visible after compose steps
+        in_compose = step_name in ("compose", "signal_compose", None)
+        if (state.phase == GamePhase.ROUND and not in_compose) or (
+            state.phase == GamePhase.GAME_OVER
+        ):
             answers = round_state.answers
 
-        if state.phase == GamePhase.PROMPT and player_id in round_state.answers:
+        # Own answer visible during compose
+        if step_name in ("compose", "signal_compose") and player_id in round_state.answers:
             my_answer = round_state.answers[player_id]
 
-        # Include player's own vote during ACTIVE task phase
-        if (
-            state.phase == GamePhase.ACTIVE
-            and round_state.round_type == RoundType.TASK
-            and player_id in round_state.gallery_votes
-        ):
+        # Include player's own vote during vote step
+        if step_name == "vote" and player_id in round_state.gallery_votes:
             my_vote = round_state.gallery_votes[player_id]
 
     player_obj = get_player_by_id(state, player_id)
@@ -250,7 +209,9 @@ def build_state_sync(
 
     scores = {p.id: p.score for p in state.players}
 
-    result = {
+    duration = step["duration"] if step else None
+
+    result: dict[str, Any] = {
         "event_type": "state_sync",
         "seq": seq,
         "game_id": state.game_id,
@@ -264,17 +225,16 @@ def build_state_sync(
         "answers": answers,
         "scores": scores,
         "phase_deadline": state.phase_deadline.isoformat() if state.phase_deadline else None,
-        "phase_duration": phase_duration,
+        "phase_duration": duration,
         "winner": state.winner,
         "winner_ids": state.winner_ids,
         "is_host": is_host,
         "my_answer": my_answer,
         "my_vote": my_vote,
-        "action_starts_at": (
-            (state.phase_deadline - timedelta(seconds=phase_duration)).isoformat()
-            if state.phase_deadline and phase_duration
-            else None
-        ),
+        # Step fields
+        "step_name": step_name,
+        "step_index": state.current_step_index if step else None,
+        "component": step["component"] if step else None,
     }
 
     # Merge handler-specific reconnection data

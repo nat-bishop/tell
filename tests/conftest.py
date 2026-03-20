@@ -16,7 +16,7 @@ from tests.factories import make_game_state, make_player, make_round_state, make
 
 @pytest.fixture
 def standard_game():
-    """4-player game (2 human, 2 AI) in PROMPT phase."""
+    """4-player game (2 human, 2 AI) in ROUND phase."""
     return make_standard_game()
 
 
@@ -71,9 +71,13 @@ def mock_ai():
     """Patch AI scheduler functions to no-ops."""
     with (
         patch(
-            "backend.services.ai_scheduler.on_phase_change",
+            "backend.services.ai_scheduler.schedule_ai_answers",
             new_callable=AsyncMock,
-        ) as mock_phase,
+        ) as mock_answers,
+        patch(
+            "backend.services.ai_scheduler.schedule_ai_votes",
+            new_callable=AsyncMock,
+        ) as mock_votes,
         patch(
             "backend.services.ai_scheduler.assign_personalities",
         ) as mock_assign,
@@ -83,12 +87,33 @@ def mock_ai():
         patch(
             "backend.services.ai_scheduler.cleanup_game",
         ) as mock_cleanup,
+        patch(
+            "backend.services.ai_scheduler.on_brain_test_challenge",
+            new_callable=AsyncMock,
+        ) as mock_bt,
+        patch(
+            "backend.services.ai_scheduler.on_wager_guess",
+            new_callable=AsyncMock,
+        ) as mock_wg,
+        patch(
+            "backend.services.ai_scheduler.on_wager_bet",
+            new_callable=AsyncMock,
+        ) as mock_wb,
+        patch(
+            "backend.services.ai_scheduler.on_signal_sub_round",
+            new_callable=AsyncMock,
+        ) as mock_ss,
     ):
         yield {
-            "on_phase_change": mock_phase,
+            "schedule_ai_answers": mock_answers,
+            "schedule_ai_votes": mock_votes,
             "assign_personalities": mock_assign,
             "register_task": mock_register,
             "cleanup_game": mock_cleanup,
+            "on_brain_test_challenge": mock_bt,
+            "on_wager_guess": mock_wg,
+            "on_wager_bet": mock_wb,
+            "on_signal_sub_round": mock_ss,
         }
 
 
@@ -121,11 +146,19 @@ async def client(fresh_deps):
         yield ac
 
 
-def seed_game(phase, round_type=None, **kwargs):
+def seed_game(phase, round_type=None, current_step_index=None, **kwargs):
     """Create a game directly in the repo at a given phase. Returns (game_id, session, players)."""
     from backend.api.deps import get_connection_manager, get_game_repository
 
-    state, players = make_standard_game(phase=phase, round_type=round_type or "task", **kwargs)
+    state, players = make_standard_game(
+        phase=phase,
+        round_type=round_type or "task",
+        current_step_index=current_step_index,
+    )
+    # Apply any extra kwargs to the state
+    for k, v in kwargs.items():
+        if hasattr(state, k):
+            setattr(state, k, v)
     repo = get_game_repository()
     session = repo.create(state)
     cm = get_connection_manager()

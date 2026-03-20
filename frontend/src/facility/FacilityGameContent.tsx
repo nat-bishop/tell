@@ -11,13 +11,9 @@ import { FacilityScene } from "@/facility/FacilityScene";
 import { TransitionOverlay } from "@/facility/TransitionOverlay";
 import { FacilityBackground } from "@/facility/FacilityBackground";
 
-const INTERSTITIAL_PHASES = new Set<GamePhase>([
-  "prompt", "active", "results",
-]);
-
-const FALLBACK_DURATIONS: Partial<Record<GamePhase, number>> = {
-  prompt: 45,
-  active: 25,
+const FALLBACK_DURATIONS: Partial<Record<string, number>> = {
+  compose: 45,
+  vote: 25,
   results: 15,
 };
 
@@ -50,7 +46,8 @@ function ColdOpen({ playerCount }: { playerCount: number }) {
 
 function FacilityInner() {
   const {
-    phase, phaseDeadline, phaseDuration, players, actionStartsAt,
+    phase, phaseDeadline, phaseDuration, players,
+    roundNumber, component, stepName,
   } = useGameStore();
   const remaining = useTimer(phaseDeadline);
   const { transitionState, startTransition, snapTo } = useFacilityContext();
@@ -76,40 +73,45 @@ function FacilityInner() {
     prevPhaseForColdRef.current = phase;
   }, [phase, coldOpenDone]);
 
-  // Transition interstitials -- drive the transition machine on phase changes
-  const prevPhaseRef = useRef<GamePhase>(phase);
-  const prevActionStartsAtRef = useRef<string | null>(actionStartsAt);
+  // Transition logic — driven by step changes
+  const prevRoundRef = useRef(roundNumber);
+  const prevComponentRef = useRef(component);
+  const prevStepNameRef = useRef(stepName);
 
   useEffect(() => {
-    const phaseChanged = prevPhaseRef.current !== phase;
-    const isReconnection = !phaseChanged && actionStartsAt !== prevActionStartsAtRef.current;
+    const prevRound = prevRoundRef.current;
+    const prevComponent = prevComponentRef.current;
+    const prevStep = prevStepNameRef.current;
 
-    prevPhaseRef.current = phase;
-    prevActionStartsAtRef.current = actionStartsAt;
+    prevRoundRef.current = roundNumber;
+    prevComponentRef.current = component;
+    prevStepNameRef.current = stepName;
 
     if (showColdOpen) return;
+    if (phase === "lobby" || phase === "game_over") return;
 
-    if (!INTERSTITIAL_PHASES.has(phase) || !actionStartsAt) {
+    // Reconnection: if step didn't actually change, snap
+    if (prevStep === stepName && prevRound === roundNumber) {
       return;
     }
 
-    if (isReconnection) {
-      // state_sync (reconnection) -- snap to idle
+    // Determine transition duration based on what changed
+    let transitionMs = 0;
+    if (roundNumber !== prevRound) {
+      transitionMs = 4000; // new round: full overlay
+    } else if (component !== prevComponent) {
+      transitionMs = 700; // new component: brief fade
+    }
+    // same component: instant swap (transitionMs = 0)
+
+    if (transitionMs > 0) {
+      startTransition(transitionMs);
+    } else {
       snapTo();
-      return;
     }
+  }, [phase, roundNumber, component, stepName, showColdOpen, startTransition, snapTo]);
 
-    if (phaseChanged) {
-      const holdMs = new Date(actionStartsAt).getTime() - Date.now();
-      if (holdMs <= 0) {
-        snapTo();
-        return;
-      }
-      startTransition(holdMs);
-    }
-  }, [phase, actionStartsAt, showColdOpen, startTransition, snapTo]);
-
-  const total = phaseDuration ?? FALLBACK_DURATIONS[phase] ?? 0;
+  const total = phaseDuration ?? FALLBACK_DURATIONS[stepName ?? ""] ?? 0;
   const hideTimer = phase === "lobby" || phase === "game_over" || showColdOpen || transitionState !== "idle";
 
   return (

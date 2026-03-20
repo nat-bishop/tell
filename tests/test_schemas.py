@@ -8,6 +8,7 @@ from schemas.aliases import generate_aliases
 from schemas.api_models import (
     FinalRevealEvent,
     PlayerJoinedEvent,
+    StepChangedEvent,
     SubmitVoteRequest,
     SubmitWagerBetRequest,
     SubmitWagerGuessRequest,
@@ -57,6 +58,8 @@ class TestModelDefaults:
         assert state.current_round is None
         assert state.round_number == 0
         assert state.total_rounds == 5
+        assert state.current_step_index == 0
+        assert state.round_step_defs == []
 
     def test_player_defaults(self):
         player = Player(id="p1", alias="UNIT-1", role=PlayerRole.HUMAN)
@@ -141,6 +144,23 @@ class TestEventSerialization:
             winner_ids=[],
         )
         assert event.narrator_text is None
+
+    def test_step_changed_event(self):
+        event = StepChangedEvent(
+            seq=1,
+            phase="round",
+            step_name="compose",
+            step_index=0,
+            component="compose",
+            round_number=1,
+            round_type="task",
+            deadline="2026-01-01T00:00:00",
+            duration=45,
+            payload={"prompt_text": "Test"},
+        )
+        assert event.event_type == "step_changed"
+        assert event.step_name == "compose"
+        assert event.component == "compose"
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from backend.minigames.signal import NUM_TRANSMITTERS, SignalHandler
-from schemas.game_state import RoundType
+from schemas.game_state import GamePhase, RoundType
 from tests.factories import make_standard_game
 
 
@@ -106,7 +106,10 @@ class TestSignalBuildResults:
     def _make_signal_state(self, guesses, judgments, phrases=None):
         """Build a game state with signal round data for testing build_results."""
         handler = SignalHandler()
-        state, _ = make_standard_game(phase="active", round_type=RoundType.SIGNAL)
+        # Use ROUND phase with signal_guess step (step_index=1)
+        state, _ = make_standard_game(
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=1
+        )
 
         rs = state.current_round
         rs.signal_constraint = "Only questions"
@@ -238,9 +241,12 @@ class TestSignalPromptSelection:
 
 
 class TestSignalStateSyncExtras:
-    def test_prompt_phase_transmitter_returns_phrase(self):
+    def test_compose_step_transmitter_returns_phrase(self):
         handler = SignalHandler()
-        state, _ = make_standard_game(phase="prompt", round_type=RoundType.SIGNAL)
+        # Step 0 = compose for signal
+        state, _ = make_standard_game(
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=0
+        )
         rs = state.current_round
         rs.signal_player_order = ["h1"]
         rs.signal_phrases = {"h1": "a dog chasing a squirrel"}
@@ -249,9 +255,11 @@ class TestSignalStateSyncExtras:
         assert extras.get("signal_phrase") == "a dog chasing a squirrel"
         assert extras.get("is_transmitter") is True
 
-    def test_prompt_phase_non_transmitter(self):
+    def test_compose_step_non_transmitter(self):
         handler = SignalHandler()
-        state, _ = make_standard_game(phase="prompt", round_type=RoundType.SIGNAL)
+        state, _ = make_standard_game(
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=0
+        )
         rs = state.current_round
         rs.signal_player_order = ["h1"]
         rs.signal_phrases = {"h1": "a dog chasing a squirrel"}
@@ -260,9 +268,12 @@ class TestSignalStateSyncExtras:
         assert "signal_phrase" not in extras
         assert extras.get("is_transmitter") is False
 
-    def test_active_phase_returns_sub_round(self):
+    def test_guess_step_returns_sub_round(self):
         handler = SignalHandler()
-        state, _ = make_standard_game(phase="active", round_type=RoundType.SIGNAL)
+        # Step 1 = signal_guess_0
+        state, _ = make_standard_game(
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=1
+        )
         rs = state.current_round
         rs.signal_player_order = ["h1", "h2"]
         rs.signal_constraint = "Only questions"

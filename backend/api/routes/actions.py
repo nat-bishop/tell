@@ -9,17 +9,15 @@ from backend.api.deps import (
     get_connection_manager,
     get_game_repository,
     get_settings,
-    get_timer_manager,
 )
 from backend.services.game_logic import (
-    fill_missing_answers,
     get_answer_total,
     get_player_by_id,
+    get_step_name,
 )
 from backend.services.transitions import (
-    do_active_complete,
-    do_prompt_complete,
     initialize_and_start_game,
+    try_advance_step,
 )
 from schemas.aliases import generate_aliases, generate_player_id
 from schemas.api_models import (
@@ -145,8 +143,9 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest) -> dict[str, str
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.PROMPT:
-            raise HTTPException(status_code=400, detail="Not in prompt phase")
+        step_name = get_step_name(state)
+        if step_name not in ("compose", "signal_compose"):
+            raise HTTPException(status_code=400, detail="Not in compose step")
 
         player = get_player_by_id(state, req.player_id)
         if not player:
@@ -160,10 +159,7 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest) -> dict[str, str
             raise HTTPException(status_code=400, detail="Already answered")
 
         # Signal: only transmitters can submit transformations
-        if (
-            round_state.round_type == RoundType.SIGNAL
-            and req.player_id not in round_state.signal_player_order
-        ):
+        if step_name == "signal_compose" and req.player_id not in round_state.signal_player_order:
             raise HTTPException(status_code=400, detail="Not a transmitter this round")
 
         answer_text = req.answer.strip() if req.answer.strip() else NO_RESPONSE
@@ -186,11 +182,8 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest) -> dict[str, str
             total=total_count,
         )
 
-        # Check if all answered — early transition
-        if answer_count >= total_count:
-            get_timer_manager().cancel_timer(game_id)
-            fill_missing_answers(state)
-            await do_prompt_complete(game_id, session)
+        # Check early completion
+        await try_advance_step(game_id, session)
 
     return {"status": "ok"}
 
@@ -210,12 +203,13 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest) -> dict[str, str]:
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.ACTIVE:
-            raise HTTPException(status_code=400, detail="Not in active phase")
+        step_name = get_step_name(state)
+        if step_name != "vote":
+            raise HTTPException(status_code=400, detail="Not in vote step")
 
         round_state = state.current_round
-        if not round_state or round_state.round_type != RoundType.TASK:
-            raise HTTPException(status_code=400, detail="Not a task round")
+        if not round_state:
+            raise HTTPException(status_code=400, detail="No active round")
 
         player = get_player_by_id(state, req.player_id)
         if not player:
@@ -227,9 +221,6 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest) -> dict[str, str]:
         target = get_player_by_id(state, req.voted_for_player_id)
         if not target:
             raise HTTPException(status_code=400, detail="Target player not found")
-
-        if not round_state:
-            raise HTTPException(status_code=400, detail="No active round")
 
         # Overwrite allowed (changeable vote)
         round_state.gallery_votes[req.player_id] = req.voted_for_player_id
@@ -253,10 +244,8 @@ async def submit_vote(game_id: str, req: SubmitVoteRequest) -> dict[str, str]:
             total=total,
         )
 
-        # Early complete: all voted
-        if vote_count >= total:
-            get_timer_manager().cancel_timer(game_id)
-            await do_active_complete(game_id, session)
+        # Check early completion
+        await try_advance_step(game_id, session)
 
     return {"status": "ok"}
 
@@ -278,8 +267,9 @@ async def submit_brain_test_answer(
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.ACTIVE:
-            raise HTTPException(status_code=400, detail="Not in active phase")
+        step_name = get_step_name(state)
+        if not step_name or not step_name.startswith("challenge"):
+            raise HTTPException(status_code=400, detail="Not in a brain test challenge step")
 
         round_state = state.current_round
         if not round_state or round_state.round_type != RoundType.BRAIN_TEST:
@@ -288,6 +278,11 @@ async def submit_brain_test_answer(
         player = get_player_by_id(state, req.player_id)
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
+
+        # Validate challenge index matches current step
+        current_challenge = int(step_name.split("_")[1])
+        if req.challenge_index != current_challenge:
+            raise HTTPException(status_code=400, detail="Wrong challenge index")
 
         if not (0 <= req.challenge_index < len(round_state.brain_challenges)):
             raise HTTPException(status_code=400, detail="Invalid challenge index")
@@ -324,8 +319,9 @@ async def submit_wager_guess(game_id: str, req: SubmitWagerGuessRequest) -> dict
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.ACTIVE:
-            raise HTTPException(status_code=400, detail="Not in active phase")
+        step_name = get_step_name(state)
+        if not step_name or not step_name.startswith("guess_"):
+            raise HTTPException(status_code=400, detail="Not in guess step")
 
         round_state = state.current_round
         if not round_state or round_state.round_type != RoundType.WAGER:
@@ -335,14 +331,13 @@ async def submit_wager_guess(game_id: str, req: SubmitWagerGuessRequest) -> dict
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
 
+        # Derive question index from step name
+        current_q_idx = int(step_name.split("_")[1])
+        if req.question_index != current_q_idx:
+            raise HTTPException(status_code=400, detail="Not in guess phase for this question")
+
         if not (0 <= req.question_index < len(round_state.wager_questions)):
             raise HTTPException(status_code=400, detail="Invalid question index")
-
-        # Validate sub-round: must be a guess sub-round for this question
-        current_q_idx = round_state.current_sub_round // 2
-        is_guess_phase = round_state.current_sub_round % 2 == 0
-        if req.question_index != current_q_idx or not is_guess_phase:
-            raise HTTPException(status_code=400, detail="Not in guess phase for this question")
 
         q = round_state.wager_questions[req.question_index]
         # Clamp value to range
@@ -375,8 +370,9 @@ async def submit_wager_bet(game_id: str, req: SubmitWagerBetRequest) -> dict[str
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.ACTIVE:
-            raise HTTPException(status_code=400, detail="Not in active phase")
+        step_name = get_step_name(state)
+        if not step_name or not step_name.startswith("bet_"):
+            raise HTTPException(status_code=400, detail="Not in bet step")
 
         round_state = state.current_round
         if not round_state or round_state.round_type != RoundType.WAGER:
@@ -386,14 +382,13 @@ async def submit_wager_bet(game_id: str, req: SubmitWagerBetRequest) -> dict[str
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
 
+        # Derive question index from step name
+        current_q_idx = int(step_name.split("_")[1])
+        if req.question_index != current_q_idx:
+            raise HTTPException(status_code=400, detail="Not in bet phase for this question")
+
         if not (0 <= req.question_index < len(round_state.wager_questions)):
             raise HTTPException(status_code=400, detail="Invalid question index")
-
-        # Validate sub-round: must be a bet sub-round for this question
-        current_q_idx = round_state.current_sub_round // 2
-        is_bet_phase = round_state.current_sub_round % 2 == 1
-        if req.question_index != current_q_idx or not is_bet_phase:
-            raise HTTPException(status_code=400, detail="Not in bet phase for this question")
 
         q = round_state.wager_questions[req.question_index]
 
@@ -431,8 +426,15 @@ async def get_signal_phrase(game_id: str, player_id: str) -> SignalPhraseRespons
         raise HTTPException(status_code=404, detail="Game not found")
 
     state = session.state
-    if state.phase != GamePhase.PROMPT:
-        raise HTTPException(status_code=400, detail="Not in prompt phase")
+    step_name = get_step_name(state)
+    is_signal_compose = step_name == "signal_compose"
+    is_signal_task_compose = (
+        step_name == "compose"
+        and state.current_round
+        and state.current_round.round_type == RoundType.SIGNAL
+    )
+    if not is_signal_compose and not is_signal_task_compose:
+        raise HTTPException(status_code=400, detail="Not in signal compose step")
 
     rs = state.current_round
     if not rs or rs.round_type != RoundType.SIGNAL:
@@ -464,8 +466,9 @@ async def submit_signal_guess(game_id: str, req: SubmitSignalGuessRequest) -> di
             raise HTTPException(status_code=404, detail="Game not found")
 
         state = session.state
-        if state.phase != GamePhase.ACTIVE:
-            raise HTTPException(status_code=400, detail="Not in active phase")
+        step_name = get_step_name(state)
+        if not step_name or not step_name.startswith("signal_guess_"):
+            raise HTTPException(status_code=400, detail="Not in signal guess step")
 
         rs = state.current_round
         if not rs or rs.round_type != RoundType.SIGNAL:
@@ -475,13 +478,15 @@ async def submit_signal_guess(game_id: str, req: SubmitSignalGuessRequest) -> di
         if not player:
             raise HTTPException(status_code=400, detail="Player not found")
 
-        if req.sub_round_index != rs.current_sub_round:
+        # Derive transmitter index from step name
+        tx_index = int(step_name.split("_")[-1])
+        if req.sub_round_index != tx_index:
             raise HTTPException(status_code=400, detail="Wrong sub-round")
 
-        if req.sub_round_index >= len(rs.signal_player_order):
+        if tx_index >= len(rs.signal_player_order):
             raise HTTPException(status_code=400, detail="Invalid sub-round index")
 
-        featured_pid = rs.signal_player_order[req.sub_round_index]
+        featured_pid = rs.signal_player_order[tx_index]
 
         # Transmitters cannot guess
         if req.player_id in rs.signal_player_order:

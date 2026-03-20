@@ -13,7 +13,6 @@ export function FacilityBrainTest() {
   const roundResults = useGameStore((s) => s.roundResults);
   const roundScores = useGameStore((s) => s.roundScores);
   const players = useGameStore((s) => s.players);
-  const phase = useGameStore((s) => s.phase);
   const scores = useGameStore((s) => s.scores);
 
   // Extract brain test fields from generic payload (guard round_type)
@@ -47,7 +46,7 @@ export function FacilityBrainTest() {
   }, [players]);
 
   // Results view
-  if (phase === "results" && roundResults && roundResults.round_type === "brain_test") {
+  if (roundResults && roundResults.round_type === "brain_test") {
     const brainTestResults = roundResults.results;
     const sortedEntries = Object.entries(brainTestResults).sort(([aId], [bId]) => {
       const aScore = roundScores?.[aId] ?? 0;

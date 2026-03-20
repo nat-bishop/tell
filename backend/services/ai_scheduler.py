@@ -13,7 +13,6 @@ from pydantic_ai.messages import ModelMessage
 from backend.api.deps import (
     get_connection_manager,
     get_game_repository,
-    get_timer_manager,
 )
 from backend.llm.personalities import PERSONALITIES, Personality
 from backend.llm.prompts import (
@@ -27,7 +26,6 @@ from backend.llm.prompts import (
     get_personality_instructions,
 )
 from backend.services.game_logic import (
-    fill_missing_answers,
     get_player_by_id,
 )
 from schemas.api_models import (
@@ -91,18 +89,12 @@ def _log_fields(game_id: str, player_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Phase scheduling
+# Scheduling helpers (called by handlers via on_step_start)
 # ---------------------------------------------------------------------------
 
 
-async def on_phase_change(game_id: str, phase: GamePhase) -> None:
-    """Called when a phase changes. Schedules AI actions for the new phase.
-
-    Only handles PROMPT (framework phase). ACTIVE phase AI is handled by
-    minigame handlers via on_active_start().
-    """
-    cancel_all(game_id)
-
+async def schedule_ai_answers(game_id: str) -> None:
+    """Schedule AI answer tasks for the current compose step."""
     repo = get_game_repository()
     session = repo.get(game_id)
     if not session:
@@ -110,31 +102,28 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
 
     state = session.state
     ai_players = [p for p in state.players if p.role == PlayerRole.AI]
-
     if not ai_players:
         return
 
+    # For signal rounds, only transmitters answer
+    rs = state.current_round
+    if rs and rs.round_type == RoundType.SIGNAL:
+        transmitter_ids = set(rs.signal_player_order)
+        eligible = [p for p in ai_players if p.id in transmitter_ids]
+    else:
+        eligible = ai_players
+
+    expected_round = state.round_number
+    expected_step = state.current_step_index
     tasks: list[asyncio.Task] = []
-
-    if phase == GamePhase.PROMPT:
-        # For signal rounds, only transmitters (players in signal_player_order) answer
-        rs = state.current_round
-        if rs and rs.round_type == RoundType.SIGNAL:
-            transmitter_ids = set(rs.signal_player_order)
-            eligible = [p for p in ai_players if p.id in transmitter_ids]
-        else:
-            eligible = ai_players
-
-        for player in eligible:
-            delay = random.uniform(3, 20)
-            tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
-
+    for player in eligible:
+        delay = random.uniform(3, 20)
+        tasks.append(
+            asyncio.create_task(
+                _ai_answer_task(game_id, player.id, delay, expected_round, expected_step)
+            )
+        )
     _ai_tasks.setdefault(game_id, []).extend(tasks)
-
-
-def register_task(game_id: str, task: asyncio.Task) -> None:
-    """Register an external background task for cleanup tracking."""
-    _ai_tasks.setdefault(game_id, []).append(task)
 
 
 async def schedule_ai_votes(game_id: str) -> None:
@@ -144,15 +133,27 @@ async def schedule_ai_votes(game_id: str) -> None:
     if not session:
         return
 
-    ai_players = [p for p in session.state.players if p.role == PlayerRole.AI]
+    state = session.state
+    ai_players = [p for p in state.players if p.role == PlayerRole.AI]
     if not ai_players:
         return
 
+    expected_round = state.round_number
+    expected_step = state.current_step_index
     tasks: list[asyncio.Task] = []
     for player in ai_players:
         delay = random.uniform(2, 8)
-        tasks.append(asyncio.create_task(_ai_vote_task(game_id, player.id, delay)))
+        tasks.append(
+            asyncio.create_task(
+                _ai_vote_task(game_id, player.id, delay, expected_round, expected_step)
+            )
+        )
     _ai_tasks.setdefault(game_id, []).extend(tasks)
+
+
+def register_task(game_id: str, task: asyncio.Task) -> None:
+    """Register an external background task for cleanup tracking."""
+    _ai_tasks.setdefault(game_id, []).append(task)
 
 
 def cancel_all(game_id: str) -> None:
@@ -172,7 +173,8 @@ async def _run_ai_task(
     game_id: str,
     player_id: str,
     delay: float,
-    expected_phase: GamePhase,
+    expected_round: int,
+    expected_step: int,
     generate_fn: Callable[[], Coroutine[Any, Any, Any]],
     apply_fn: _ApplyFn,
     label: str,
@@ -181,7 +183,7 @@ async def _run_ai_task(
 
     1. Sleep for *delay* seconds.
     2. Call *generate_fn* outside the lock (LLM call). Return ``None`` to abort.
-    3. Acquire the per-game lock, validate the phase hasn't changed.
+    3. Acquire the per-game lock, validate round+step haven't changed.
     4. Call *apply_fn(cm, session, result)* to update state + broadcast.
     """
     try:
@@ -195,7 +197,10 @@ async def _run_ai_task(
         async with lock:
             repo = get_game_repository()
             session = repo.get(game_id)
-            if not session or session.state.phase != expected_phase:
+            if not session:
+                return
+            state = session.state
+            if state.round_number != expected_round or state.current_step_index != expected_step:
                 return
             await apply_fn(cm, session, result)
     except asyncio.CancelledError:
@@ -209,7 +214,9 @@ async def _run_ai_task(
 # ---------------------------------------------------------------------------
 
 
-async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
+async def _ai_answer_task(
+    game_id: str, player_id: str, delay: float, expected_round: int, expected_step: int
+) -> None:
     """AI player answers a prompt after a delay."""
 
     async def generate() -> tuple[str, list[ModelMessage]] | None:
@@ -249,8 +256,6 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         )
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
-        from backend.services.transitions import do_prompt_complete
-
         answer_text, updated_history = result
         state = session.state
         if not state.current_round or player_id in state.current_round.answers:
@@ -280,17 +285,26 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
             personality=get_personality(game_id, player_id).name,
         )
 
-        if answer_count >= total_count:
-            get_timer_manager().cancel_timer(game_id)
-            fill_missing_answers(state)
-            await do_prompt_complete(game_id, session)
+        # Check early completion
+        from backend.services.transitions import try_advance_step
+
+        await try_advance_step(game_id, session)
 
     await _run_ai_task(
-        game_id, player_id, delay, GamePhase.PROMPT, generate, apply, "ai_answer_task"
+        game_id,
+        player_id,
+        delay,
+        expected_round,
+        expected_step,
+        generate,
+        apply,
+        "ai_answer_task",
     )
 
 
-async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
+async def _ai_vote_task(
+    game_id: str, player_id: str, delay: float, expected_round: int, expected_step: int
+) -> None:
     """AI player votes in gallery vote phase after a delay."""
 
     async def generate() -> tuple[str, list[ModelMessage]] | None:
@@ -354,8 +368,6 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
         return voted_id, updated_history
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
-        from backend.services.transitions import do_active_complete
-
         voted_for_id, updated_history = result
         state = session.state
         if not state.current_round:
@@ -383,11 +395,21 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
             voted_for=voted_for_id,
         )
 
-        if vote_count >= total:
-            get_timer_manager().cancel_timer(game_id)
-            await do_active_complete(game_id, session)
+        # Check early completion
+        from backend.services.transitions import try_advance_step
 
-    await _run_ai_task(game_id, player_id, delay, GamePhase.ACTIVE, generate, apply, "ai_vote_task")
+        await try_advance_step(game_id, session)
+
+    await _run_ai_task(
+        game_id,
+        player_id,
+        delay,
+        expected_round,
+        expected_step,
+        generate,
+        apply,
+        "ai_vote_task",
+    )
 
 
 async def _schedule_ai_sub_tasks(
@@ -425,7 +447,7 @@ async def _ai_brain_test_task(
 
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.ACTIVE:
+        if not session or session.state.phase != GamePhase.ROUND:
             return
 
         state = session.state
@@ -463,7 +485,7 @@ async def _ai_brain_test_task(
 
         async with lock:
             session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.ACTIVE:
+            if not session or session.state.phase != GamePhase.ROUND:
                 return
             rs = session.state.current_round
             if not rs or challenge_index >= len(rs.brain_challenges):
@@ -506,7 +528,7 @@ async def _ai_wager_guess_task(
 
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.ACTIVE:
+        if not session or session.state.phase != GamePhase.ROUND:
             return
 
         state = session.state
@@ -549,7 +571,7 @@ async def _ai_wager_guess_task(
 
         async with lock:
             session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.ACTIVE:
+            if not session or session.state.phase != GamePhase.ROUND:
                 return
             rs = session.state.current_round
             if not rs or rs.round_type != RoundType.WAGER:
@@ -594,7 +616,7 @@ async def _ai_wager_bet_task(
 
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session or session.state.phase != GamePhase.ACTIVE:
+        if not session or session.state.phase != GamePhase.ROUND:
             return
 
         state = session.state
@@ -659,7 +681,7 @@ async def _ai_wager_bet_task(
 
         async with lock:
             session = repo.get(game_id)
-            if not session or session.state.phase != GamePhase.ACTIVE:
+            if not session or session.state.phase != GamePhase.ROUND:
                 return
             rs = session.state.current_round
             if not rs or rs.round_type != RoundType.WAGER:
@@ -788,8 +810,23 @@ async def _ai_signal_guess_task(
             sub_round_index=sub_round_index,
         )
 
+    # Guard: check round_number and step_index
+    repo = get_game_repository()
+    session = repo.get(game_id)
+    if not session:
+        return
+    expected_round = session.state.round_number
+    expected_step = session.state.current_step_index
+
     await _run_ai_task(
-        game_id, player_id, delay, GamePhase.ACTIVE, generate, apply, "ai_signal_guess"
+        game_id,
+        player_id,
+        delay,
+        expected_round,
+        expected_step,
+        generate,
+        apply,
+        "ai_signal_guess",
     )
 
 

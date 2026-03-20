@@ -52,7 +52,10 @@ class StateSyncEvent(GameEvent):
     my_vote: str | None = None
     # Signal reconnection
     signal_phrase: str | None = None
-    action_starts_at: str | None = None
+    # Step-based fields
+    step_name: str | None = None
+    step_index: int | None = None
+    component: str | None = None
     # Generic reconnection state
     sub_round_index: int | None = None
     sub_round_payload: dict | None = None
@@ -77,17 +80,17 @@ class PlayerReconnectedEvent(GameEvent):
     player_id: str
 
 
-class PhaseChangedEvent(GameEvent):
-    event_type: Literal["phase_changed"] = "phase_changed"
+class StepChangedEvent(GameEvent):
+    event_type: Literal["step_changed"] = "step_changed"
     phase: str
+    step_name: str
+    step_index: int
+    component: str
     round_number: int
-    prompt_text: str | None = None
-    prompt_category: str | None = None
-    phase_deadline: str | None = None
-    phase_duration: int | None = None
-    answers: dict[str, str] = Field(default_factory=dict)
-    round_type: str | None = None
-    action_starts_at: str | None = None
+    round_type: str
+    deadline: str | None = None
+    duration: int | None = None
+    payload: dict = Field(default_factory=dict)
 
 
 class AnswerSubmittedEvent(GameEvent):
@@ -120,15 +123,6 @@ class NarrationEvent(GameEvent):
     event_type: Literal["narration"] = "narration"
     text: str
     trigger: str
-
-
-class SubRoundEvent(GameEvent):
-    event_type: Literal["sub_round"] = "sub_round"
-    round_type: str
-    sub_round_index: int
-    payload: dict = Field(default_factory=dict)
-    sub_deadline: str | None = None
-    phase_duration: int | None = None
 
 
 class RoundResultsEvent(GameEvent):

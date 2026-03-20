@@ -2,24 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
-import datetime as dt
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.config import Settings
 
-import structlog
-
-from backend.minigames.base import MinigameHandler, MinigameMeta
+from backend.minigames.base import MinigameHandler, StepDef
 from schemas.game_state import (
     RoundState,
     RoundType,
     TellGameState,
     WagerQuestion,
 )
-
-log = structlog.get_logger(__name__)
 
 
 def _get_closest_ids(q: WagerQuestion) -> list[str]:
@@ -32,7 +26,7 @@ def _get_closest_ids(q: WagerQuestion) -> list[str]:
 
 
 def _build_sub_round_payload(q: WagerQuestion, q_idx: int, num_questions: int, phase: str) -> dict:
-    """Build the payload dict for a wager sub-round event."""
+    """Build the payload dict for a wager step event."""
     payload: dict = {
         "round_type": "wager",
         "phase": phase,
@@ -63,13 +57,7 @@ def score_wager(questions: list[WagerQuestion]) -> dict[str, int]:
 
 class WagerHandler(MinigameHandler):
     round_type = RoundType.WAGER
-    meta = MinigameMeta(
-        min_players=3,
-        has_prompt=False,
-        has_results=True,
-        active_interstitial=5,
-        results_interstitial=2,
-    )
+    min_players = 3
 
     def setup_round(self, state: TellGameState, settings: Settings) -> None:
         from schemas.prompts import select_wager_questions
@@ -95,100 +83,77 @@ class WagerHandler(MinigameHandler):
             ],
         )
 
-    def get_active_duration(self, settings: Settings) -> int:
-        return settings.wager_duration
-
-    def get_results_duration(self, settings: Settings) -> int:
-        return settings.wager_results_duration
-
-    async def on_active_start(self, game_id: str) -> None:
-        """Start the wager sub-round loop."""
-        from backend.services.ai_scheduler import register_task
-
-        task = asyncio.create_task(self._wager_loop(game_id))
-        register_task(game_id, task)
-
-    async def _wager_loop(self, game_id: str) -> None:
-        try:
-            from backend.api.deps import (
-                get_connection_manager,
-                get_game_repository,
-                get_settings,
-                get_timer_manager,
+    def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
+        num = settings.wager_questions
+        dur = settings.wager_sub_round_duration
+        steps: list[StepDef] = []
+        for i in range(num):
+            steps.append(StepDef(name=f"guess_{i}", duration=dur, component="wager"))
+            steps.append(StepDef(name=f"bet_{i}", duration=dur, component="wager"))
+        steps.append(
+            StepDef(
+                name="results",
+                duration=settings.wager_results_duration,
+                component="wager_results",
+                is_results=True,
             )
-            from schemas.api_models import SubRoundEvent
-            from schemas.game_state import GamePhase
+        )
+        return steps
 
-            cm = get_connection_manager()
-            settings = get_settings()
-            repo = get_game_repository()
-            sub_duration = settings.wager_sub_round_duration
-            num_questions = settings.wager_questions
-            lock = cm.get_lock(game_id)
+    async def on_step_start(self, game_id: str, step_index: int) -> None:
+        from backend.api.deps import get_game_repository
 
-            for q_idx in range(num_questions):
-                for phase in ("guess", "bet"):
-                    sub_index = q_idx * 2 if phase == "guess" else q_idx * 2 + 1
+        session = get_game_repository().get(game_id)
+        if not session:
+            return
+        rs = session.state.current_round
+        if not rs:
+            return
 
-                    async with lock:
-                        session = repo.get(game_id)
-                        if not session:
-                            return
-                        state = session.state
-                        if state.phase != GamePhase.ACTIVE:
-                            return
-                        rs = state.current_round
-                        if not rs or q_idx >= len(rs.wager_questions):
-                            return
+        steps = session.state.round_step_defs
+        if step_index >= len(steps):
+            return
+        step = steps[step_index]
+        step_name = step["name"]
 
-                        rs.current_sub_round = sub_index
-                        q = rs.wager_questions[q_idx]
+        if step_name.startswith("guess_"):
+            q_idx = int(step_name.split("_")[1])
+            # Set current_sub_round for route validation
+            rs.current_sub_round = step_index
+            # Schedule AI guesses
+            from backend.services.ai_scheduler import on_wager_guess
 
-                        sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
-                        state.phase_deadline = sub_deadline
+            await on_wager_guess(game_id, q_idx)
 
-                        await cm.broadcast(
-                            game_id,
-                            SubRoundEvent(
-                                seq=session.next_seq(),
-                                round_type="wager",
-                                sub_round_index=sub_index,
-                                payload=_build_sub_round_payload(q, q_idx, num_questions, phase),
-                                sub_deadline=sub_deadline.isoformat(),
-                                phase_duration=sub_duration,
-                            ),
-                        )
+        elif step_name.startswith("bet_"):
+            q_idx = int(step_name.split("_")[1])
+            rs.current_sub_round = step_index
+            # Schedule AI bets
+            from backend.services.ai_scheduler import on_wager_bet
 
-                    # Schedule AI (outside lock)
-                    if phase == "guess":
-                        from backend.services.ai_scheduler import on_wager_guess
+            await on_wager_bet(game_id, q_idx)
 
-                        await on_wager_guess(game_id, q_idx)
-                    else:
-                        from backend.services.ai_scheduler import on_wager_bet
+    def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
+        rs = state.current_round
+        if not rs:
+            return {}
+        steps = state.round_step_defs
+        if step_index >= len(steps):
+            return {}
+        step = steps[step_index]
+        step_name = step["name"]
 
-                        await on_wager_bet(game_id, q_idx)
-
-                    await asyncio.sleep(sub_duration)
-
-            # All questions done — transition to results
-            async with lock:
-                session = repo.get(game_id)
-                if not session:
-                    return
-                if session.state.phase != GamePhase.ACTIVE:
-                    return
-                get_timer_manager().cancel_timer(game_id)
-
-                # Runtime import to avoid circular dep
-                from backend.services.transitions import do_active_complete
-
-                await do_active_complete(game_id, session)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            log.exception("wager_loop_error", game_id=game_id)
+        if step_name.startswith("guess_"):
+            q_idx = int(step_name.split("_")[1])
+            if q_idx < len(rs.wager_questions):
+                q = rs.wager_questions[q_idx]
+                return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "guess")
+        elif step_name.startswith("bet_"):
+            q_idx = int(step_name.split("_")[1])
+            if q_idx < len(rs.wager_questions):
+                q = rs.wager_questions[q_idx]
+                return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "bet")
+        return {}
 
     def build_results(self, state: TellGameState) -> tuple[dict, dict[str, int]]:
         rs = state.current_round
@@ -213,21 +178,26 @@ class WagerHandler(MinigameHandler):
         return {"questions": questions_payload}, score_deltas
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
-        """Provide current sub-round info for reconnection during ACTIVE."""
-        from schemas.game_state import GamePhase
-
+        """Provide current sub-round info for reconnection during gameplay steps."""
         rs = state.current_round
         if not rs:
             return {}
 
-        if state.phase == GamePhase.ACTIVE:
-            sub = rs.current_sub_round
-            q_idx = sub // 2
+        steps = state.round_step_defs
+        idx = state.current_step_index
+        if not steps or idx >= len(steps):
+            return super().build_state_sync_extras(state, player_id)
+
+        step = steps[idx]
+        step_name = step["name"]
+
+        if step_name.startswith(("guess_", "bet_")):
+            q_idx = int(step_name.split("_")[1])
             if q_idx < len(rs.wager_questions):
                 q = rs.wager_questions[q_idx]
-                phase = "guess" if sub % 2 == 0 else "bet"
+                phase = "guess" if step_name.startswith("guess") else "bet"
                 return {
-                    "sub_round_index": sub,
+                    "sub_round_index": idx,
                     "sub_round_payload": _build_sub_round_payload(
                         q, q_idx, len(rs.wager_questions), phase
                     ),

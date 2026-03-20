@@ -1,6 +1,6 @@
 "use client";
 
-import { useGameStore, type GamePhase, type PlayerInfo } from "@/hooks/useGameStore";
+import { useGameStore, type PlayerInfo } from "@/hooks/useGameStore";
 import { useFacilityContext } from "@/facility/FacilityProvider";
 import { Panel } from "@/facility/Panel";
 
@@ -93,27 +93,28 @@ function getVoice(roundNumber: number): Voice {
   return VOICES[VOICE_ORDER[idx]];
 }
 
-// ─── Phase Directives ───
+// ─── Step Directives ───
 
 interface Directive {
   text: string;
   subtitle: string;
 }
 
-function getDirective(phase: GamePhase, roundType: string | null): Directive | null {
-  if (phase === "active" && roundType === "task") {
+function getDirective(component: string | null, roundType: string | null): Directive | null {
+  if (component === "vote") {
     return {
       text: "DETECTION SCAN",
       subtitle: "who sounds most human?",
     };
   }
-  if (phase === "active" && roundType === "signal") {
+  if (component === "signal_guess") {
     return {
       text: "SIGNAL INTERCEPT",
       subtitle: "decode the transmission",
     };
   }
-  if (phase === "results") {
+  if (component === "vote_results" || component === "brain_test_results" ||
+      component === "wager_results" || component === "signal_results") {
     return {
       text: "RESULTS INCOMING",
       subtitle: "scan complete",
@@ -123,9 +124,6 @@ function getDirective(phase: GamePhase, roundType: string | null): Directive | n
 }
 
 // ─── Situation Lines ───
-
-// Phases that represent a new round start (show round label)
-const ROUND_START_PHASES = new Set<GamePhase>(["prompt", "active"]);
 
 function getSituationLine(
   roundNumber: number,
@@ -165,19 +163,20 @@ export function TransitionOverlay() {
 }
 
 function TransitionOverlayContent() {
-  const phase = useGameStore((s) => s.phase);
   const roundNumber = useGameStore((s) => s.roundNumber);
   const roundType = useGameStore((s) => s.roundType);
+  const component = useGameStore((s) => s.component);
+  const stepName = useGameStore((s) => s.stepName);
   const totalRounds = useGameStore((s) => s.totalRounds);
   const scores = useGameStore((s) => s.scores);
   const players = useGameStore((s) => s.players);
 
-  // "prompt" is always a round start; "active" is a round start only for
-  // non-prompt minigames (brain_test). For task rounds, "active" follows
-  // "prompt" and shows a directive instead.
+  // Round start = first step of a round (compose steps, challenge_0, guess_0)
   const isRoundStart =
-    phase === "prompt" ||
-    (phase === "active" && (roundType === "brain_test" || roundType === "wager"));
+    stepName === "compose" ||
+    stepName === "signal_compose" ||
+    stepName === "challenge_0" ||
+    stepName === "guess_0";
 
   const voice = getVoice(roundNumber);
 
@@ -190,12 +189,12 @@ function TransitionOverlayContent() {
     subtitle = voice.typeLabel(roundType);
     situationLine = getSituationLine(roundNumber, totalRounds, scores, players);
   } else {
-    const directive = getDirective(phase, roundType);
+    const directive = getDirective(component, roundType);
     if (directive) {
       text = directive.text;
       subtitle = directive.subtitle;
     } else {
-      text = phase.toUpperCase();
+      text = (stepName ?? "").toUpperCase();
     }
   }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import asdict
 
 from schemas.game_state import (
     GamePhase,
@@ -56,10 +57,57 @@ def make_round_state(
     )
 
 
+def _make_step_defs_for_round_type(round_type: RoundType) -> list[dict]:
+    """Generate default step defs for a round type (used in test factories)."""
+    from backend.minigames.base import StepDef
+
+    if round_type == RoundType.TASK:
+        steps = [
+            StepDef(name="compose", duration=45, component="compose"),
+            StepDef(name="vote", duration=25, component="vote"),
+            StepDef(name="results", duration=8, component="vote_results", is_results=True),
+        ]
+    elif round_type == RoundType.BRAIN_TEST:
+        steps = [
+            StepDef(name=f"challenge_{i}", duration=12, component="brain_test") for i in range(5)
+        ]
+        steps.append(
+            StepDef(name="results", duration=15, component="brain_test_results", is_results=True)
+        )
+    elif round_type == RoundType.WAGER:
+        steps = []
+        for i in range(3):
+            steps.append(StepDef(name=f"guess_{i}", duration=15, component="wager"))
+            steps.append(StepDef(name=f"bet_{i}", duration=15, component="wager"))
+        steps.append(
+            StepDef(name="results", duration=15, component="wager_results", is_results=True)
+        )
+    elif round_type == RoundType.SIGNAL:
+        steps = [
+            StepDef(name="compose", duration=20, component="signal_compose"),
+            StepDef(name="signal_guess_0", duration=12, component="signal_guess"),
+            StepDef(name="signal_guess_1", duration=12, component="signal_guess"),
+            StepDef(name="signal_guess_2", duration=12, component="signal_guess"),
+            StepDef(name="results", duration=15, component="signal_results", is_results=True),
+        ]
+    else:
+        steps = [StepDef(name="results", duration=10, component="results", is_results=True)]
+
+    return [asdict(s) for s in steps]
+
+
+def _step_index_for_phase(phase: GamePhase, round_type: RoundType) -> int:
+    """Map old phase concept to a default step index for tests."""
+    if phase == GamePhase.LOBBY or phase == GamePhase.GAME_OVER:
+        return 0
+    # For ROUND phase, default to first step (compose/challenge_0/guess_0)
+    return 0
+
+
 def make_game_state(
     *,
     game_id: str = "test1234",
-    phase: GamePhase = GamePhase.PROMPT,
+    phase: GamePhase = GamePhase.ROUND,
     players: list[Player] | None = None,
     round_number: int = 1,
     round_type: RoundType = RoundType.TASK,
@@ -67,9 +115,17 @@ def make_game_state(
     round_types: list[RoundType] | None = None,
     current_round: RoundState | None = "auto",
     winner: str | None = None,
+    current_step_index: int | None = None,
+    round_step_defs: list[dict] | None = None,
 ) -> TellGameState:
     if current_round == "auto":
         current_round = make_round_state(round_number=round_number, round_type=round_type)
+
+    if round_step_defs is None and phase == GamePhase.ROUND:
+        round_step_defs = _make_step_defs_for_round_type(round_type)
+
+    if current_step_index is None:
+        current_step_index = _step_index_for_phase(phase, round_type)
 
     return TellGameState(
         game_id=game_id,
@@ -80,6 +136,8 @@ def make_game_state(
         total_rounds=total_rounds,
         round_types=round_types or [],
         winner=winner,
+        current_step_index=current_step_index or 0,
+        round_step_defs=round_step_defs or [],
     )
 
 
@@ -108,8 +166,9 @@ def make_wager_question(
 
 def make_standard_game(
     *,
-    phase: GamePhase = GamePhase.PROMPT,
+    phase: GamePhase = GamePhase.ROUND,
     round_type: RoundType = RoundType.TASK,
+    current_step_index: int | None = None,
 ) -> tuple[TellGameState, list[Player]]:
     """8-player game: 2 human (first is host), 6 AI. Returns (state, players)."""
     h1 = make_player(role=PlayerRole.HUMAN, alias="UNIT-01", player_id="h1", is_host=True)
@@ -127,5 +186,6 @@ def make_standard_game(
         players=players,
         round_type=round_type,
         round_types=[RoundType.TASK],
+        current_step_index=current_step_index,
     )
     return state, players

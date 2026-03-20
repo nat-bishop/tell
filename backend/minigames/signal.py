@@ -9,7 +9,6 @@ LLM judges guesses on a 0/1/2 scale.
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
 import random
 from typing import TYPE_CHECKING
 
@@ -18,7 +17,7 @@ if TYPE_CHECKING:
 
 import structlog
 
-from backend.minigames.base import MinigameHandler, MinigameMeta
+from backend.minigames.base import MinigameHandler, StepDef
 from schemas.constants import NO_RESPONSE
 from schemas.game_state import (
     RoundState,
@@ -33,13 +32,7 @@ NUM_TRANSMITTERS = 3
 
 class SignalHandler(MinigameHandler):
     round_type = RoundType.SIGNAL
-    meta = MinigameMeta(
-        min_players=2,
-        has_prompt=True,
-        has_results=True,
-        active_interstitial=3,
-        results_interstitial=2,
-    )
+    min_players = 2
 
     def setup_round(self, state: TellGameState, settings: Settings) -> None:
         from schemas.prompts import select_signal_constraint, select_signal_phrases
@@ -78,140 +71,124 @@ class SignalHandler(MinigameHandler):
             signal_player_order=transmitter_ids,
         )
 
-    def get_prompt_duration(self, settings: Settings) -> int:
-        return settings.signal_prompt_duration
+    def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
+        rs = state.current_round
+        num_tx = len(rs.signal_player_order) if rs else NUM_TRANSMITTERS
+        dur = settings.signal_sub_round_duration
 
-    def get_active_duration(self, settings: Settings) -> int:
-        return settings.signal_safety_duration
-
-    def get_results_duration(self, settings: Settings) -> int:
-        return settings.signal_results_duration
-
-    def active_event_extras(self, state: TellGameState) -> dict:
-        return {}
-
-    async def on_active_start(self, game_id: str) -> None:
-        from backend.services.ai_scheduler import register_task
-
-        task = asyncio.create_task(self._signal_loop(game_id))
-        register_task(game_id, task)
-
-    async def _signal_loop(self, game_id: str) -> None:
-        try:
-            from backend.api.deps import (
-                get_connection_manager,
-                get_game_repository,
-                get_settings,
-                get_timer_manager,
+        steps: list[StepDef] = [
+            StepDef(
+                name="compose", duration=settings.signal_prompt_duration, component="signal_compose"
+            ),
+        ]
+        for i in range(num_tx):
+            steps.append(StepDef(name=f"signal_guess_{i}", duration=dur, component="signal_guess"))
+        steps.append(
+            StepDef(
+                name="results",
+                duration=settings.signal_results_duration,
+                component="signal_results",
+                is_results=True,
             )
-            from schemas.api_models import SubRoundEvent
-            from schemas.game_state import GamePhase
+        )
+        return steps
 
-            cm = get_connection_manager()
-            settings = get_settings()
-            repo = get_game_repository()
-            sub_duration = settings.signal_sub_round_duration
-            lock = cm.get_lock(game_id)
+    async def on_step_start(self, game_id: str, step_index: int) -> None:
+        from backend.api.deps import get_game_repository
 
-            # Snapshot transmitter order under lock
-            async with lock:
-                session = repo.get(game_id)
-                if not session:
-                    return
-                rs = session.state.current_round
-                if not rs:
-                    return
-                transmitter_order = list(rs.signal_player_order)
-                alias_map = {p.id: p.alias for p in session.state.players}
+        session = get_game_repository().get(game_id)
+        if not session:
+            return
+        state = session.state
+        rs = state.current_round
+        if not rs:
+            return
 
-            for i, featured_pid in enumerate(transmitter_order):
-                async with lock:
-                    session = repo.get(game_id)
-                    if not session:
-                        return
-                    state = session.state
-                    if state.phase != GamePhase.ACTIVE:
-                        return
-                    rs = state.current_round
-                    if not rs:
-                        return
+        steps = state.round_step_defs
+        if step_index >= len(steps):
+            return
+        step = steps[step_index]
+        step_name = step["name"]
 
-                    rs.current_sub_round = i
-                    sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
-                    state.phase_deadline = sub_deadline
+        if step_name == "compose":
+            # Schedule AI transmitter answers
+            from backend.services.ai_scheduler import schedule_ai_answers
 
-                    transformation = rs.answers.get(featured_pid, NO_RESPONSE)
+            await schedule_ai_answers(game_id)
 
-                    await cm.broadcast(
-                        game_id,
-                        SubRoundEvent(
-                            seq=session.next_seq(),
-                            round_type="signal",
-                            sub_round_index=i,
-                            payload={
-                                "featured_player_id": featured_pid,
-                                "featured_alias": alias_map.get(featured_pid, featured_pid),
-                                "transformation": transformation,
-                                "constraint": rs.signal_constraint,
-                                "total_transmitters": len(transmitter_order),
-                            },
-                            sub_deadline=sub_deadline.isoformat(),
-                            phase_duration=sub_duration,
-                        ),
-                    )
-
-                # Schedule AI guesses outside lock
+        elif step_name.startswith("signal_guess_"):
+            tx_index = int(step_name.split("_")[-1])
+            rs.current_sub_round = tx_index
+            if tx_index < len(rs.signal_player_order):
+                featured_pid = rs.signal_player_order[tx_index]
                 from backend.services.ai_scheduler import on_signal_sub_round
 
-                await on_signal_sub_round(game_id, i, featured_pid)
+                await on_signal_sub_round(game_id, tx_index, featured_pid)
 
-                await asyncio.sleep(sub_duration)
+    async def on_step_end(self, game_id: str, step_index: int) -> None:
+        from backend.api.deps import get_game_repository
+        from backend.services.game_logic import fill_missing_answers
 
-            # Snapshot guesses under lock before judging
-            async with lock:
-                session = repo.get(game_id)
-                if not session or not session.state.current_round:
-                    return
-                rs = session.state.current_round
-                guesses_snapshot = {pid: dict(gs) for pid, gs in rs.signal_guesses.items()}
-                phrases_snapshot = dict(rs.signal_phrases)
-                order_snapshot = list(rs.signal_player_order)
+        session = get_game_repository().get(game_id)
+        if not session:
+            return
+        steps = session.state.round_step_defs
+        if step_index >= len(steps):
+            return
+        step = steps[step_index]
+        if step["name"] == "compose":
+            fill_missing_answers(session.state)
 
-            # Judge all guesses (outside lock)
-            await self._judge_all_guesses(
-                game_id, order_snapshot, guesses_snapshot, phrases_snapshot
-            )
+    def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
+        rs = state.current_round
+        if not rs:
+            return {}
+        steps = state.round_step_defs
+        if step_index >= len(steps):
+            return {}
+        step = steps[step_index]
+        step_name = step["name"]
 
-            # Transition to results
-            async with lock:
-                session = repo.get(game_id)
-                if not session:
-                    return
-                if session.state.phase != GamePhase.ACTIVE:
-                    return
-                get_timer_manager().cancel_timer(game_id)
+        if step_name == "compose":
+            return {
+                "prompt_text": rs.prompt_text,
+                "constraint": rs.signal_constraint,
+                "transmitter_ids": rs.signal_player_order,
+            }
+        elif step_name.startswith("signal_guess_"):
+            tx_index = int(step_name.split("_")[-1])
+            if tx_index < len(rs.signal_player_order):
+                featured_pid = rs.signal_player_order[tx_index]
+                alias_map = {p.id: p.alias for p in state.players}
+                transformation = rs.answers.get(featured_pid, NO_RESPONSE)
+                return {
+                    "featured_player_id": featured_pid,
+                    "featured_alias": alias_map.get(featured_pid, featured_pid),
+                    "transformation": transformation,
+                    "constraint": rs.signal_constraint,
+                    "total_transmitters": len(rs.signal_player_order),
+                    "sub_round_index": tx_index,
+                }
+        return {}
 
-                from backend.services.transitions import do_active_complete
-
-                await do_active_complete(game_id, session)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            log.exception("signal_loop_error", game_id=game_id)
-
-    async def _judge_all_guesses(
-        self,
-        game_id: str,
-        transmitter_order: list[str],
-        guesses_snapshot: dict[str, dict[str, str]],
-        phrases_snapshot: dict[str, str],
-    ) -> None:
+    async def finalize_round(self, game_id: str) -> None:
         """Batch-judge all guesses via LLM, parallelized per transmitter."""
-        from backend.api.deps import get_connection_manager
+        from backend.api.deps import get_connection_manager, get_game_repository
 
         cm = get_connection_manager()
+        lock = cm.get_lock(game_id)
 
+        # Snapshot data under lock
+        async with lock:
+            session = get_game_repository().get(game_id)
+            if not session or not session.state.current_round:
+                return
+            rs = session.state.current_round
+            guesses_snapshot = {pid: dict(gs) for pid, gs in rs.signal_guesses.items()}
+            phrases_snapshot = dict(rs.signal_phrases)
+            order_snapshot = list(rs.signal_player_order)
+
+        # Judge outside lock
         from backend.llm.agents import judge_signal_guesses
 
         async def judge_one(featured_pid: str) -> tuple[str, dict[str, int]]:
@@ -226,13 +203,10 @@ class SignalHandler(MinigameHandler):
                 log.exception("signal_judge_error", game_id=game_id, featured_pid=featured_pid)
                 return featured_pid, {}
 
-        tasks = [judge_one(pid) for pid in transmitter_order]
+        tasks = [judge_one(pid) for pid in order_snapshot]
         judge_results = await asyncio.gather(*tasks)
 
         # Store under lock
-        from backend.api.deps import get_game_repository
-
-        lock = cm.get_lock(game_id)
         async with lock:
             session = get_game_repository().get(game_id)
             if not session:
@@ -297,15 +271,21 @@ class SignalHandler(MinigameHandler):
         return payload, score_deltas
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
-        from schemas.game_state import GamePhase
-
         rs = state.current_round
         if not rs:
             return {}
 
         transmitter_ids = set(rs.signal_player_order)
+        steps = state.round_step_defs
+        idx = state.current_step_index
 
-        if state.phase == GamePhase.PROMPT:
+        if not steps or idx >= len(steps):
+            return super().build_state_sync_extras(state, player_id)
+
+        step = steps[idx]
+        step_name = step["name"]
+
+        if step_name == "compose":
             # Only transmitters get their phrase
             if player_id in transmitter_ids:
                 phrase = rs.signal_phrases.get(player_id, "")
@@ -313,17 +293,17 @@ class SignalHandler(MinigameHandler):
                     return {"signal_phrase": phrase, "is_transmitter": True}
             return {"is_transmitter": player_id in transmitter_ids}
 
-        if state.phase == GamePhase.ACTIVE:
-            idx = rs.current_sub_round
-            if idx < len(rs.signal_player_order):
-                featured_pid = rs.signal_player_order[idx]
+        if step_name.startswith("signal_guess_"):
+            tx_index = int(step_name.split("_")[-1])
+            if tx_index < len(rs.signal_player_order):
+                featured_pid = rs.signal_player_order[tx_index]
                 alias_map = {p.id: p.alias for p in state.players}
                 transformation = rs.answers.get(featured_pid, NO_RESPONSE)
                 return {
                     "answers": {
                         pid: ans for pid, ans in rs.answers.items() if pid in transmitter_ids
                     },
-                    "sub_round_index": idx,
+                    "sub_round_index": tx_index,
                     "sub_round_payload": {
                         "round_type": "signal",
                         "featured_player_id": featured_pid,

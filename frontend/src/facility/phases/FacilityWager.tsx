@@ -218,7 +218,6 @@ export function FacilityWager() {
   const roundResults = useGameStore((s) => s.roundResults);
   const roundScores = useGameStore((s) => s.roundScores);
   const players = useGameStore((s) => s.players);
-  const phase = useGameStore((s) => s.phase);
   const scores = useGameStore((s) => s.scores);
   const playerColors = usePlayerColors();
 
@@ -265,7 +264,7 @@ export function FacilityWager() {
 
   // ─── Results View ───
 
-  if (phase === "results" && roundResults?.round_type === "wager") {
+  if (roundResults?.round_type === "wager") {
     const { questions } = roundResults;
 
     return (

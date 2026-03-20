@@ -10,11 +10,11 @@ from backend.services.game_logic import (
     build_state_sync,
     check_game_over,
     fill_missing_answers,
+    get_current_step,
     get_final_rankings,
     get_next_round_type,
-    get_phase_duration,
+    get_step_name,
     make_game_over_event,
-    make_phase_changed_event,
     sanitize_players_for_client,
     select_next_round_type,
     tally_gallery_votes,
@@ -122,6 +122,28 @@ class TestGetFinalRankings:
 
 
 # ---------------------------------------------------------------------------
+# Step helpers
+# ---------------------------------------------------------------------------
+
+
+class TestStepHelpers:
+    def test_get_current_step(self):
+        state, _ = make_standard_game()
+        step = get_current_step(state)
+        assert step is not None
+        assert step["name"] == "compose"
+
+    def test_get_step_name(self):
+        state, _ = make_standard_game()
+        assert get_step_name(state) == "compose"
+
+    def test_get_current_step_no_steps(self):
+        state = make_game_state(phase=GamePhase.LOBBY, round_step_defs=[], current_step_index=0)
+        assert get_current_step(state) is None
+        assert get_step_name(state) is None
+
+
+# ---------------------------------------------------------------------------
 # Phase transitions
 # ---------------------------------------------------------------------------
 
@@ -226,38 +248,47 @@ class TestStateSanitization:
         result = sanitize_players_for_client(state)
         assert result[0]["score"] == 3
 
-    def test_build_state_sync_hides_answers_during_prompt(self):
-        state, _ = make_standard_game(phase=GamePhase.PROMPT)
+    def test_build_state_sync_hides_answers_during_compose(self):
+        state, _ = make_standard_game(phase=GamePhase.ROUND)
+        # step 0 = compose
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
-        assert sync["answers"] == {}  # all answers hidden during PROMPT
+        assert sync["answers"] == {}  # all answers hidden during compose
         assert sync["my_answer"] == "my answer"  # own answer visible
 
-    def test_build_state_sync_shows_answers_in_active(self):
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+    def test_build_state_sync_shows_answers_in_vote(self):
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        # step 1 = vote
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["answers"] == {"h1": "my answer", "h2": "other"}
 
-    def test_build_state_sync_includes_my_vote_during_active_task(self):
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+    def test_build_state_sync_includes_my_vote_during_vote_step(self):
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
         state.current_round.gallery_votes = {"h1": "a1"}
 
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["my_vote"] == "a1"
 
     def test_build_state_sync_includes_scores(self):
-        state, _ = make_standard_game(phase=GamePhase.PROMPT)
+        state, _ = make_standard_game(phase=GamePhase.ROUND)
         state.players[0].score = 5
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["scores"]["h1"] == 5
 
     def test_build_state_sync_includes_total_rounds(self):
-        state, _ = make_standard_game(phase=GamePhase.PROMPT)
+        state, _ = make_standard_game(phase=GamePhase.ROUND)
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["total_rounds"] == 5
+
+    def test_build_state_sync_includes_step_fields(self):
+        state, _ = make_standard_game(phase=GamePhase.ROUND)
+        sync = build_state_sync(state, "h1", seq=1)
+        assert sync["step_name"] == "compose"
+        assert sync["step_index"] == 0
+        assert sync["component"] == "compose"
 
     def test_make_game_over_event_reveals_all(self):
         state, _ = make_standard_game()
@@ -277,13 +308,6 @@ class TestStateSanitization:
         assert roles["a1"] == "ai"
         assert event.scores["h1"] == 3
 
-    def test_make_phase_changed_event(self):
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
-        event = make_phase_changed_event(state, seq=5)
-        assert event.phase == "active"
-        assert event.round_number == 1
-        assert event.seq == 5
-
 
 # ---------------------------------------------------------------------------
 # Duel prompt selection
@@ -300,73 +324,6 @@ class TestDuelPrompts:
         settings = SimpleNamespace(prompt_duration=45)
         handler.setup_round(state, settings)
         assert len(state.used_prompt_indices) >= 1
-
-
-# ---------------------------------------------------------------------------
-# get_phase_duration
-# ---------------------------------------------------------------------------
-
-
-def _mock_settings(**overrides):
-    defaults = {
-        "prompt_duration": 45,
-        "vote_duration": 25,
-        "vote_results_duration": 8,
-        "brain_test_duration": 85,
-        "brain_test_results_duration": 15,
-        "wager_duration": 100,
-        "wager_sub_round_duration": 15,
-        "wager_questions": 3,
-        "wager_results_duration": 15,
-        "signal_prompt_duration": 20,
-        "signal_safety_duration": 120,
-        "signal_results_duration": 15,
-        "signal_sub_round_duration": 12,
-    }
-    defaults.update(overrides)
-    return SimpleNamespace(**defaults)
-
-
-class TestGetPhaseDuration:
-    def test_prompt(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.PROMPT) == 45
-
-    def test_active_task(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.TASK) == 25
-
-    def test_results_task(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.TASK) == 8
-
-    def test_active_brain_test(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.BRAIN_TEST) == 85
-
-    def test_active_wager(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.WAGER) == 100
-
-    def test_results_wager(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.WAGER) == 15
-
-    def test_prompt_signal(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.PROMPT, RoundType.SIGNAL) == 20
-
-    def test_active_signal(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.SIGNAL) == 120
-
-    def test_results_signal(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.SIGNAL) == 15
-
-    def test_unknown_phase(self):
-        s = _mock_settings()
-        assert get_phase_duration(s, GamePhase.LOBBY) is None
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +408,7 @@ class TestScoreBrainTest:
 class TestGalleryVoteScoring:
     def test_tally_gallery_votes_basic(self):
         """3 votes for player a1."""
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
         state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
 
         vote_counts = tally_gallery_votes(state)
@@ -462,7 +419,7 @@ class TestGalleryVoteScoring:
         from backend.minigames.task import TaskHandler
 
         handler = TaskHandler()
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
         state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
 
         payload, score_deltas = handler.build_results(state)
@@ -471,7 +428,7 @@ class TestGalleryVoteScoring:
 
     def test_tally_gallery_votes_no_votes(self):
         """Nobody voted → all counts 0."""
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
         state.current_round.gallery_votes = {}
 
         vote_counts = tally_gallery_votes(state)
@@ -483,7 +440,7 @@ class TestGalleryVoteScoring:
         from backend.minigames.task import TaskHandler
 
         handler = TaskHandler()
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
         state.current_round.gallery_votes = {
             "h1": "a1",
             "h2": "a2",
@@ -501,7 +458,7 @@ class TestGalleryVoteScoring:
         from backend.minigames.task import TaskHandler
 
         handler = TaskHandler()
-        state, _ = make_standard_game(phase=GamePhase.ACTIVE)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
         other_ids = [p.id for p in state.players if p.id != "h1"]
         state.current_round.gallery_votes = dict.fromkeys(other_ids, "h1")
 
@@ -560,9 +517,6 @@ class TestScoreWager:
         q2 = make_wager_question(correct_answer=10, guesses={"h1": 20, "h2": 10}, bets={"h1": "h2"})
         q3 = make_wager_question(correct_answer=80, guesses={"h1": 80, "h2": 60}, bets={"h2": "h1"})
         totals = score_wager([q1, q2, q3])
-        # q1: h1 closest (+100) + h1 self-bet (+100) = h1:200
-        # q2: h2 closest (+100) + h1 bet on h2 (+100) = h2:100, h1:100
-        # q3: h1 closest (+100) + h2 bet on h1 (+100) = h1:100, h2:100
         assert totals["h1"] == 400  # 200 + 100 + 100
         assert totals["h2"] == 200  # 100 + 100
 

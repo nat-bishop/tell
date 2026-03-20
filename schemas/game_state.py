@@ -10,9 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class GamePhase(enum.StrEnum):
     LOBBY = "lobby"
-    PROMPT = "prompt"
-    ACTIVE = "active"
-    RESULTS = "results"
+    ROUND = "round"
     GAME_OVER = "game_over"
 
 
@@ -112,3 +110,6 @@ class TellGameState(BaseModel):
     winner_ids: list[str] = Field(default_factory=list)
     phase_deadline: datetime | None = None
     narrator_context: list[NarratorEntry] = Field(default_factory=list)
+    # Step-based round state
+    current_step_index: int = 0
+    round_step_defs: list[dict] = Field(default_factory=list)

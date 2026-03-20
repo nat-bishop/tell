@@ -1,9 +1,10 @@
-"""Phase transition sequences — shared by route handlers and AI scheduler."""
+"""Step-based transition system — generic step runner for all minigames."""
 
 from __future__ import annotations
 
 import asyncio
 import uuid
+from dataclasses import asdict
 
 import structlog
 
@@ -16,14 +17,10 @@ from backend.api.deps import (
 from backend.minigames import get_handler
 from backend.services.game_logic import (
     check_game_over,
-    fill_missing_answers,
-    get_interstitial_hold,
     get_next_round_type,
-    get_phase_duration,
     make_game_over_event,
-    make_phase_changed_event,
     tally_gallery_votes,
-    transition_to_phase,
+    transition_to_step,
 )
 from backend.services.game_repository import TellGameSession
 from schemas.aliases import generate_aliases
@@ -32,6 +29,7 @@ from schemas.api_models import (
     NarrationEvent,
     PlayerJoinedEvent,
     RoundResultsEvent,
+    StepChangedEvent,
 )
 from schemas.game_state import (
     GamePhase,
@@ -166,109 +164,159 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
     task.add_done_callback(_background_tasks.discard)
 
 
-async def _notify_ai(game_id: str, phase: GamePhase) -> None:
-    """Notify the AI scheduler of a phase change (runtime import to avoid circular dep)."""
-    from backend.services.ai_scheduler import on_phase_change
-
-    await on_phase_change(game_id, phase)
-
-
-def _make_event(state, session, settings, **extra):
-    """Build a PhaseChangedEvent with phase_duration computed from settings."""
+def _make_step_event(
+    state: TellGameState, session: TellGameSession, step_index: int
+) -> StepChangedEvent:
+    """Build a StepChangedEvent from current state."""
+    step = state.round_step_defs[step_index]
     rs = state.current_round
-    pd = get_phase_duration(settings, state.phase, rs.round_type if rs else None)
-    return make_phase_changed_event(state, session.next_seq(), phase_duration=pd, **extra)
+    handler = get_handler(rs.round_type) if rs else None
+    payload = handler.step_event_extras(state, step_index) if handler else {}
 
-
-async def start_phase_timer(
-    game_id: str, phase: GamePhase, round_type: RoundType | None = None
-) -> None:
-    """Start the timer for the current phase. On expiry, transition to next phase."""
-    settings = get_settings()
-    tm = get_timer_manager()
-
-    duration = get_phase_duration(settings, phase, round_type)
-    if not duration:
-        return
-    # Interstitial hold is already baked into phase_deadline by transition functions,
-    # so the timer must include it too to stay in sync with the deadline.
-    duration += get_interstitial_hold(phase, round_type)
-
-    async def on_timer_expire():
-        await handle_phase_expiry(game_id, phase)
-
-    tm.start_timer(game_id, duration, on_timer_expire)
-
-
-async def handle_phase_expiry(game_id: str, expired_phase: GamePhase) -> None:
-    """Handle timer expiry — transition to next phase under lock."""
-    cm = get_connection_manager()
-    repo = get_game_repository()
-    lock = cm.get_lock(game_id)
-
-    async with lock:
-        session = repo.get(game_id)
-        if not session or session.state.phase != expired_phase:
-            return
-
-        log.info("phase_expired", phase=expired_phase.value)
-
-        if expired_phase == GamePhase.PROMPT:
-            fill_missing_answers(session.state)
-            await do_prompt_complete(game_id, session)
-
-        elif expired_phase == GamePhase.ACTIVE:
-            await do_active_complete(game_id, session)
-
-        elif expired_phase == GamePhase.RESULTS:
-            await do_results_complete(game_id, session)
-
-
-async def do_prompt_complete(game_id: str, session: TellGameSession) -> None:
-    """PROMPT complete → transition to ACTIVE phase.
-
-    Assumes caller holds the game lock and has called fill_missing_answers.
-    """
-    cm = get_connection_manager()
-    settings = get_settings()
-    state = session.state
-    round_state = state.current_round
-
-    assert round_state, "No active round in PROMPT phase"
-    round_type = round_state.round_type
-    handler = get_handler(round_type)
-
-    # Transition to ACTIVE
-    transition_to_phase(state, GamePhase.ACTIVE, handler.get_active_duration(settings), round_type)
-    extras = handler.active_event_extras(state)
-    await cm.broadcast(
-        game_id,
-        _make_event(
-            state,
-            session,
-            settings,
-            round_type=round_type,
-            **extras,
-        ),
+    return StepChangedEvent(
+        seq=session.next_seq(),
+        phase=state.phase.value,
+        step_name=step["name"],
+        step_index=step_index,
+        component=step["component"],
+        round_number=state.round_number,
+        round_type=rs.round_type if rs else "",
+        deadline=state.phase_deadline.isoformat() if state.phase_deadline else None,
+        duration=step["duration"],
+        payload=payload,
     )
-    await start_phase_timer(game_id, GamePhase.ACTIVE, round_type)
-    await handler.on_active_start(game_id)
 
 
-async def do_active_complete(game_id: str, session: TellGameSession) -> None:
-    """ACTIVE complete → score round via handler → RESULTS or next round.
+async def _advance_step(game_id: str, session: TellGameSession, step_index: int) -> None:
+    """Advance to a specific step: set state, broadcast, start timer, notify handler.
 
     Assumes caller holds the game lock.
     """
     cm = get_connection_manager()
-    settings = get_settings()
+    state = session.state
+
+    transition_to_step(state, step_index)
+    event = _make_step_event(state, session, step_index)
+    await cm.broadcast(game_id, event)
+
+    step = state.round_step_defs[step_index]
+    duration = step["duration"]
+
+    # Start timer
+    async def on_timer_expire():
+        await _handle_step_expiry(game_id)
+
+    get_timer_manager().start_timer(game_id, duration, on_timer_expire)
+
+    # Notify handler
+    rs = state.current_round
+    if rs and not step.get("is_results"):
+        handler = get_handler(rs.round_type)
+        await handler.on_step_start(game_id, step_index)
+
+
+async def _handle_step_expiry(game_id: str) -> None:
+    """Handle timer expiry — advance to next step, score, or end game.
+
+    Acquires lock. For finalize_round (Signal), releases lock during I/O.
+    """
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    need_finalize = False
+    handler = None
+    step_index = -1
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            return
+        state = session.state
+        if state.phase != GamePhase.ROUND:
+            return
+
+        step_index = state.current_step_index
+        steps = state.round_step_defs
+        if step_index >= len(steps):
+            return
+
+        current_step = steps[step_index]
+        rs = state.current_round
+        if not rs:
+            return
+
+        handler = get_handler(rs.round_type)
+        log.info("step_expired", step_name=current_step["name"], step_index=step_index)
+
+        # Cleanup current step
+        await handler.on_step_end(game_id, step_index)
+
+        if current_step.get("is_results"):
+            # Results step done — game over or next round
+            result = check_game_over(state)
+            if result:
+                winner, winner_ids = result
+                await _do_game_over(game_id, session, state, winner, winner_ids)
+                return
+
+            # Fire narration before next round
+            await _fire_narration(
+                game_id,
+                "between_rounds",
+                "Round complete. Comment on performance. One line.",
+            )
+            await _start_next_round(game_id, session)
+            return
+
+        next_index = step_index + 1
+        if next_index >= len(steps):
+            return
+
+        next_step = steps[next_index]
+        if next_step.get("is_results"):
+            # Next step is results — need to finalize, score, then advance
+            need_finalize = True
+        else:
+            # Normal advance
+            await _advance_step(game_id, session, next_index)
+            return
+
+    # Outside lock: finalize_round (Signal LLM judging)
+    if need_finalize and handler:
+        await handler.finalize_round(game_id)
+
+        async with lock:
+            session = repo.get(game_id)
+            if not session:
+                return
+            state = session.state
+            if state.phase != GamePhase.ROUND:
+                return
+            # Verify still on expected step (no race)
+            if state.current_step_index != step_index:
+                return
+
+            rs = state.current_round
+            if not rs:
+                return
+
+            await _score_and_advance_to_results(game_id, session, handler, next_index)
+
+
+async def _score_and_advance_to_results(
+    game_id: str, session: TellGameSession, handler, next_index: int
+) -> None:
+    """Build results, apply scores, broadcast, fire narration, advance to results step.
+
+    Assumes caller holds the game lock.
+    """
+    cm = get_connection_manager()
     state = session.state
     rs = state.current_round
     if not rs:
         return
 
-    round_type = rs.round_type
-    handler = get_handler(round_type)
     payload, score_deltas = handler.build_results(state)
 
     # Apply score deltas
@@ -280,32 +328,15 @@ async def do_active_complete(game_id: str, session: TellGameSession) -> None:
         game_id,
         RoundResultsEvent(
             seq=session.next_seq(),
-            round_type=round_type,
+            round_type=rs.round_type,
             payload=payload,
             scores=scores,
         ),
     )
-    log.info("round_results", round_type=round_type, scores=scores)
+    log.info("round_results", round_type=rs.round_type, scores=scores)
 
-    if handler.meta.has_results:
-        transition_to_phase(
-            state, GamePhase.RESULTS, handler.get_results_duration(settings), round_type
-        )
-        await cm.broadcast(
-            game_id,
-            _make_event(state, session, settings, round_type=round_type),
-        )
-        await start_phase_timer(game_id, GamePhase.RESULTS, round_type)
-    else:
-        # Skip results phase
-        result = check_game_over(state)
-        if result:
-            winner, winner_ids = result
-            await _do_game_over(game_id, session, state, winner, winner_ids)
-            return
-        await _start_next_round(game_id, session)
-
-    # Fire narrator: react to round results (round-type-specific prompt)
+    # Fire narration for results
+    round_type = rs.round_type
     if round_type == RoundType.TASK:
         alias_map = {p.id: p.alias for p in state.players}
         vote_counts = payload.get("vote_counts", {})
@@ -324,24 +355,58 @@ async def do_active_complete(game_id: str, session: TellGameSession) -> None:
         await _fire_narration(
             game_id,
             "between_rounds",
-            "Quick Draw complete. Comment on who performed well or stumbled. One line.",
+            "Round scoring complete. Comment on who performed well or stumbled. One line.",
         )
 
+    await _advance_step(game_id, session, next_index)
 
-async def do_results_complete(game_id: str, session: TellGameSession) -> None:
-    """RESULTS done → check game over or next round.
 
-    Assumes caller holds the game lock.
-    """
+async def try_advance_step(game_id: str, session: TellGameSession) -> None:
+    """Check if current step can end early. Called under lock by routes/AI tasks."""
     state = session.state
-
-    result = check_game_over(state)
-    if result:
-        winner, winner_ids = result
-        await _do_game_over(game_id, session, state, winner, winner_ids)
+    if state.phase != GamePhase.ROUND:
         return
 
-    await _start_next_round(game_id, session)
+    step_index = state.current_step_index
+    steps = state.round_step_defs
+    if step_index >= len(steps):
+        return
+
+    rs = state.current_round
+    if not rs:
+        return
+
+    handler = get_handler(rs.round_type)
+    if not handler.check_early_complete(state, step_index):
+        return
+
+    # Early completion — cancel timer and process
+    get_timer_manager().cancel_timer(game_id)
+
+    log.info("step_early_complete", step_name=steps[step_index]["name"], step_index=step_index)
+
+    await handler.on_step_end(game_id, step_index)
+
+    current_step = steps[step_index]
+    if current_step.get("is_results"):
+        result = check_game_over(state)
+        if result:
+            winner, winner_ids = result
+            await _do_game_over(game_id, session, state, winner, winner_ids)
+            return
+        await _start_next_round(game_id, session)
+        return
+
+    next_index = step_index + 1
+    if next_index >= len(steps):
+        return
+
+    next_step = steps[next_index]
+    if next_step.get("is_results"):
+        # Score and advance to results — finalize is no-op for early-complete handlers
+        await _score_and_advance_to_results(game_id, session, handler, next_index)
+    else:
+        await _advance_step(game_id, session, next_index)
 
 
 async def _do_game_over(
@@ -361,7 +426,6 @@ async def _do_game_over(
     log.info("game_over", winner=winner, winner_ids=winner_ids)
 
     # Fire narrator: game over wrap-up (non-blocking background task).
-    # Narration arrives via NarrationEvent; we don't block here waiting for it.
     top_players = [p for p in state.players if p.id in winner_ids]
     top_info = ", ".join(f"{p.alias} ({_role_label(p.role)}, score {p.score})" for p in top_players)
     humans = [p for p in state.players if p.role == PlayerRole.HUMAN]
@@ -415,7 +479,6 @@ async def _start_next_round(game_id: str, session: TellGameSession) -> None:
 
     Assumes caller holds the game lock.
     """
-    cm = get_connection_manager()
     settings = get_settings()
     state = session.state
 
@@ -424,34 +487,14 @@ async def _start_next_round(game_id: str, session: TellGameSession) -> None:
 
     handler.setup_round(state, settings)
     state.round_types.append(next_round_type)
+    state.phase = GamePhase.ROUND
 
-    if handler.meta.has_prompt:
-        prompt_dur = handler.get_prompt_duration(settings)
-        transition_to_phase(state, GamePhase.PROMPT, prompt_dur)
-        round_state = state.current_round
-        await cm.broadcast(
-            game_id,
-            _make_event(
-                state,
-                session,
-                settings,
-                prompt_text=round_state.prompt_text if round_state else None,
-                prompt_category=round_state.prompt_category if round_state else None,
-                round_type=next_round_type,
-            ),
-        )
-        await start_phase_timer(game_id, GamePhase.PROMPT, next_round_type)
-        await _notify_ai(game_id, GamePhase.PROMPT)
-    else:
-        transition_to_phase(
-            state, GamePhase.ACTIVE, handler.get_active_duration(settings), next_round_type
-        )
-        await cm.broadcast(
-            game_id,
-            _make_event(state, session, settings, round_type=next_round_type),
-        )
-        await start_phase_timer(game_id, GamePhase.ACTIVE, next_round_type)
-        await handler.on_active_start(game_id)
+    # Store step defs for this round
+    step_defs = handler.get_steps(state, settings)
+    state.round_step_defs = [asdict(s) for s in step_defs]
+
+    # Advance to first step
+    await _advance_step(game_id, session, 0)
 
     # Fire narrator: round preview (round 2+)
     if state.round_number > 1:

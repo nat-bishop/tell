@@ -2,24 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
-import datetime as dt
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from backend.config import Settings
 
-import structlog
-
-from backend.minigames.base import MinigameHandler, MinigameMeta
+from backend.minigames.base import MinigameHandler, StepDef
 from schemas.game_state import (
     BrainTestChallenge,
     RoundState,
     RoundType,
     TellGameState,
 )
-
-log = structlog.get_logger(__name__)
 
 
 def score_brain_test(challenges: list[BrainTestChallenge]) -> dict[str, int]:
@@ -33,13 +27,7 @@ def score_brain_test(challenges: list[BrainTestChallenge]) -> dict[str, int]:
 
 class BrainTestHandler(MinigameHandler):
     round_type = RoundType.BRAIN_TEST
-    meta = MinigameMeta(
-        min_players=2,
-        has_prompt=False,
-        has_results=True,
-        active_interstitial=5,
-        results_interstitial=2,
-    )
+    min_players = 2
 
     def setup_round(self, state: TellGameState, settings: Settings) -> None:
         from schemas.prompts import select_brain_test_challenges
@@ -63,97 +51,69 @@ class BrainTestHandler(MinigameHandler):
             ],
         )
 
-    def get_active_duration(self, settings: Settings) -> int:
-        return settings.brain_test_duration
-
-    def get_results_duration(self, settings: Settings) -> int:
-        return settings.brain_test_results_duration
-
-    async def on_active_start(self, game_id: str) -> None:
-        """Start the brain test sub-round loop."""
-        from backend.services.ai_scheduler import register_task
-
-        task = asyncio.create_task(self._brain_loop(game_id))
-        register_task(game_id, task)
-
-    async def _brain_loop(self, game_id: str) -> None:
-        try:
-            from backend.api.deps import (
-                get_connection_manager,
-                get_game_repository,
-                get_settings,
-                get_timer_manager,
+    def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
+        num = settings.brain_test_challenges
+        dur = settings.brain_test_challenge_duration
+        steps = [
+            StepDef(name=f"challenge_{i}", duration=dur, component="brain_test") for i in range(num)
+        ]
+        steps.append(
+            StepDef(
+                name="results",
+                duration=settings.brain_test_results_duration,
+                component="brain_test_results",
+                is_results=True,
             )
-            from schemas.api_models import SubRoundEvent
-            from schemas.game_state import GamePhase
+        )
+        return steps
 
-            cm = get_connection_manager()
-            settings = get_settings()
-            repo = get_game_repository()
-            sub_duration = settings.brain_test_challenge_duration
-            num_challenges = settings.brain_test_challenges
-            lock = cm.get_lock(game_id)
+    async def on_step_start(self, game_id: str, step_index: int) -> None:
+        from backend.api.deps import get_game_repository
 
-            for i in range(num_challenges):
-                async with lock:
-                    session = repo.get(game_id)
-                    if not session:
-                        return
-                    state = session.state
-                    if state.phase != GamePhase.ACTIVE:
-                        return
-                    rs = state.current_round
-                    if not rs or i >= len(rs.brain_challenges):
-                        return
+        session = get_game_repository().get(game_id)
+        if not session:
+            return
+        rs = session.state.current_round
+        if not rs:
+            return
 
-                    rs.current_sub_round = i
-                    ch = rs.brain_challenges[i]
+        steps = session.state.round_step_defs
+        if step_index >= len(steps):
+            return
+        step = steps[step_index]
+        if not step["name"].startswith("challenge"):
+            return
 
-                    sub_deadline = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=sub_duration)
-                    state.phase_deadline = sub_deadline
+        # Set current_sub_round for the challenge
+        challenge_index = int(step["name"].split("_")[1])
+        rs.current_sub_round = challenge_index
 
-                    await cm.broadcast(
-                        game_id,
-                        SubRoundEvent(
-                            seq=session.next_seq(),
-                            round_type="brain_test",
-                            sub_round_index=i,
-                            payload={
-                                "challenge_index": i,
-                                "challenge_type": ch.challenge_type,
-                                "question": ch.question,
-                                "options": ch.options,
-                            },
-                            sub_deadline=sub_deadline.isoformat(),
-                            phase_duration=sub_duration,
-                        ),
-                    )
+        # Schedule AI for this challenge
+        from backend.services.ai_scheduler import on_brain_test_challenge
 
-                # Schedule AI for this challenge
-                from backend.services.ai_scheduler import on_brain_test_challenge
+        await on_brain_test_challenge(game_id, challenge_index)
 
-                await on_brain_test_challenge(game_id, i)
+    def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
+        rs = state.current_round
+        if not rs:
+            return {}
+        steps = state.round_step_defs
+        if step_index >= len(steps):
+            return {}
+        step = steps[step_index]
+        if not step["name"].startswith("challenge"):
+            return {}
 
-                await asyncio.sleep(sub_duration)
-
-            # All challenges done — transition to results
-            async with lock:
-                session = repo.get(game_id)
-                if not session:
-                    return
-                if session.state.phase != GamePhase.ACTIVE:
-                    return
-                get_timer_manager().cancel_timer(game_id)
-
-                # Runtime import to avoid circular dep
-                from backend.services.transitions import do_active_complete
-
-                await do_active_complete(game_id, session)
-
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            log.exception("brain_test_loop_error", game_id=game_id)
+        challenge_index = int(step["name"].split("_")[1])
+        if challenge_index >= len(rs.brain_challenges):
+            return {}
+        ch = rs.brain_challenges[challenge_index]
+        return {
+            "challenge_index": challenge_index,
+            "challenge_type": ch.challenge_type,
+            "question": ch.question,
+            "options": ch.options,
+        }
 
     def build_results(self, state: TellGameState) -> tuple[dict, dict[str, int]]:
         rs = state.current_round
@@ -180,22 +140,22 @@ class BrainTestHandler(MinigameHandler):
         return {"results": results}, score_deltas
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:
-        """Provide current challenge info for reconnection during ACTIVE."""
-        from schemas.game_state import GamePhase
-
+        """Provide current challenge info for reconnection during challenge steps."""
         rs = state.current_round
         if not rs:
             return {}
 
-        if state.phase == GamePhase.ACTIVE:
-            idx = rs.current_sub_round
-            if idx < len(rs.brain_challenges):
-                ch = rs.brain_challenges[idx]
+        steps = state.round_step_defs
+        idx = state.current_step_index
+        if steps and idx < len(steps) and steps[idx]["name"].startswith("challenge"):
+            challenge_index = int(steps[idx]["name"].split("_")[1])
+            if challenge_index < len(rs.brain_challenges):
+                ch = rs.brain_challenges[challenge_index]
                 return {
-                    "sub_round_index": idx,
+                    "sub_round_index": challenge_index,
                     "sub_round_payload": {
                         "round_type": "brain_test",
-                        "challenge_index": idx,
+                        "challenge_index": challenge_index,
                         "challenge_type": ch.challenge_type,
                         "question": ch.question,
                         "options": ch.options,

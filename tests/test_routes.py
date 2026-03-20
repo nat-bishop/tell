@@ -58,7 +58,7 @@ class TestJoinGame:
         assert resp.status_code == 404
 
     async def test_join_game_in_progress(self, client, mock_ai):
-        game_id, _session, _players = seed_game(GamePhase.PROMPT)
+        game_id, _session, _players = seed_game(GamePhase.ROUND)
         resp = await client.post(f"/games/{game_id}/join", json={"player_name": "Alice"})
         assert resp.status_code == 400
         assert "already in progress" in resp.json()["detail"].lower()
@@ -87,7 +87,7 @@ class TestStartGame:
         assert "host" in resp.json()["detail"].lower()
 
     async def test_start_already_started(self, client, mock_ai):
-        game_id, _session, _players = seed_game(GamePhase.PROMPT)
+        game_id, _session, _players = seed_game(GamePhase.ROUND)
         resp = await client.post(
             f"/games/{game_id}/start",
             json={"player_id": "h1"},
@@ -102,17 +102,18 @@ class TestStartGame:
 
 
 class TestSubmitAnswer:
-    async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
+    async def test_wrong_step(self, client, mock_ai):
+        # current_step_index=1 is the vote step for task, not compose
+        game_id, _, _ = seed_game(GamePhase.ROUND, round_type=RoundType.TASK, current_step_index=1)
         resp = await client.post(
             f"/games/{game_id}/answer",
             json={"player_id": "h1", "answer": "test"},
         )
         assert resp.status_code == 400
-        assert "not in prompt phase" in resp.json()["detail"].lower()
+        assert "compose" in resp.json()["detail"].lower()
 
     async def test_nonexistent_player(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.PROMPT)
+        game_id, _, _ = seed_game(GamePhase.ROUND)
         resp = await client.post(
             f"/games/{game_id}/answer",
             json={"player_id": "nonexistent", "answer": "test"},
@@ -121,7 +122,7 @@ class TestSubmitAnswer:
         assert "not found" in resp.json()["detail"].lower()
 
     async def test_duplicate_answer(self, client, mock_ai):
-        game_id, session, _ = seed_game(GamePhase.PROMPT)
+        game_id, session, _ = seed_game(GamePhase.ROUND)
         session.state.current_round.answers["h1"] = "already answered"
         resp = await client.post(
             f"/games/{game_id}/answer",
@@ -131,7 +132,7 @@ class TestSubmitAnswer:
         assert "already answered" in resp.json()["detail"].lower()
 
     async def test_success(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.PROMPT)
+        game_id, _, _ = seed_game(GamePhase.ROUND)
         resp = await client.post(
             f"/games/{game_id}/answer",
             json={"player_id": "h1", "answer": "my answer"},
@@ -146,7 +147,9 @@ class TestSubmitAnswer:
 
 class TestGalleryVote:
     async def test_success(self, client, mock_ai):
-        game_id, session, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
+        game_id, session, _ = seed_game(
+            GamePhase.ROUND, round_type=RoundType.TASK, current_step_index=1
+        )
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "a1"},
@@ -154,26 +157,18 @@ class TestGalleryVote:
         assert resp.status_code == 200
         assert session.state.current_round.gallery_votes["h1"] == "a1"
 
-    async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.PROMPT)
+    async def test_wrong_step(self, client, mock_ai):
+        # compose step (index 0), not vote
+        game_id, _, _ = seed_game(GamePhase.ROUND)
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "a1"},
         )
         assert resp.status_code == 400
-        assert "active" in resp.json()["detail"].lower()
-
-    async def test_wrong_round_type(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.BRAIN_TEST)
-        resp = await client.post(
-            f"/games/{game_id}/vote",
-            json={"player_id": "h1", "voted_for_player_id": "a1"},
-        )
-        assert resp.status_code == 400
-        assert "task" in resp.json()["detail"].lower()
+        assert "vote" in resp.json()["detail"].lower()
 
     async def test_vote_for_self(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
+        game_id, _, _ = seed_game(GamePhase.ROUND, round_type=RoundType.TASK, current_step_index=1)
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "h1"},
@@ -182,7 +177,9 @@ class TestGalleryVote:
         assert "yourself" in resp.json()["detail"].lower()
 
     async def test_duplicate_vote_overwrites(self, client, mock_ai):
-        game_id, session, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
+        game_id, session, _ = seed_game(
+            GamePhase.ROUND, round_type=RoundType.TASK, current_step_index=1
+        )
         # First vote
         resp = await client.post(
             f"/games/{game_id}/vote",
@@ -200,7 +197,7 @@ class TestGalleryVote:
         assert session.state.current_round.gallery_votes["h1"] == "a2"
 
     async def test_invalid_target(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
+        game_id, _, _ = seed_game(GamePhase.ROUND, round_type=RoundType.TASK, current_step_index=1)
         resp = await client.post(
             f"/games/{game_id}/vote",
             json={"player_id": "h1", "voted_for_player_id": "nonexistent"},
@@ -216,20 +213,22 @@ class TestGalleryVote:
 
 def seed_wager_game(
     *,
-    current_sub_round: int = 0,
+    current_step_index: int = 0,
     wager_questions: list[WagerQuestion] | None = None,
 ):
-    """Seed a game at ACTIVE/WAGER with wager questions."""
-    game_id, session, players = seed_game(GamePhase.ACTIVE, round_type=RoundType.WAGER)
+    """Seed a game at ROUND/WAGER with wager questions."""
+    game_id, session, players = seed_game(
+        GamePhase.ROUND, round_type=RoundType.WAGER, current_step_index=current_step_index
+    )
     rs = session.state.current_round
     rs.wager_questions = wager_questions or [make_wager_question()]
-    rs.current_sub_round = current_sub_round
+    rs.current_sub_round = current_step_index
     return game_id, session, players
 
 
 class TestWagerGuess:
     async def test_success(self, client, mock_ai):
-        game_id, session, _ = seed_wager_game(current_sub_round=0)
+        game_id, session, _ = seed_wager_game(current_step_index=0)
         resp = await client.post(
             f"/games/{game_id}/wager-guess",
             json={"player_id": "h1", "question_index": 0, "value": 42},
@@ -238,25 +237,16 @@ class TestWagerGuess:
         assert session.state.current_round.wager_questions[0].guesses["h1"] == 42
 
     async def test_wrong_phase(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.PROMPT)
+        game_id, _, _ = seed_game(GamePhase.ROUND, round_type=RoundType.TASK)
         resp = await client.post(
             f"/games/{game_id}/wager-guess",
             json={"player_id": "h1", "question_index": 0, "value": 100},
         )
         assert resp.status_code == 400
-        assert "active" in resp.json()["detail"].lower()
-
-    async def test_wrong_round_type(self, client, mock_ai):
-        game_id, _, _ = seed_game(GamePhase.ACTIVE, round_type=RoundType.TASK)
-        resp = await client.post(
-            f"/games/{game_id}/wager-guess",
-            json={"player_id": "h1", "question_index": 0, "value": 100},
-        )
-        assert resp.status_code == 400
-        assert "wager" in resp.json()["detail"].lower()
+        assert "guess" in resp.json()["detail"].lower()
 
     async def test_value_clamped(self, client, mock_ai):
-        game_id, session, _ = seed_wager_game(current_sub_round=0)
+        game_id, session, _ = seed_wager_game(current_step_index=0)
         resp = await client.post(
             f"/games/{game_id}/wager-guess",
             json={"player_id": "h1", "question_index": 0, "value": 9999},
@@ -265,7 +255,7 @@ class TestWagerGuess:
         assert session.state.current_round.wager_questions[0].guesses["h1"] == 100
 
     async def test_overwrite_allowed(self, client, mock_ai):
-        game_id, session, _ = seed_wager_game(current_sub_round=0)
+        game_id, session, _ = seed_wager_game(current_step_index=0)
         await client.post(
             f"/games/{game_id}/wager-guess",
             json={"player_id": "h1", "question_index": 0, "value": 30},
@@ -278,8 +268,8 @@ class TestWagerGuess:
         assert session.state.current_round.wager_questions[0].guesses["h1"] == 70
 
     async def test_wrong_sub_round(self, client, mock_ai):
-        # sub_round 1 = bet phase, not guess
-        game_id, _, _ = seed_wager_game(current_sub_round=1)
+        # step index 1 = bet_0, not guess
+        game_id, _, _ = seed_wager_game(current_step_index=1)
         resp = await client.post(
             f"/games/{game_id}/wager-guess",
             json={"player_id": "h1", "question_index": 0, "value": 100},
@@ -296,7 +286,7 @@ class TestWagerGuess:
 class TestWagerBet:
     async def test_success(self, client, mock_ai):
         q = make_wager_question(guesses={"h2": 200})
-        game_id, session, _ = seed_wager_game(current_sub_round=1, wager_questions=[q])
+        game_id, session, _ = seed_wager_game(current_step_index=1, wager_questions=[q])
         resp = await client.post(
             f"/games/{game_id}/wager-bet",
             json={"player_id": "h1", "question_index": 0, "target_player_id": "h2"},
@@ -306,7 +296,7 @@ class TestWagerBet:
 
     async def test_self_bet_allowed(self, client, mock_ai):
         q = make_wager_question(guesses={"h1": 200})
-        game_id, session, _ = seed_wager_game(current_sub_round=1, wager_questions=[q])
+        game_id, session, _ = seed_wager_game(current_step_index=1, wager_questions=[q])
         resp = await client.post(
             f"/games/{game_id}/wager-bet",
             json={"player_id": "h1", "question_index": 0, "target_player_id": "h1"},
@@ -316,7 +306,7 @@ class TestWagerBet:
 
     async def test_overwrite_allowed(self, client, mock_ai):
         q = make_wager_question(guesses={"h2": 200, "a1": 150})
-        game_id, session, _ = seed_wager_game(current_sub_round=1, wager_questions=[q])
+        game_id, session, _ = seed_wager_game(current_step_index=1, wager_questions=[q])
         await client.post(
             f"/games/{game_id}/wager-bet",
             json={"player_id": "h1", "question_index": 0, "target_player_id": "h2"},
@@ -330,7 +320,7 @@ class TestWagerBet:
 
     async def test_invalid_target(self, client, mock_ai):
         q = make_wager_question(guesses={"h2": 200})
-        game_id, _, _ = seed_wager_game(current_sub_round=1, wager_questions=[q])
+        game_id, _, _ = seed_wager_game(current_step_index=1, wager_questions=[q])
         resp = await client.post(
             f"/games/{game_id}/wager-bet",
             json={"player_id": "h1", "question_index": 0, "target_player_id": "nonexistent"},
@@ -341,7 +331,7 @@ class TestWagerBet:
     async def test_target_has_no_guess(self, client, mock_ai):
         # h2 exists but hasn't guessed
         q = make_wager_question(guesses={"h1": 200})
-        game_id, _, _ = seed_wager_game(current_sub_round=1, wager_questions=[q])
+        game_id, _, _ = seed_wager_game(current_step_index=1, wager_questions=[q])
         resp = await client.post(
             f"/games/{game_id}/wager-bet",
             json={"player_id": "h1", "question_index": 0, "target_player_id": "h2"},
@@ -350,9 +340,9 @@ class TestWagerBet:
         assert "no guess" in resp.json()["detail"].lower()
 
     async def test_wrong_sub_round(self, client, mock_ai):
-        # sub_round 0 = guess phase, not bet
+        # step index 0 = guess_0, not bet
         q = make_wager_question(guesses={"h2": 200})
-        game_id, _, _ = seed_wager_game(current_sub_round=0, wager_questions=[q])
+        game_id, _, _ = seed_wager_game(current_step_index=0, wager_questions=[q])
         resp = await client.post(
             f"/games/{game_id}/wager-bet",
             json={"player_id": "h1", "question_index": 0, "target_player_id": "h2"},

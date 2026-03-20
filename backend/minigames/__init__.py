@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from schemas.game_state import RoundType
 
 from backend.minigames.base import MinigameHandler
-from backend.minigames.base import MinigameMeta as MinigameMeta
+from backend.minigames.base import StepDef as StepDef
 
 MINIGAME_REGISTRY: dict[RoundType, MinigameHandler] = {}
 

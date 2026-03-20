@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from backend.minigames.base import MinigameHandler, MinigameMeta
+from backend.minigames.base import MinigameHandler, StepDef
 from schemas.game_state import RoundState, RoundType, TellGameState
 
 if TYPE_CHECKING:
@@ -13,13 +13,7 @@ if TYPE_CHECKING:
 
 class TaskHandler(MinigameHandler):
     round_type = RoundType.TASK
-    meta = MinigameMeta(
-        min_players=2,
-        has_prompt=True,
-        has_results=True,
-        active_interstitial=3,
-        results_interstitial=2,
-    )
+    min_players = 2
 
     def setup_round(self, state: TellGameState, settings: Settings) -> None:
         from schemas.prompts import select_duel_prompt
@@ -35,21 +29,66 @@ class TaskHandler(MinigameHandler):
             round_type=RoundType.TASK,
         )
 
-    def get_active_duration(self, settings: Settings) -> int:
-        return settings.vote_duration
+    def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
+        return [
+            StepDef(name="compose", duration=settings.prompt_duration, component="compose"),
+            StepDef(name="vote", duration=settings.vote_duration, component="vote"),
+            StepDef(
+                name="results",
+                duration=settings.vote_results_duration,
+                component="vote_results",
+                is_results=True,
+            ),
+        ]
 
-    def get_results_duration(self, settings: Settings) -> int:
-        return settings.vote_results_duration
+    async def on_step_start(self, game_id: str, step_index: int) -> None:
+        from backend.services.ai_scheduler import schedule_ai_answers, schedule_ai_votes
 
-    def active_event_extras(self, state: TellGameState) -> dict:
+        if step_index == 0:
+            # Compose step — schedule AI answers
+            await schedule_ai_answers(game_id)
+        elif step_index == 1:
+            # Vote step — schedule AI votes
+            await schedule_ai_votes(game_id)
+
+    async def on_step_end(self, game_id: str, step_index: int) -> None:
+        if step_index == 0:
+            # Compose step ending — fill missing answers
+            from backend.api.deps import get_game_repository
+            from backend.services.game_logic import fill_missing_answers
+
+            session = get_game_repository().get(game_id)
+            if session:
+                fill_missing_answers(session.state)
+
+    def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
         rs = state.current_round
-        return {"answers": rs.answers if rs else {}}
+        if not rs:
+            return {}
+        if step_index == 0:
+            # Compose step — include prompt info
+            return {
+                "prompt_text": rs.prompt_text,
+                "prompt_category": rs.prompt_category,
+            }
+        if step_index == 1:
+            # Vote step — include all answers
+            return {"answers": rs.answers}
+        return {}
 
-    async def on_active_start(self, game_id: str) -> None:
-        """Schedule AI vote tasks."""
-        from backend.services.ai_scheduler import schedule_ai_votes
+    def check_early_complete(self, state: TellGameState, step_index: int) -> bool:
+        rs = state.current_round
+        if not rs:
+            return False
+        if step_index == 0:
+            # Compose — all answers in?
+            from backend.services.game_logic import get_answer_total
 
-        await schedule_ai_votes(game_id)
+            return len(rs.answers) >= get_answer_total(state)
+        if step_index == 1:
+            # Vote — all voted?
+            return len(rs.gallery_votes) >= len(state.players)
+        return False
 
     def build_results(self, state: TellGameState) -> tuple[dict, dict[str, int]]:
         """Tally gallery votes. Each vote received = -1 point."""

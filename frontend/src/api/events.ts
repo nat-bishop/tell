@@ -2,13 +2,12 @@ import { API_URL } from "./client";
 import type {
   StateSyncData,
   PlayerEventData,
-  PhaseChangedData,
+  StepChangedData,
   CountData,
   GameOverData,
   SeqData,
   HostChangedData,
   NarrationData,
-  SubRoundData,
   RoundResultsData,
   VoteSubmittedData,
   FinalRevealData,
@@ -19,13 +18,12 @@ export interface GameEventCallbacks {
   onPlayerJoined: (data: PlayerEventData) => void;
   onPlayerDisconnected: (data: PlayerEventData) => void;
   onPlayerReconnected: (data: PlayerEventData) => void;
-  onPhaseChanged: (data: PhaseChangedData) => void;
+  onStepChanged: (data: StepChangedData) => void;
   onAnswerSubmitted: (data: CountData) => void;
   onGameOver: (data: GameOverData) => void;
   onTimerTick: (data: SeqData) => void;
   onHostChanged: (data: HostChangedData) => void;
   onNarration: (data: NarrationData) => void;
-  onSubRound: (data: SubRoundData) => void;
   onRoundResults: (data: RoundResultsData) => void;
   onVoteSubmitted: (data: VoteSubmittedData) => void;
   onFinalReveal: (data: FinalRevealData) => void;
@@ -49,13 +47,12 @@ export function connectGameEvents(
     player_joined: callbacks.onPlayerJoined,
     player_disconnected: callbacks.onPlayerDisconnected,
     player_reconnected: callbacks.onPlayerReconnected,
-    phase_changed: callbacks.onPhaseChanged,
+    step_changed: callbacks.onStepChanged,
     answer_submitted: callbacks.onAnswerSubmitted,
     game_over: callbacks.onGameOver,
     timer_tick: callbacks.onTimerTick,
     host_changed: callbacks.onHostChanged,
     narration: callbacks.onNarration,
-    sub_round: callbacks.onSubRound,
     round_results: callbacks.onRoundResults,
     vote_submitted: callbacks.onVoteSubmitted,
     final_reveal: callbacks.onFinalReveal,
