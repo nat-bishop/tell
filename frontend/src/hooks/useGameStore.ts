@@ -199,6 +199,7 @@ interface GameState {
   // Narration
   narrationText: string | null;
   narrationTrigger: string | null;
+  narrationReceivedAt: number | null;
 
   // Generic round state
   subRoundIndex: number;
@@ -260,6 +261,7 @@ const initialState = {
   revealedPlayers: null as RevealedPlayer[] | null,
   narrationText: null as string | null,
   narrationTrigger: null as string | null,
+  narrationReceivedAt: null as number | null,
   subRoundIndex: 0,
   subRoundPayload: null as SubRoundPayload | null,
   roundResults: null as RoundResultsPayload | null,
@@ -336,30 +338,36 @@ export const useGameStore = create<GameState>((set) => ({
     })),
 
   onPhaseChanged: (data) =>
-    set((s) => ({
-      phase: data.phase,
-      roundNumber: data.round_number,
-      promptText: data.prompt_text || null,
-      promptCategory: data.prompt_category || null,
-      phaseDeadline: data.phase_deadline || null,
-      phaseDuration: data.phase_duration ?? null,
-      actionStartsAt: data.action_starts_at ?? null,
-      answers: data.answers || {},
-      roundType: data.round_type || null,
-      lastSeq: data.seq,
-      myAnswer: null,
-      answerCount: 0,
-      totalCount: data.phase === "prompt" ? s.players.length : 0,
-      narrationText: null,
-      narrationTrigger: null,
-      // Generic round state reset
-      subRoundPayload: null,
-      subRoundIndex: 0,
-      roundResults: null,
-      roundScores: null,
-      votedForId: null,
-      voteCount: 0,
-    })),
+    set((s) => {
+      // Only clear narration if it has been visible for 4+ seconds
+      const stale =
+        s.narrationReceivedAt !== null && Date.now() - s.narrationReceivedAt > 4000;
+      return {
+        phase: data.phase,
+        roundNumber: data.round_number,
+        promptText: data.prompt_text || null,
+        promptCategory: data.prompt_category || null,
+        phaseDeadline: data.phase_deadline || null,
+        phaseDuration: data.phase_duration ?? null,
+        actionStartsAt: data.action_starts_at ?? null,
+        answers: data.answers || {},
+        roundType: data.round_type || null,
+        lastSeq: data.seq,
+        myAnswer: null,
+        answerCount: 0,
+        totalCount: data.phase === "prompt" ? s.players.length : 0,
+        narrationText: stale ? null : s.narrationText,
+        narrationTrigger: stale ? null : s.narrationTrigger,
+        narrationReceivedAt: stale ? null : s.narrationReceivedAt,
+        // Generic round state reset
+        subRoundPayload: null,
+        subRoundIndex: 0,
+        roundResults: null,
+        roundScores: null,
+        votedForId: null,
+        voteCount: 0,
+      };
+    }),
 
   onAnswerSubmitted: (data) =>
     set({
@@ -372,6 +380,7 @@ export const useGameStore = create<GameState>((set) => ({
     set({
       narrationText: data.text,
       narrationTrigger: data.trigger,
+      narrationReceivedAt: Date.now(),
       lastSeq: data.seq,
     }),
 
@@ -426,6 +435,7 @@ export const useGameStore = create<GameState>((set) => ({
       winnerIds: data.winner_ids || [],
       narrationText: data.narrator_text,
       narrationTrigger: "game_over",
+      narrationReceivedAt: Date.now(),
       lastSeq: data.seq,
     }),
 
