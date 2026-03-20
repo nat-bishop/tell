@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from backend.minigames.brain_test import score_brain_test
+from backend.minigames.wager import score_wager
 from backend.services.game_logic import (
     build_state_sync,
     check_game_over,
@@ -25,7 +26,7 @@ from schemas.game_state import (
     PlayerRole,
     RoundType,
 )
-from tests.factories import make_game_state, make_player, make_standard_game
+from tests.factories import make_game_state, make_player, make_standard_game, make_wager_question
 
 # ---------------------------------------------------------------------------
 # Player queries
@@ -136,13 +137,13 @@ class TestPhaseTransitions:
             rt = select_next_round_type(RoundType.BRAIN_TEST)
             assert rt != RoundType.BRAIN_TEST
 
-    def test_select_next_round_type_two_types_only(self):
-        """Only Task and Brain Test exist."""
+    def test_select_next_round_type_all_types(self):
+        """All round types can be selected."""
         results = set()
         for _ in range(200):
             rt = select_next_round_type(None)
             results.add(rt)
-        assert results == {RoundType.TASK, RoundType.BRAIN_TEST}
+        assert results == {RoundType.TASK, RoundType.BRAIN_TEST, RoundType.WAGER}
 
     def test_task_handler_setup_round(self):
         from backend.minigames.task import TaskHandler
@@ -308,6 +309,10 @@ def _mock_settings(**overrides):
         "vote_results_duration": 8,
         "brain_test_duration": 85,
         "brain_test_results_duration": 15,
+        "wager_duration": 100,
+        "wager_sub_round_duration": 15,
+        "wager_questions": 3,
+        "wager_results_duration": 15,
     }
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -329,6 +334,14 @@ class TestGetPhaseDuration:
     def test_active_brain_test(self):
         s = _mock_settings()
         assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.BRAIN_TEST) == 85
+
+    def test_active_wager(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.ACTIVE, RoundType.WAGER) == 100
+
+    def test_results_wager(self):
+        s = _mock_settings()
+        assert get_phase_duration(s, GamePhase.RESULTS, RoundType.WAGER) == 15
 
     def test_unknown_phase(self):
         s = _mock_settings()
@@ -474,3 +487,72 @@ class TestGalleryVoteScoring:
         payload, score_deltas = handler.build_results(state)
         assert payload["vote_counts"]["h1"] == 7
         assert score_deltas["h1"] == -7
+
+
+# ---------------------------------------------------------------------------
+# Wager scoring
+# ---------------------------------------------------------------------------
+
+
+class TestScoreWager:
+    def test_closest_guess_scores_one(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 49, "h2": 30})
+        totals = score_wager([q])
+        assert totals["h1"] == 1
+        assert totals.get("h2", 0) == 0
+
+    def test_correct_bet_scores_one(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 49, "h2": 30}, bets={"h2": "h1"})
+        totals = score_wager([q])
+        assert totals["h1"] == 1  # closest guess
+        assert totals["h2"] == 1  # correct bet
+
+    def test_max_points_self_bet(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30}, bets={"h1": "h1"})
+        totals = score_wager([q])
+        assert totals["h1"] == 2  # closest guess + self-bet
+
+    def test_tie_in_guesses(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 48, "h2": 52})
+        totals = score_wager([q])
+        assert totals["h1"] == 1
+        assert totals["h2"] == 1
+
+    def test_bet_on_tied_closest(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 48, "h2": 52}, bets={"a1": "h2"})
+        totals = score_wager([q])
+        assert totals["a1"] == 1  # bet on either tied guesser → +1
+
+    def test_no_guesses_no_scores(self):
+        q = make_wager_question(correct_answer=50, guesses={})
+        totals = score_wager([q])
+        assert totals == {}
+
+    def test_no_bets_only_guess_points(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30})
+        totals = score_wager([q])
+        assert totals["h1"] == 1
+        assert totals.get("h2", 0) == 0
+
+    def test_multiple_questions_accumulate(self):
+        q1 = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30}, bets={"h1": "h1"})
+        q2 = make_wager_question(correct_answer=10, guesses={"h1": 20, "h2": 10}, bets={"h1": "h2"})
+        q3 = make_wager_question(correct_answer=80, guesses={"h1": 80, "h2": 60}, bets={"h2": "h1"})
+        totals = score_wager([q1, q2, q3])
+        # q1: h1 closest (+1) + h1 self-bet (+1) = h1:2
+        # q2: h2 closest (+1) + h1 bet on h2 (+1) = h2:1, h1:1
+        # q3: h1 closest (+1) + h2 bet on h1 (+1) = h1:1, h2:1
+        assert totals["h1"] == 4  # 2 + 1 + 1
+        assert totals["h2"] == 2  # 1 + 1
+
+    def test_bet_on_non_closest_scores_zero(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30}, bets={"a1": "h2"})
+        totals = score_wager([q])
+        assert totals.get("a1", 0) == 0
+
+    def test_all_same_guess_all_closest(self):
+        q = make_wager_question(correct_answer=50, guesses={"h1": 40, "h2": 40, "a1": 40})
+        totals = score_wager([q])
+        assert totals["h1"] == 1
+        assert totals["h2"] == 1
+        assert totals["a1"] == 1

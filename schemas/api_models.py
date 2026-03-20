@@ -164,6 +164,22 @@ class SubmitBrainTestAnswerRequest(BaseModel):
     challenge_index: int
 
 
+class SubmitWagerGuessRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
+    question_index: int
+    value: int
+
+
+class SubmitWagerBetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
+    question_index: int
+    target_player_id: str
+
+
 # --- Response models ---
 
 

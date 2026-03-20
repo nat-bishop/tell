@@ -16,50 +16,60 @@ interface Voice {
 const VOICES: Record<VoiceId, Voice> = {
   clinical: {
     roundLabel: (n, type) => {
+      if (type === "wager") return `TEST SEQUENCE ${n} / ESTIMATION PROTOCOL`;
       if (type === "brain_test") return `TEST SEQUENCE ${n} / RAPID ASSESSMENT`;
       return `TEST SEQUENCE ${n} / DETECTION SCAN`;
     },
     typeLabel: (type) => {
+      if (type === "wager") return "PLACE YOUR BETS";
       if (type === "brain_test") return "QUICK DRAW";
       return "IDENTIFY THE HUMAN";
     },
   },
   bureaucratic: {
     roundLabel: (n, type) => {
+      if (type === "wager") return `FORM 12C: NUMERICAL ASSESSMENT ${n}`;
       if (type === "brain_test") return `PLEASE PROCEED TO ASSESSMENT ${n}`;
       return `ASSESSMENT ${n} / VERIFICATION TASK`;
     },
     typeLabel: (type) => {
+      if (type === "wager") return "ESTIMATE AND WAGER";
       if (type === "brain_test") return "FORM 9D: RAPID RESPONSE";
       return "FORM 7B: DETECTION PROTOCOL";
     },
   },
   military: {
     roundLabel: (n, type) => {
+      if (type === "wager") return `OPERATION ${n} / FIELD ESTIMATION`;
       if (type === "brain_test") return `OPERATION ${n} / SNAP JUDGMENT`;
       return `OPERATION ${n} / SWEEP SCAN`;
     },
     typeLabel: (type) => {
+      if (type === "wager") return "CONFIDENCE CHECK";
       if (type === "brain_test") return "RAPID FIRE";
       return "WHO DOESN'T BELONG?";
     },
   },
   malfunctioning: {
     roundLabel: (n, type) => {
+      if (type === "wager") return `R-R-ROUND ${n} / N-NUMBER... LINE`;
       if (type === "brain_test") return `R-R-ROUND ${n} / Q-QUICK... DRAW`;
       return `R-R-ROUND ${n} / SC-SCAN [retry]`;
     },
     typeLabel: (type) => {
-      if (type === "brain_test") return "PICK— PICK AN OPTION. [retry]";
-      return "FIND THE— THE HUMAN. [buffer overflow]";
+      if (type === "wager") return "GUESS\u2014 GUESS THE NUMBER. [overflow]";
+      if (type === "brain_test") return "PICK\u2014 PICK AN OPTION. [retry]";
+      return "FIND THE\u2014 THE HUMAN. [buffer overflow]";
     },
   },
   friendly: {
     roundLabel: (n, type) => {
+      if (type === "wager") return `round ${n}! estimation time :)`;
       if (type === "brain_test") return `round ${n}! quick quiz time :)`;
       return `round ${n}! detection time :)`;
     },
     typeLabel: (type) => {
+      if (type === "wager") return "guess and bet!";
       if (type === "brain_test") return "quick draw";
       return "who sounds most human?";
     },
@@ -151,7 +161,7 @@ function TransitionOverlayContent() {
   // "prompt" and shows a directive instead.
   const isRoundStart =
     phase === "prompt" ||
-    (phase === "active" && roundType === "brain_test");
+    (phase === "active" && (roundType === "brain_test" || roundType === "wager"));
 
   const voice = getVoice(roundNumber);
 

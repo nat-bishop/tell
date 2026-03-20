@@ -11,6 +11,7 @@ from schemas.game_state import (
     RoundState,
     RoundType,
     TellGameState,
+    WagerQuestion,
 )
 
 
@@ -42,6 +43,7 @@ def make_round_state(
     prompt_category: str = "logical",
     answers: dict[str, str] | None = None,
     gallery_votes: dict[str, str] | None = None,
+    wager_questions: list[WagerQuestion] | None = None,
 ) -> RoundState:
     return RoundState(
         round_number=round_number,
@@ -50,6 +52,7 @@ def make_round_state(
         round_type=round_type,
         answers=answers or {},
         gallery_votes=gallery_votes or {},
+        wager_questions=wager_questions or [],
     )
 
 
@@ -77,6 +80,29 @@ def make_game_state(
         total_rounds=total_rounds,
         round_types=round_types or [],
         winner=winner,
+    )
+
+
+def make_wager_question(
+    *,
+    question: str = "How many?",
+    correct_answer: int = 50,
+    range_min: int = 0,
+    range_max: int = 100,
+    unit: str = "units",
+    category: str = "test",
+    guesses: dict[str, int] | None = None,
+    bets: dict[str, str] | None = None,
+) -> WagerQuestion:
+    return WagerQuestion(
+        question=question,
+        correct_answer=correct_answer,
+        range_min=range_min,
+        range_max=range_max,
+        unit=unit,
+        category=category,
+        guesses=guesses or {},
+        bets=bets or {},
     )
 
 

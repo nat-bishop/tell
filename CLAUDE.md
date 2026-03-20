@@ -7,10 +7,11 @@ Multiplayer social deduction game — reverse Turing test. Players join a group 
 ```
 schemas/          Shared Pydantic models — the contract between backend + frontend
   game_state.py   GamePhase (LOBBY/PROMPT/ACTIVE/RESULTS/GAME_OVER), Player,
-                  TellGameState, RoundState, BrainTestChallenge, NarratorEntry
+                  TellGameState, RoundState, BrainTestChallenge, WagerQuestion, NarratorEntry
   api_models.py   SSE event types + POST request/response models (incl. matchmaking)
   prompts.py      42 task prompts (7 categories) + brain test challenges (multiple-choice)
-                  + select_brain_test_challenges()
+                  + select_brain_test_challenges() + wager questions (25 numerical
+                  estimation) + select_wager_questions()
   aliases.py      Robot alias generator (UNIT-7, BOT-42)
   constants.py    MISSING_ALIAS, NO_RESPONSE, MATCHMAKING_LOBBY_ID
 
@@ -23,7 +24,7 @@ backend/
     routes/
       game.py         POST /games, GET /games/{id}
       events.py       GET /games/{id}/events (SSE stream)
-      actions.py      POST join/start/answer/vote/brain-test-answer
+      actions.py      POST join/start/answer/vote/brain-test-answer/wager-guess/wager-bet
       matchmaking.py  POST /matchmaking/join|leave, GET /matchmaking/status|events
       debug.py        POST /debug/seed (only when TELL_LOG_LEVEL=DEBUG)
   services/
@@ -46,9 +47,10 @@ backend/
     base.py                MinigameMeta dataclass + MinigameHandler interface
     task.py                TaskHandler (gallery vote, score = negative votes received)
     brain_test.py          BrainTestHandler + score_brain_test()
+    wager.py               WagerHandler + score_wager()
     __init__.py            MINIGAME_REGISTRY dict + get_handler() + register()
   llm/
-    agents.py              PydanticAI: answer, vote, brain test answer, narration
+    agents.py              PydanticAI: answer, vote, brain test answer, wager guess/bet, narration
     personalities.py       5 AI personalities with system prompts + vote styles
     prompts.py             NARRATOR_SYSTEM_PROMPT + build_* helpers
 
@@ -91,6 +93,7 @@ frontend/src/
       FacilityVote.tsx     active phase for task roundType: gallery of all answers, tap to vote
       FacilityVoteResults.tsx  results phase for task roundType: vote counts per player
       FacilityBrainTest.tsx  active + results phases for brain_test roundType
+      FacilityWager.tsx   active + results phases for wager roundType (number line + betting)
       FacilityGameOver.tsx full-screen panel: headline, scoreboard, narration, play again
   components/              Shared primitives — used by app screens and facility phases
     Stage.tsx              Full-screen centered layout wrapper
@@ -103,7 +106,7 @@ frontend/src/
   hooks/useGameEvents.ts   EventSource connection → store dispatch
   hooks/useTimer.ts        Client-side countdown from server deadline
   api/actions.ts           Typed POST helpers (incl. submitVote,
-                           submitBrainTestAnswer, matchmaking)
+                           submitBrainTestAnswer, submitWagerGuess, submitWagerBet, matchmaking)
   api/events.ts            SSE client with typed event routing
   api/matchmaking-events.ts  SSE client for matchmaking lobby (LobbyStatus, GameAssigned)
   api/client.ts            API_URL config + base fetch wrapper
@@ -139,6 +142,7 @@ Optional overrides via `TELL_*` env vars (see `config.py`):
 - `TELL_AI_MODEL`, `TELL_AI_RETRIES` — override AI model and retry count
 - `TELL_PROMPT_DURATION`, `TELL_TASK_PROMPT_DURATION`, `TELL_PROMPT_READING_DURATION` — prompt phase timing
 - `TELL_BRAIN_TEST_DURATION`, `TELL_BRAIN_TEST_CHALLENGE_DURATION`, `TELL_BRAIN_TEST_CHALLENGES`, `TELL_BRAIN_TEST_RESULTS_DURATION` — brain test timing
+- `TELL_WAGER_DURATION`, `TELL_WAGER_SUB_ROUND_DURATION`, `TELL_WAGER_QUESTIONS`, `TELL_WAGER_RESULTS_DURATION` — wager timing
 - `TELL_TOTAL_ROUNDS` — override fixed game length (default 5)
 - `TELL_MIN_HUMANS`, `TELL_MAX_PLAYERS`, `TELL_MIN_AI`, `TELL_MAX_AI` — player count limits
 - `TELL_RECORD_GAMES=false` — disable writing game recordings to `recordings/`
@@ -157,11 +161,11 @@ AI players call LLM **outside** the lock, then acquire `asyncio.Lock` only to wr
 ### Type pipeline
 Pydantic models → OpenAPI → `openapi-typescript` → generated TS types. Run `make codegen` after changing any schema or route signature. SSE event types in `schemas/api_models.py` use `Literal["event_name"]` for the `event_type` field — ensures exhaustive matching on the frontend.
 
-### State machine — two round types
+### State machine — three round types
 
 `GamePhase` has 5 values: `LOBBY, PROMPT, ACTIVE, RESULTS, GAME_OVER`. `ACTIVE` and `RESULTS` are generic — behavior dispatches via `get_handler(round_type)`. Phases never grow; adding a minigame only requires a new handler registered in `backend/minigames/`.
 
-Round types are selected dynamically via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat. Two types: Task (gallery vote), Brain Test (Quick Draw).
+Round types are selected dynamically via `get_next_round_type(state)` — not pre-generated. `state.round_types` is a growing list (appended per round). Selection rule: no consecutive repeat. Three types: Task (gallery vote), Brain Test (Quick Draw), Wager (estimation + betting).
 
 **Task / Gallery Vote** (creative prompt, everyone votes for who sounds most human):
 ```
@@ -174,6 +178,12 @@ All players vote for one other player who sounds most human. Votes received = ne
 ACTIVE (85s safety timer, 5 challenges × 15s each) → RoundResultsEvent → RESULTS (15s) → next round
 ```
 Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, +1 point).
+
+**Wager** (numerical estimation + social betting):
+```
+ACTIVE (100s safety, 3 questions × [GUESS 15s + BET 15s]) → RoundResultsEvent → RESULTS (15s) → next round
+```
+Each question has two sub-rounds: GUESS (place a marker on a number line) and BET (pick whose guess is closest). Scoring: +1 for closest guess, +1 for betting on a closest guesser. Self-bet allowed. Max 2 per question, 6 total across 3 questions.
 
 **After 5 rounds** (`state.round_number == state.total_rounds`):
 ```
@@ -207,6 +217,7 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 ### Scoring
 - **Task**: Each vote received = **-1 point**. `tally_gallery_votes()` in `game_logic.py`, deltas applied in `TaskHandler.build_results()`.
 - **Brain Test**: Pure correctness — `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
+- **Wager**: +1 for closest guess, +1 for betting on a closest guesser. Self-bet allowed. Max 2 per question, 6 total across 3 questions. `score_wager()` in `wager.py`.
 - Running scores in `Player.score` (int). `scores` dict (player_id → score) carried on `StateSyncEvent`, `RoundResultsEvent`, and `GameOverEvent`.
 - Game over after `total_rounds` (default 5). Winner = highest score; ties produce multiple `winner_ids`.
 
@@ -221,6 +232,8 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 - **AI answers** (PROMPT): AI players generate answers trying to pass as human. System prompt is personality-driven via `build_system_prompt()`.
 - **AI votes** (ACTIVE / task): Scheduled by `TaskHandler.on_active_start()` via `_ai_vote_task()`.
 - **AI brain test** (ACTIVE / brain_test): Scheduled by `BrainTestHandler._brain_loop()` via `on_brain_test_challenge()`.
+- **AI wager guesses** (ACTIVE / wager): Character agent with `WagerGuessResponse` structured output, maintains conversation history. Scheduled by `WagerHandler._wager_loop()` via `on_wager_guess()`.
+- **AI wager bets** (ACTIVE / wager): Character agent with `WagerBetResponse` structured output, maintains conversation history. Scheduled via `on_wager_bet()`.
 
 ## Gotchas
 
@@ -248,6 +261,11 @@ To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameH
 - **Narrator fires non-blocking**: `_fire_narration()` uses `asyncio.create_task()`. LLM call is outside the lock. Exits silently if game ends first.
 - **MinigameMeta lives in `backend/minigames/base.py`**: Not in `game_logic.py`. `game_logic.py` imports `MINIGAME_REGISTRY` and `get_handler` from `backend.minigames`.
 - **FacilityScene uses component registry**: `MINIGAME_COMPONENTS` maps `round_type → {Active, Results}` component pairs. Adding a new frontend round type only requires adding an entry here and a handler entry in `backend/minigames/`.
+- **Wager self-bet is allowed**: Unlike gallery vote which rejects self-votes, wager bet route accepts `target_player_id == player_id`.
+- **Wager loop controls timing**: No early completion on all-submitted — the wager loop drives sub-round timing.
+- **Wager routes validate sub-round phase**: Guess route rejects during bet sub-rounds and vice versa. Routes check `current_sub_round % 2` and `current_sub_round // 2`.
+- **Wager bet route validates target has a guess**: `target_player_id` must be in `q.guesses` for the current question. Prevents betting on a player who timed out.
+- **`WagerHandler._wager_loop`** imports `do_active_complete` at runtime to avoid circular dep (same pattern as `_brain_loop`).
 
 ## Code Conventions
 

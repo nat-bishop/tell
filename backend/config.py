@@ -68,6 +68,26 @@ class Settings:
             )
         )
 
+        # Wager
+        self.wager_duration: int = int(
+            os.environ.get("TELL_WAGER_DURATION", game.get("wager_duration", 100))
+        )
+        self.wager_sub_round_duration: int = int(
+            os.environ.get(
+                "TELL_WAGER_SUB_ROUND_DURATION",
+                game.get("wager_sub_round_duration", 15),
+            )
+        )
+        self.wager_questions: int = int(
+            os.environ.get("TELL_WAGER_QUESTIONS", game.get("wager_questions", 3))
+        )
+        self.wager_results_duration: int = int(
+            os.environ.get(
+                "TELL_WAGER_RESULTS_DURATION",
+                game.get("wager_results_duration", 15),
+            )
+        )
+
         # Player limits
         self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))
         self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 2)))

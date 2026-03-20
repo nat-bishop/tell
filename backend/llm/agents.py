@@ -74,6 +74,20 @@ class VoteResponse(BaseModel):
         return v
 
 
+class WagerGuessResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: int = Field(description="Your numerical estimate")
+    reasoning: str = Field(description="Brief reasoning (1 sentence)")
+
+
+class WagerBetResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(description="Alias of the player whose guess you think is closest")
+    reasoning: str = Field(description="Brief reasoning (1 sentence)")
+
+
 # ---------------------------------------------------------------------------
 # Character agents — personality-driven, maintain message history
 # ---------------------------------------------------------------------------
@@ -260,6 +274,44 @@ async def generate_brain_test_answer(
 
     # Fallback: random selection
     return random.randint(0, len(options) - 1)
+
+
+async def generate_wager_guess(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+    *,
+    range_min: int = 0,
+    range_max: int = 100,
+) -> tuple[int, list[ModelMessage]]:
+    """Generate a numerical estimate for a wager question in character."""
+    try:
+        result, history = await _run_ai_agent(
+            deps, "wager_guess", message_history, output_type=WagerGuessResponse
+        )
+        return result.value, history
+    except Exception:
+        # Fallback: random value weighted toward center of the actual range
+        center = (range_min + range_max) // 2
+        spread = (range_max - range_min) // 4
+        value = center + random.randint(-spread, spread)
+        return max(range_min, min(range_max, value)), message_history or []
+
+
+async def generate_wager_bet(
+    deps: AIPlayerDeps,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[str, list[ModelMessage]]:
+    """Choose whose guess is closest for a wager question in character.
+
+    Returns (target_alias, updated_history).
+    """
+    try:
+        result, history = await _run_ai_agent(
+            deps, "wager_bet", message_history, output_type=WagerBetResponse
+        )
+        return result.target, history
+    except Exception:
+        return "", message_history or []
 
 
 # ---------------------------------------------------------------------------

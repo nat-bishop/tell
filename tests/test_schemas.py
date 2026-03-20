@@ -9,6 +9,8 @@ from schemas.api_models import (
     FinalRevealEvent,
     PlayerJoinedEvent,
     SubmitVoteRequest,
+    SubmitWagerBetRequest,
+    SubmitWagerGuessRequest,
 )
 from schemas.game_state import (
     GamePhase,
@@ -17,8 +19,9 @@ from schemas.game_state import (
     RoundState,
     RoundType,
     TellGameState,
+    WagerQuestion,
 )
-from schemas.prompts import DUEL_PROMPTS, select_duel_prompt
+from schemas.prompts import DUEL_PROMPTS, select_duel_prompt, select_wager_questions
 
 # ---------------------------------------------------------------------------
 # Alias generation
@@ -138,3 +141,64 @@ class TestEventSerialization:
             winner_ids=[],
         )
         assert event.narrator_text is None
+
+
+# ---------------------------------------------------------------------------
+# Wager models and question selection
+# ---------------------------------------------------------------------------
+
+
+class TestWagerModels:
+    def test_wager_question_creation(self):
+        q = WagerQuestion(
+            question="How many bones?",
+            correct_answer=206,
+            range_min=0,
+            range_max=500,
+            unit="bones",
+            category="science",
+        )
+        assert q.question == "How many bones?"
+        assert q.guesses == {}
+        assert q.bets == {}
+
+    def test_wager_question_extra_forbid(self):
+        with pytest.raises(ValueError):
+            WagerQuestion(
+                question="Q",
+                correct_answer=1,
+                range_min=0,
+                range_max=10,
+                unit="u",
+                category="c",
+                extra_field="bad",
+            )
+
+    def test_select_wager_questions_count(self):
+        questions = select_wager_questions(3)
+        assert len(questions) == 3
+
+    def test_select_wager_questions_category_diversity(self):
+        # With 3 questions and 6 categories, all 3 should be from different categories
+        for _ in range(20):
+            questions = select_wager_questions(3)
+            categories = [q.category for q in questions]
+            assert len(set(categories)) == 3
+
+    def test_submit_wager_guess_request(self):
+        req = SubmitWagerGuessRequest(player_id="p1", question_index=0, value=42)
+        assert req.value == 42
+
+    def test_submit_wager_bet_request(self):
+        req = SubmitWagerBetRequest(player_id="p1", question_index=0, target_player_id="p2")
+        assert req.target_player_id == "p2"
+
+    def test_submit_wager_guess_request_extra_forbid(self):
+        with pytest.raises(ValueError):
+            SubmitWagerGuessRequest(player_id="p1", question_index=0, value=42, extra="bad")
+
+    def test_submit_wager_bet_request_extra_forbid(self):
+        with pytest.raises(ValueError):
+            SubmitWagerBetRequest(
+                player_id="p1", question_index=0, target_player_id="p2", extra="bad"
+            )

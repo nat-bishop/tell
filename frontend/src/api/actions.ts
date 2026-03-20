@@ -76,6 +76,38 @@ export function submitVote(
   });
 }
 
+export function submitWagerGuess(
+  gameId: string,
+  playerId: string,
+  questionIndex: number,
+  value: number,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/wager-guess`, {
+    method: "POST",
+    body: JSON.stringify({
+      player_id: playerId,
+      question_index: questionIndex,
+      value,
+    }),
+  });
+}
+
+export function submitWagerBet(
+  gameId: string,
+  playerId: string,
+  questionIndex: number,
+  targetPlayerId: string,
+): Promise<void> {
+  return apiFetch(`/games/${gameId}/wager-bet`, {
+    method: "POST",
+    body: JSON.stringify({
+      player_id: playerId,
+      question_index: questionIndex,
+      target_player_id: targetPlayerId,
+    }),
+  });
+}
+
 // --- Matchmaking ---
 
 export interface MatchmakingJoinResponse {

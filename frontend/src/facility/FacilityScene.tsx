@@ -8,10 +8,12 @@ import { FacilityVote } from "@/facility/phases/FacilityVote";
 import { FacilityVoteResults } from "@/facility/phases/FacilityVoteResults";
 import { FacilityGameOver } from "@/facility/phases/FacilityGameOver";
 import { FacilityBrainTest } from "@/facility/phases/FacilityBrainTest";
+import { FacilityWager } from "@/facility/phases/FacilityWager";
 
 const MINIGAME_COMPONENTS: Record<string, { Active: React.FC; Results: React.FC }> = {
   task: { Active: FacilityVote, Results: FacilityVoteResults },
   brain_test: { Active: FacilityBrainTest, Results: FacilityBrainTest },
+  wager: { Active: FacilityWager, Results: FacilityWager },
 };
 
 export function FacilityScene() {

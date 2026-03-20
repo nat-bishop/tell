@@ -97,13 +97,25 @@ export interface NarrationData {
 }
 
 // Generic sub-round payload (discriminated by round_type in the event)
-export type SubRoundPayload = {
-  round_type: string;
-  challenge_index: number;
-  challenge_type: string;
-  question: string;
-  options: string[];
-};
+export type SubRoundPayload =
+  | {
+      round_type: "brain_test";
+      challenge_index: number;
+      challenge_type: string;
+      question: string;
+      options: string[];
+    }
+  | {
+      round_type: "wager";
+      phase: "guess" | "bet";
+      question_index: number;
+      question: string;
+      range_min: number;
+      range_max: number;
+      unit: string;
+      total_questions: number;
+      guesses?: Record<string, number>;
+    };
 
 // Generic round results payload (discriminated by round_type in the event)
 export type RoundResultsPayload =
@@ -120,6 +132,19 @@ export type RoundResultsPayload =
   | {
       round_type: "task";
       vote_counts: Record<string, number>;
+    }
+  | {
+      round_type: "wager";
+      questions: Array<{
+        question: string;
+        correct_answer: number;
+        range_min: number;
+        range_max: number;
+        unit: string;
+        guesses: Record<string, number>;
+        bets: Record<string, string>;
+        closest_ids: string[];
+      }>;
     };
 
 export interface SubRoundData {
@@ -300,7 +325,7 @@ export const useGameStore = create<GameState>((set) => ({
       subRoundPayload: data.sub_round_payload ?? null,
       subRoundIndex: data.sub_round_index ?? 0,
       roundResults: data.round_results_payload
-        ? { round_type: data.round_type ?? "unknown", ...data.round_results_payload } as RoundResultsPayload
+        ? ({ ...data.round_results_payload, round_type: data.round_type ?? "unknown" } as RoundResultsPayload)
         : null,
       roundScores: data.round_scores ?? null,
       connectionStatus: "connected",

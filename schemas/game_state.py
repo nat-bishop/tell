@@ -19,6 +19,7 @@ class GamePhase(enum.StrEnum):
 class RoundType(enum.StrEnum):
     TASK = "task"
     BRAIN_TEST = "brain_test"
+    WAGER = "wager"
 
 
 class PlayerRole(enum.StrEnum):
@@ -47,6 +48,19 @@ class BrainTestChallenge(BaseModel):
     responses: dict[str, int] = Field(default_factory=dict)  # player_id -> selected index
 
 
+class WagerQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str
+    correct_answer: int
+    range_min: int
+    range_max: int
+    unit: str
+    category: str
+    guesses: dict[str, int] = Field(default_factory=dict)  # player_id → value
+    bets: dict[str, str] = Field(default_factory=dict)  # player_id → target_player_id
+
+
 class RoundState(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -60,6 +74,8 @@ class RoundState(BaseModel):
     brain_challenges: list[BrainTestChallenge] = Field(default_factory=list)
     # Gallery vote (Task rounds) — voter_id → voted_for_player_id
     gallery_votes: dict[str, str] = Field(default_factory=dict)
+    # Wager
+    wager_questions: list[WagerQuestion] = Field(default_factory=list)
 
 
 class NarratorEntry(BaseModel):

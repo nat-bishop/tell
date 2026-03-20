@@ -4,8 +4,34 @@ from __future__ import annotations
 
 import enum
 import random
+from collections.abc import Callable
 
 from pydantic import BaseModel
+
+
+def _select_diverse[T](items: list[T], count: int, key: Callable[[T], str]) -> list[T]:
+    """Select items with category diversity. Pick one per group first, fill randomly."""
+    by_group: dict[str, list[T]] = {}
+    for item in items:
+        by_group.setdefault(key(item), []).append(item)
+
+    selected: list[T] = []
+    groups = list(by_group.keys())
+    random.shuffle(groups)
+
+    for g in groups:
+        if len(selected) >= count:
+            break
+        selected.append(random.choice(by_group[g]))
+
+    remaining = [x for x in items if x not in selected]
+    while len(selected) < count and remaining:
+        pick = random.choice(remaining)
+        remaining.remove(pick)
+        selected.append(pick)
+
+    random.shuffle(selected)
+    return selected[:count]
 
 
 class DuelCategory(enum.StrEnum):
@@ -184,27 +210,247 @@ def select_brain_test_challenges(
     count: int = 5,
 ) -> list[BrainTestChallengeSpec]:
     """Select a mix of challenges for a brain test round."""
-    by_type: dict[str, list[BrainTestChallengeSpec]] = {}
-    for c in BRAIN_TEST_CHALLENGES:
-        by_type.setdefault(c.challenge_type, []).append(c)
+    return _select_diverse(BRAIN_TEST_CHALLENGES, count, lambda c: c.challenge_type)
 
-    selected: list[BrainTestChallengeSpec] = []
-    types = list(by_type.keys())
-    random.shuffle(types)
 
-    for t in types:
-        if len(selected) >= count:
-            break
-        selected.append(random.choice(by_type[t]))
+# ---------------------------------------------------------------------------
+# Wager questions — numerical estimation for the wager round
+# ---------------------------------------------------------------------------
 
-    remaining = [c for c in BRAIN_TEST_CHALLENGES if c not in selected]
-    while len(selected) < count and remaining:
-        pick = random.choice(remaining)
-        remaining.remove(pick)
-        selected.append(pick)
 
-    random.shuffle(selected)
-    return selected[:count]
+class WagerCategory(enum.StrEnum):
+    GEOGRAPHY = "geography"
+    SCIENCE = "science"
+    HISTORY = "history"
+    POP_CULTURE = "pop_culture"
+    ECONOMICS = "economics"
+    NATURE = "nature"
+
+
+class WagerQuestionSpec(BaseModel):
+    question: str
+    correct_answer: int
+    range_min: int
+    range_max: int
+    unit: str
+    category: WagerCategory
+
+
+WAGER_QUESTIONS: list[WagerQuestionSpec] = [
+    # --- Geography ---
+    WagerQuestionSpec(
+        question="How many countries are in Africa?",
+        correct_answer=54,
+        range_min=10,
+        range_max=100,
+        unit="countries",
+        category=WagerCategory.GEOGRAPHY,
+    ),
+    WagerQuestionSpec(
+        question="How deep is the Mariana Trench in meters?",
+        correct_answer=10994,
+        range_min=1000,
+        range_max=20000,
+        unit="meters",
+        category=WagerCategory.GEOGRAPHY,
+    ),
+    WagerQuestionSpec(
+        question="How many islands make up the Philippines?",
+        correct_answer=7641,
+        range_min=100,
+        range_max=15000,
+        unit="islands",
+        category=WagerCategory.GEOGRAPHY,
+    ),
+    WagerQuestionSpec(
+        question="What percentage of Earth's surface is covered by water?",
+        correct_answer=71,
+        range_min=30,
+        range_max=95,
+        unit="percent",
+        category=WagerCategory.GEOGRAPHY,
+    ),
+    # --- Science ---
+    WagerQuestionSpec(
+        question="How many bones are in the adult human body?",
+        correct_answer=206,
+        range_min=50,
+        range_max=500,
+        unit="bones",
+        category=WagerCategory.SCIENCE,
+    ),
+    WagerQuestionSpec(
+        question="What percentage of the ocean floor has been mapped?",
+        correct_answer=5,
+        range_min=0,
+        range_max=100,
+        unit="percent",
+        category=WagerCategory.SCIENCE,
+    ),
+    WagerQuestionSpec(
+        question="How many taste buds does the average human tongue have?",
+        correct_answer=10000,
+        range_min=100,
+        range_max=50000,
+        unit="taste buds",
+        category=WagerCategory.SCIENCE,
+    ),
+    WagerQuestionSpec(
+        question="How long does light from the Sun take to reach Earth in minutes?",
+        correct_answer=8,
+        range_min=1,
+        range_max=60,
+        unit="minutes",
+        category=WagerCategory.SCIENCE,
+    ),
+    # --- History ---
+    WagerQuestionSpec(
+        question="How many years did the Hundred Years' War last?",
+        correct_answer=116,
+        range_min=50,
+        range_max=200,
+        unit="years",
+        category=WagerCategory.HISTORY,
+    ),
+    WagerQuestionSpec(
+        question="How many paintings did Van Gogh sell during his lifetime?",
+        correct_answer=1,
+        range_min=0,
+        range_max=100,
+        unit="paintings",
+        category=WagerCategory.HISTORY,
+    ),
+    WagerQuestionSpec(
+        question="In what year was the first email sent?",
+        correct_answer=1971,
+        range_min=1950,
+        range_max=2000,
+        unit="year",
+        category=WagerCategory.HISTORY,
+    ),
+    WagerQuestionSpec(
+        question="How many years did it take to build the Great Wall of China?",
+        correct_answer=2000,
+        range_min=10,
+        range_max=5000,
+        unit="years",
+        category=WagerCategory.HISTORY,
+    ),
+    # --- Pop Culture ---
+    WagerQuestionSpec(
+        question="How many episodes of The Simpsons have aired?",
+        correct_answer=768,
+        range_min=100,
+        range_max=1500,
+        unit="episodes",
+        category=WagerCategory.POP_CULTURE,
+    ),
+    WagerQuestionSpec(
+        question="How many words are in the Harry Potter series?",
+        correct_answer=1084170,
+        range_min=100000,
+        range_max=3000000,
+        unit="words",
+        category=WagerCategory.POP_CULTURE,
+    ),
+    WagerQuestionSpec(
+        question="How many number-one Billboard hits did The Beatles have?",
+        correct_answer=20,
+        range_min=1,
+        range_max=50,
+        unit="hits",
+        category=WagerCategory.POP_CULTURE,
+    ),
+    WagerQuestionSpec(
+        question="How many keys are on a standard piano?",
+        correct_answer=88,
+        range_min=20,
+        range_max=200,
+        unit="keys",
+        category=WagerCategory.POP_CULTURE,
+    ),
+    # --- Economics ---
+    WagerQuestionSpec(
+        question="How many McDonald's restaurants are in Japan?",
+        correct_answer=2975,
+        range_min=0,
+        range_max=20000,
+        unit="restaurants",
+        category=WagerCategory.ECONOMICS,
+    ),
+    WagerQuestionSpec(
+        question="How many shipping containers are on the largest cargo ship?",
+        correct_answer=24000,
+        range_min=1000,
+        range_max=50000,
+        unit="containers",
+        category=WagerCategory.ECONOMICS,
+    ),
+    WagerQuestionSpec(
+        question="How many Starbucks stores are there worldwide?",
+        correct_answer=38000,
+        range_min=5000,
+        range_max=80000,
+        unit="stores",
+        category=WagerCategory.ECONOMICS,
+    ),
+    WagerQuestionSpec(
+        question="How many languages are spoken in the world?",
+        correct_answer=7168,
+        range_min=100,
+        range_max=15000,
+        unit="languages",
+        category=WagerCategory.ECONOMICS,
+    ),
+    # --- Nature ---
+    WagerQuestionSpec(
+        question="How many bones does a shark have?",
+        correct_answer=0,
+        range_min=0,
+        range_max=500,
+        unit="bones",
+        category=WagerCategory.NATURE,
+    ),
+    WagerQuestionSpec(
+        question="How many hearts does an octopus have?",
+        correct_answer=3,
+        range_min=1,
+        range_max=10,
+        unit="hearts",
+        category=WagerCategory.NATURE,
+    ),
+    WagerQuestionSpec(
+        question="How many miles can an Arctic tern migrate in a year?",
+        correct_answer=44000,
+        range_min=1000,
+        range_max=100000,
+        unit="miles",
+        category=WagerCategory.NATURE,
+    ),
+    WagerQuestionSpec(
+        question="How many species of beetles have been identified?",
+        correct_answer=400000,
+        range_min=10000,
+        range_max=1000000,
+        unit="species",
+        category=WagerCategory.NATURE,
+    ),
+    WagerQuestionSpec(
+        question="How many teeth does a garden snail have?",
+        correct_answer=14000,
+        range_min=0,
+        range_max=50000,
+        unit="teeth",
+        category=WagerCategory.NATURE,
+    ),
+]
+
+
+def select_wager_questions(
+    count: int = 3,
+) -> list[WagerQuestionSpec]:
+    """Select a category-diverse mix of wager questions."""
+    return _select_diverse(WAGER_QUESTIONS, count, lambda q: q.category)
 
 
 # --- Duel prompts — AI-friendly tasks for the reverse Turing test ---

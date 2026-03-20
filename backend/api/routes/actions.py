@@ -31,6 +31,8 @@ from schemas.api_models import (
     SubmitAnswerRequest,
     SubmitBrainTestAnswerRequest,
     SubmitVoteRequest,
+    SubmitWagerBetRequest,
+    SubmitWagerGuessRequest,
     VoteSubmittedEvent,
 )
 from schemas.constants import NO_RESPONSE
@@ -292,6 +294,119 @@ async def submit_brain_test_answer(
             "brain_test_answer",
             player_id=req.player_id,
             challenge_index=req.challenge_index,
+        )
+
+    return {"status": "ok"}
+
+
+@router.post("/{game_id}/wager-guess", response_model=StatusResponse)
+async def submit_wager_guess(game_id: str, req: SubmitWagerGuessRequest) -> dict[str, str]:
+    """Submit a numerical guess for a wager question."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        round_state = state.current_round
+        if not round_state or round_state.round_type != RoundType.WAGER:
+            raise HTTPException(status_code=400, detail="Not a wager round")
+
+        player = get_player_by_id(state, req.player_id)
+        if not player:
+            raise HTTPException(status_code=400, detail="Player not found")
+
+        if req.question_index >= len(round_state.wager_questions):
+            raise HTTPException(status_code=400, detail="Invalid question index")
+
+        # Validate sub-round: must be a guess sub-round for this question
+        current_q_idx = round_state.current_sub_round // 2
+        is_guess_phase = round_state.current_sub_round % 2 == 0
+        if req.question_index != current_q_idx or not is_guess_phase:
+            raise HTTPException(status_code=400, detail="Not in guess phase for this question")
+
+        q = round_state.wager_questions[req.question_index]
+        # Clamp value to range
+        clamped = max(q.range_min, min(q.range_max, req.value))
+        # Overwrite allowed
+        q.guesses[req.player_id] = clamped
+
+        log.info(
+            "wager_guess_submitted",
+            player_id=req.player_id,
+            question_index=req.question_index,
+            value=clamped,
+        )
+
+    return {"status": "ok"}
+
+
+@router.post("/{game_id}/wager-bet", response_model=StatusResponse)
+async def submit_wager_bet(game_id: str, req: SubmitWagerBetRequest) -> dict[str, str]:
+    """Place a bet on whose guess is closest."""
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(game_id=game_id)
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        if state.phase != GamePhase.ACTIVE:
+            raise HTTPException(status_code=400, detail="Not in active phase")
+
+        round_state = state.current_round
+        if not round_state or round_state.round_type != RoundType.WAGER:
+            raise HTTPException(status_code=400, detail="Not a wager round")
+
+        player = get_player_by_id(state, req.player_id)
+        if not player:
+            raise HTTPException(status_code=400, detail="Player not found")
+
+        if req.question_index >= len(round_state.wager_questions):
+            raise HTTPException(status_code=400, detail="Invalid question index")
+
+        # Validate sub-round: must be a bet sub-round for this question
+        current_q_idx = round_state.current_sub_round // 2
+        is_bet_phase = round_state.current_sub_round % 2 == 1
+        if req.question_index != current_q_idx or not is_bet_phase:
+            raise HTTPException(status_code=400, detail="Not in bet phase for this question")
+
+        q = round_state.wager_questions[req.question_index]
+
+        # Validate target exists in game
+        target = get_player_by_id(state, req.target_player_id)
+        if not target:
+            raise HTTPException(status_code=400, detail="Target player not found")
+
+        # Validate target has a guess for this question
+        if req.target_player_id not in q.guesses:
+            raise HTTPException(
+                status_code=400, detail="Target player has no guess for this question"
+            )
+
+        # Self-bet IS allowed (unlike gallery vote)
+        # Overwrite allowed
+        q.bets[req.player_id] = req.target_player_id
+
+        log.info(
+            "wager_bet_submitted",
+            player_id=req.player_id,
+            question_index=req.question_index,
+            target=req.target_player_id,
         )
 
     return {"status": "ok"}

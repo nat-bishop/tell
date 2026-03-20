@@ -21,6 +21,10 @@ const ROUND_LAYOUTS: Record<string, Record<string, PhaseLayout>> = {
     active: { roomIndex: 2, brightness: 0.9, accentColor: 0 },
     results: { roomIndex: 2, brightness: 0.9, accentColor: 0 },
   },
+  wager: {
+    active: { roomIndex: 2, brightness: 0.85, accentColor: 0 },
+    results: { roomIndex: 2, brightness: 0.9, accentColor: 0 },
+  },
 };
 
 export function getPhaseLayout(phase: string, roundType: string | null): PhaseLayout {
