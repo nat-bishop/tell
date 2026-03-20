@@ -44,35 +44,72 @@ from schemas.game_state import (
 
 log = structlog.get_logger(__name__)
 
+# prevent garbage collection of fire-and-forget narrator tasks
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _role_label(role: PlayerRole) -> str:
+    """Human-readable role for narrator context."""
+    return "human" if role == PlayerRole.HUMAN else "AI"
+
 
 def _build_narrator_context(state: TellGameState) -> str:
     """Build a context string for the narrator from game state."""
     parts: list[str] = []
     n_players = len(state.players)
     rnd = state.round_number
-    parts.append(f"Game: {n_players} players, round {rnd} of {state.total_rounds}.")
 
-    # Score context
-    score_parts = [f"{p.alias}: {p.score}" for p in state.players]
-    parts.append(f"Scores: {', '.join(score_parts)}.")
+    # Round progression
+    progression = ""
+    if rnd == 1:
+        progression = " Opening round."
+    elif rnd == state.total_rounds:
+        progression = " Final round."
+    parts.append(f"Round {rnd} of {state.total_rounds}.{progression} {n_players} players.")
+
+    # Players with roles (narrator knows who is who)
+    role_parts = [f"{p.alias} ({_role_label(p.role)}): {p.score}" for p in state.players]
+    parts.append(f"Players: {', '.join(role_parts)}.")
+
+    # Drama signals
+    sorted_players = sorted(state.players, key=lambda p: p.score, reverse=True)
+    if len(sorted_players) >= 2:
+        gap = sorted_players[0].score - sorted_players[1].score
+        if gap == 0:
+            parts.append(
+                f"Drama: tied at the top ({sorted_players[0].alias}, {sorted_players[1].alias})."
+            )
+        elif gap == 1:
+            parts.append(f"Drama: close race — {sorted_players[0].alias} leads by {gap}.")
+        elif gap >= 3:
+            parts.append(f"Drama: {sorted_players[0].alias} running away with it (+{gap}).")
+
+    # Check if a human is leading
+    if sorted_players and sorted_players[0].role == PlayerRole.HUMAN:
+        parts.append(f"Note: a human ({sorted_players[0].alias}) is in the lead.")
 
     rs = state.current_round
     if rs:
         alias_map = {p.id: p.alias for p in state.players}
+        role_map = {p.id: p.role for p in state.players}
         if rs.prompt_text:
             parts.append(f'Prompt: "{rs.prompt_text}"')
         if rs.answers:
             for pid, ans in rs.answers.items():
                 alias = alias_map.get(pid, pid)
-                parts.append(f'  {alias} answered: "{ans}"')
+                role = _role_label(role_map.get(pid, PlayerRole.AI))
+                parts.append(f'  {alias} ({role}) answered: "{ans}"')
         # Vote results context
         if rs.gallery_votes:
             vote_counts = tally_gallery_votes(state)
             detected = [
                 (alias_map.get(pid, pid), cnt) for pid, cnt in vote_counts.items() if cnt > 0
             ]
+            undetected = [alias_map.get(pid, pid) for pid, cnt in vote_counts.items() if cnt == 0]
             if detected:
                 parts.append("Votes received: " + ", ".join(f"{a}: {c}" for a, c in detected))
+            if undetected:
+                parts.append("Went undetected: " + ", ".join(undetected))
     return "\n".join(parts)
 
 
@@ -82,13 +119,12 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
     async def _do_narrate():
         try:
             from backend.llm.agents import generate_narration
-            from backend.services.ai_scheduler import get_narrator_history, set_narrator_history
 
             cm = get_connection_manager()
             repo = get_game_repository()
             lock = cm.get_lock(game_id)
 
-            # Build context + read history under lock
+            # Build context under game lock
             async with lock:
                 session = repo.get(game_id)
                 if not session:
@@ -98,21 +134,17 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
                     context += f"\n\nTrigger: {trigger}. {extra_context}"
                 else:
                     context += f"\n\nTrigger: {trigger}."
-                history = get_narrator_history(game_id)
 
-            # LLM call outside the lock
-            text, updated_history = await generate_narration(
-                trigger, context, game_id=game_id, message_history=history
-            )
+            # LLM call outside the game lock (narrator serializes via its own lock)
+            text = await generate_narration(game_id, trigger, context)
             if not text:
                 return
 
-            # Write result under lock
+            # Write result + broadcast under game lock
             async with lock:
                 session = repo.get(game_id)
                 if not session:
                     return
-                set_narrator_history(game_id, updated_history)
                 ctx = session.state.narrator_context
                 ctx.append(
                     NarratorEntry(
@@ -121,7 +153,6 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
                         round_number=session.state.round_number,
                     )
                 )
-                # Keep only the last 5 entries for frontend display
                 if len(ctx) > 5:
                     session.state.narrator_context = ctx[-5:]
                 await cm.broadcast(
@@ -137,9 +168,8 @@ async def _fire_narration(game_id: str, trigger: str, extra_context: str = "") -
             log.exception("narration_failed", trigger=trigger, game_id=game_id)
 
     task = asyncio.create_task(_do_narrate())
-    task.add_done_callback(
-        lambda t: t.result() if not t.cancelled() and not t.exception() else None
-    )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
 
 async def _notify_ai(game_id: str, phase: GamePhase) -> None:
@@ -230,13 +260,6 @@ async def do_prompt_complete(game_id: str, session: TellGameSession) -> None:
     await start_phase_timer(game_id, GamePhase.ACTIVE, round_type)
     await handler.on_active_start(game_id)
 
-    # Fire narrator: post-submissions
-    await _fire_narration(
-        game_id,
-        "post_submissions",
-        "All answers are in. Comment briefly on what you notice.",
-    )
-
 
 async def do_active_complete(game_id: str, session: TellGameSession) -> None:
     """ACTIVE complete → score round via handler → RESULTS or next round.
@@ -288,12 +311,27 @@ async def do_active_complete(game_id: str, session: TellGameSession) -> None:
             return
         await _start_next_round(game_id, session)
 
-    # Fire narrator: between rounds
-    await _fire_narration(
-        game_id,
-        "between_rounds",
-        "A round just ended. Comment on the state of play — scores, standout moments.",
-    )
+    # Fire narrator: react to round results (round-type-specific prompt)
+    if round_type == RoundType.TASK:
+        alias_map = {p.id: p.alias for p in state.players}
+        vote_counts = payload.get("vote_counts", {})
+        most_voted = max(vote_counts, key=vote_counts.get, default=None)  # type: ignore[arg-type]
+        most_alias = alias_map.get(most_voted, "someone") if most_voted else "someone"
+        most_count = vote_counts.get(most_voted, 0) if most_voted else 0
+        zero_aliases = [alias_map.get(pid, pid) for pid, c in vote_counts.items() if c == 0]
+        zero_str = ", ".join(zero_aliases) if zero_aliases else "no one"
+        await _fire_narration(
+            game_id,
+            "vote_results",
+            f"{most_alias} drew {most_count} votes. "
+            f"{zero_str} went undetected. React to the vote results.",
+        )
+    else:
+        await _fire_narration(
+            game_id,
+            "between_rounds",
+            "Quick Draw complete. Comment on who performed well or stumbled. One line.",
+        )
 
 
 async def do_results_complete(game_id: str, session: TellGameSession) -> None:
@@ -329,11 +367,14 @@ async def _do_game_over(
     log.info("game_over", winner=winner, winner_ids=winner_ids)
 
     # Fire narrator: game over wrap-up (non-blocking background task)
-    top_aliases = [p.alias for p in state.players if p.id in winner_ids]
+    top_players = [p for p in state.players if p.id in winner_ids]
+    top_info = ", ".join(f"{p.alias} ({_role_label(p.role)}, score {p.score})" for p in top_players)
+    humans = [p for p in state.players if p.role == PlayerRole.HUMAN]
+    human_summary = "; ".join(f"{p.alias}: {p.score}" for p in humans)
     narr_msg = (
-        f"The game is over. Winners: {', '.join(top_aliases)}. "
-        "Write a knockout wrap-up — "
-        "the story of this game in 1-2 sentences. Reference specific moments."
+        f"Winner: {top_info}. "
+        f"Human performance: {human_summary}. "
+        "Deliver a final verdict on this experiment."
     )
     await _fire_narration(game_id, "game_over", narr_msg)
 
@@ -427,6 +468,18 @@ async def _start_next_round(game_id: str, session: TellGameSession) -> None:
         await start_phase_timer(game_id, GamePhase.ACTIVE, next_round_type)
         await handler.on_active_start(game_id)
 
+    # Fire narrator: round preview (round 2+)
+    if state.round_number > 1:
+        rnd = state.round_number
+        total = state.total_rounds
+        rt_label = "Task round" if next_round_type == RoundType.TASK else "Quick Draw"
+        final = " Final round." if rnd == total else ""
+        await _fire_narration(
+            game_id,
+            "round_preview",
+            f"Round {rnd} of {total}. {rt_label}.{final} Set the stage — what's at stake now.",
+        )
+
 
 async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     """Start a game — spawn AI, assign personalities, transition to first round.
@@ -493,6 +546,6 @@ async def initialize_and_start_game(game_id: str, ai_count: int) -> None:
     await _fire_narration(
         game_id,
         "game_start",
-        f"{player_count} players assembled. {human_count} humans, {ai_count} AI. "
-        "The humans hide among machines. Each trying to pass as AI.",
+        f"The experiment begins. {player_count} subjects — "
+        f"{human_count} human, {ai_count} machine. Announce the start of testing.",
     )

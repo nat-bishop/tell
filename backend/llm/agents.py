@@ -262,37 +262,66 @@ async def generate_brain_test_answer(
     return random.randint(0, len(options) - 1)
 
 
+# ---------------------------------------------------------------------------
+# Narrator — owns its own conversation history per game
+# ---------------------------------------------------------------------------
+
+_narrator_history: dict[str, list[ModelMessage]] = {}
+_narrator_locks: dict[str, asyncio.Lock] = {}
+
+
+def init_narrator(game_id: str) -> None:
+    """Initialize narrator state for a new game."""
+    _narrator_history[game_id] = []
+    _narrator_locks[game_id] = asyncio.Lock()
+
+
+def cleanup_narrator(game_id: str) -> None:
+    """Clean up narrator state when a game ends."""
+    _narrator_history.pop(game_id, None)
+    _narrator_locks.pop(game_id, None)
+
+
 async def generate_narration(
+    game_id: str,
     trigger: str,
     context: str,
-    *,
-    game_id: str | None = None,
-    message_history: list[ModelMessage] | None = None,
-) -> tuple[str | None, list[ModelMessage]]:
+) -> str | None:
     """Generate a narrator line for a specific game moment.
 
-    Returns (text, updated_history). Text is None on timeout/failure.
+    Manages its own message history internally. Serialized per game via
+    asyncio.Lock so concurrent triggers don't clobber each other's history.
+    Returns the narration text, or None on timeout/failure.
     """
+    lock = _narrator_locks.get(game_id)
+    if not lock:
+        lock = asyncio.Lock()
+        _narrator_locks[game_id] = lock
+
     settings = get_settings()
     timeout = 5.0 if trigger == "game_over" else 3.0
-    log.info("llm_narrator_call_start", trigger=trigger, game_id=game_id)
-    try:
-        result = await asyncio.wait_for(
-            narrator_agent.run(
-                context,
-                model=settings.ai_model,
-                message_history=message_history,
-            ),
-            timeout=timeout,
-        )
-        log.info("llm_narrator_call_done", output_len=len(result.output), game_id=game_id)
-        return result.output, result.all_messages()
-    except TimeoutError:
-        log.info("llm_narrator_timeout", trigger=trigger, game_id=game_id)
-        return None, message_history or []
-    except (ModelHTTPError, ModelAPIError) as exc:
-        log.warning("llm_narrator_api_error", error=str(exc), trigger=trigger, game_id=game_id)
-        return None, message_history or []
-    except Exception:
-        log.exception("llm_narrator_failed", game_id=game_id)
-        return None, message_history or []
+
+    async with lock:
+        history = _narrator_history.get(game_id, [])
+        log.info("llm_narrator_call_start", trigger=trigger, game_id=game_id)
+        try:
+            result = await asyncio.wait_for(
+                narrator_agent.run(
+                    context,
+                    model=settings.ai_model,
+                    message_history=history,
+                ),
+                timeout=timeout,
+            )
+            _narrator_history[game_id] = result.all_messages()
+            log.info("llm_narrator_call_done", output_len=len(result.output), game_id=game_id)
+            return result.output
+        except TimeoutError:
+            log.info("llm_narrator_timeout", trigger=trigger, game_id=game_id)
+            return None
+        except (ModelHTTPError, ModelAPIError) as exc:
+            log.warning("llm_narrator_api_error", error=str(exc), trigger=trigger, game_id=game_id)
+            return None
+        except Exception:
+            log.exception("llm_narrator_failed", game_id=game_id)
+            return None

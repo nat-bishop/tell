@@ -99,7 +99,7 @@ def mock_llm():
         patch(
             "backend.llm.agents.generate_narration",
             new_callable=AsyncMock,
-            return_value=(None, []),
+            return_value=None,
         ) as mock_narration,
     ):
         yield {
