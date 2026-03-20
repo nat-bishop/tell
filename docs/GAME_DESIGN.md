@@ -26,7 +26,7 @@ Human or Not (AI21 Labs, 2023) proved 15 million people wanted to play "spot the
 
 ### Diegetic Text
 
-Phase transitions are voiced by a robot narrator persona — not a game UI label. `PhaseInterstitial` rotates through 5 robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that shift per round. Each archetype issues directives for the incoming phase ("SUBMIT YOUR RESPONSE WITHIN THE ALLOTTED WINDOW.") rather than describing it neutrally. Situation lines reference cumulative game state ("round 3 of 5. scores are close.").
+Phase transitions are voiced by a robot narrator persona — not a game UI label. `TransitionOverlay` rotates through 5 robot voice archetypes (clinical, bureaucratic, military, malfunctioning, friendly) that shift per round. Each archetype issues directives for the incoming phase ("SUBMIT YOUR RESPONSE WITHIN THE ALLOTTED WINDOW.") rather than describing it neutrally. Situation lines reference cumulative game state ("round 3 of 5. scores are close.").
 
 The cold open ("N SUBJECTS DETECTED / some are not what they seem") fires once when the game starts, before round 1. The landing page copy uses the same register: "a reverse turing test", "enter test →", "isolated examination".
 
@@ -42,14 +42,17 @@ The contrast between serif dialogue and monospace system text reinforces the the
 ## Color
 
 ```
---page:  #FAFAF8   warm off-white, like good paper
---ink:   #1C1C1A   warm near-black
---dim:   #9A9A92   secondary text, system messages
---rule:  #E5E5E0   dividers
---warm:  #B85C38   terracotta — ONLY for: timer warning, vote selection, "human" reveal
+--page:    #0F1114   dark background
+--surface: #1A1D23   card/panel background
+--raised:  #242830   elevated surface
+--ink:     #E8E6E3   primary text
+--dim:     #6B7084   secondary text, system messages
+--rule:    #2A2D35   dividers
+--warm:    #E07A5F   terracotta — ONLY for: timer warning, vote selection, "human" reveal
+--cold:    #5B8FB9   AI blue — system accents, cold indicators
 ```
 
-`--warm` appears in exactly three places. Everywhere else is ink on paper.
+`--warm` is reserved for moments of human signal. Everywhere else is ink on dark.
 
 ---
 
@@ -66,7 +69,7 @@ Each creates different pressure. Matchup exposes voice and judgment simultaneous
 A constrained creative prompt. Everyone answers simultaneously. Then players are paired — all answers shown two at a time. Everyone votes on which of the two sounds more human. Winner of each head-to-head gets +1 point.
 
 ```
-PROMPT (25s) → MATCHUP (sub-round loop, 12s each) → scoring → next round
+PROMPT (45s + 10s reading) → ACTIVE (matchup sub-round loop, 12s each) → scoring → next round
 ```
 
 ~60-90 seconds per round depending on player count. Short answers leave nowhere to hide — every word is evidence.
@@ -104,17 +107,17 @@ The constraint is the detector. When you only get 5 words or 17 syllables, there
 No writing of your own. No head-to-head. A rapid sequence of multiple-choice challenges — estimation, common knowledge, trick questions, pattern completion. Everyone taps an option. Points awarded for correct answers.
 
 ```
-BRAIN_TEST (5 challenges × 12s each, 75s safety timer) → BRAIN_TEST_RESULTS (15s) → next round
+ACTIVE (5 challenges × 15s each, 85s safety timer) → RESULTS (15s) → next round
 ```
 
 ~90 seconds per round. The only round with a right answer.
 
 #### How It Works
 
-1. Five challenges appear one at a time, 12 seconds each. A new `BrainTestChallengeEvent` fires for each, with 4 option buttons.
+1. Five challenges appear one at a time, 15 seconds each. A new `SubRoundEvent(round_type="brain_test", ...)` fires for each, with 4 option buttons.
 2. All players tap one of the 4 options. AI selects an option via LLM.
-3. After all challenges, `BRAIN_TEST_RESULTS` shows every player's selections with correct/incorrect indicators and running scores.
-4. No vote. `do_after_brain_test()` starts the next round directly.
+3. After all challenges, `RESULTS` phase shows every player's selections with correct/incorrect indicators and running scores.
+4. No vote. `do_results_complete()` starts the next round directly.
 
 #### Scoring
 
@@ -206,7 +209,7 @@ Each matchup is shown for 12 seconds. All players vote 0 (left) or 1 (right) —
 
 ### Scores
 
-Running scores are visible throughout the game in the player bar. `Player.score` is a cumulative int. After each round, `MatchupResultsEvent` or `BrainTestResultsEvent` carries the updated `scores` dict (player_id → score). Final scores shown in the reveal.
+Running scores are visible throughout the game in the HUD panel. `Player.score` is a cumulative int. After each round, `RoundResultsEvent` carries the updated `scores` dict (player_id → score). Final scores shown in the reveal.
 
 ### AI Personalities
 
@@ -214,11 +217,11 @@ Running scores are visible throughout the game in the player bar. `Player.score`
 
 | Name | Style | Vote Strategy |
 |---|---|---|
-| Paranoid | Suspicious, probing | Picks the answer that seems most designed to deceive |
-| Chill | Short, casual, unremarkable | Random-ish |
-| Overachiever | Detailed, analytical | Picks the least detailed answer as "most human" |
-| Glitchy | Typos, repetition, erratic | Unpredictable |
-| Philosopher | Abstract, existential | Picks the most emotionally resonant answer |
+| Anxious | Overthinker, hedges, shares tangents | Overthinks the comparison |
+| Chill | Low-effort, brief, casual | Picks casually |
+| Earnest | Warm, specific anecdotes, overshares | Picks the most emotionally resonant answer |
+| Eccentric | Unexpected angles, non-sequiturs | Unpredictable |
+| Sardonic | Dry, world-weary, sharp observations | Picks the most polished answer as suspicious |
 
 Each personality has a `fallback_response` for LLM failures.
 
@@ -226,7 +229,7 @@ Each personality has a `fallback_response` for LLM failures.
 
 A persistent LLM show host fires at four transition points: game start, after all answers are submitted, between rounds, and at game over. The narrator is the robot running the test — dry, literary, increasingly invested. Its voice is `NARRATOR_SYSTEM_PROMPT` in `backend/llm/prompts.py`.
 
-Narration arrives as a floating overlay (`Narration` component), auto-dismissing after 6 seconds. Game-over narration persists inline on the game over screen. The narrator never blocks game flow — `_fire_narration()` fires as `asyncio.create_task()`. It retains memory of its last 5 lines for continuity within a game.
+Narration arrives as a floating overlay (`FacilityNarration` component), auto-dismissing after 6 seconds. Game-over narration persists inline on the game over screen. The narrator never blocks game flow — `_fire_narration()` fires as `asyncio.create_task()`. It retains memory of its last 5 lines for continuity within a game.
 
 The narrator knows everyone's role. It never reveals that directly — but the wording shifts as the game progresses.
 
