@@ -4,39 +4,52 @@ description: Documentation drift patterns, sync conventions, and common stale sp
 type: project
 ---
 
-Round type history: Probe → Task/Interrogation/Word Chain (3-type) → Task/Brain Test/Interrogation (3-type) → **Task (Matchup) + Brain Test (Quick Draw) only (v2, current)**. Always check `game_logic.py::select_next_round_type()` and `MINIGAMES` registry for the authoritative list — docs lag the code.
+Round type history: Probe → Task/Interrogation/Word Chain → Task/Brain Test/Interrogation → **Task (Gallery Vote) + Brain Test (Quick Draw) only (v3, current)**. Always check `MINIGAME_REGISTRY` in `backend/minigames/__init__.py` for the authoritative list.
 
-**Why:** Each major feature push has changed the cycle. The count and names are load-bearing for timing tables in CLAUDE.md and GAME_DESIGN.md.
+**Why:** Each major push changes the round type cycle. The names and mechanics are load-bearing throughout CLAUDE.md, ARCHITECTURE.md, and GAME_DESIGN.md.
 
-**How to apply:** When syncing docs, start with `MINIGAMES` in `game_logic.py`. If the round types don't match docs, update all timing tables and "round types" prose in CLAUDE.md, ARCHITECTURE.md, and GAME_DESIGN.md together.
+**How to apply:** When syncing docs, start with `backend/minigames/`. Check handler `meta` fields for `has_prompt`/`has_results` — these determine phase flow.
 
-## v2 Key Changes (score-based, no elimination)
+## v3 Key Changes (plugin pattern + gallery vote)
 
-The game was completely redesigned from elimination-based to score-based in 2026:
-- Frame flip: "Be yourself, find the AI" — humans play as themselves, AI tries to pass as human
-- No elimination. No spectator mode. Fixed 5 rounds. Big reveal at end.
-- Removed: Interrogation, Discussion chat, Comedy Cup, Abilities (PARTIAL SCAN + DOUBLE VOTE), multi-vote, ELIMINATION phase
-- Added: Matchup sub-round loop (1v1 head-to-head), FinalRevealEvent, scoring on Player model
+Major refactor post-v2:
 
-## Facility UI (current frontend, branch: verification-chamber-ui)
+- **GamePhase collapsed**: 7 → 5 phases. Now: LOBBY, PROMPT, ACTIVE, RESULTS, GAME_OVER only.
+- **Task round changed**: Was 1v1 matchup (sub-round loop). Now **gallery vote** — all answers shown at once, all players vote for one player who sounds most human. Votes received = −1 point each. Positive score = fewer suspicion votes.
+- **Minigame handler plugin system**: `backend/minigames/` package with `MinigameHandler` interface, `MinigameMeta` dataclass, `MINIGAME_REGISTRY` dict. Handlers: `TaskHandler`, `BrainTestHandler`.
+- **transitions.py is minigame-agnostic**: No `if round_type ==` checks. Everything dispatches via `get_handler()`.
+- **AI scheduling delegated to handlers**: `on_phase_change()` in `ai_scheduler.py` handles PROMPT only. ACTIVE scheduling in `TaskHandler.on_active_start()` and `BrainTestHandler._brain_loop`.
+- **SSE event names changed**: `SubRoundEvent` (was `BrainTestChallengeEvent`), `RoundResultsEvent` (was `BrainTestResultsEvent`/`VoteResultsEvent`). Old names gone.
+- **Route changed**: `/vote` (was `/matchup-vote`).
+- **score_brain_test()** moved to `backend/minigames/brain_test.py` (was `game_logic.py`).
+- **MinigameMeta/MINIGAMES** moved to `backend/minigames/base.py` and `__init__.py` (was `game_logic.py`).
+- **Rive removed**: `RiveScene.tsx`, `useFacilityCharacters.ts`, `facility.riv`, `@rive-app/react-canvas` all deleted. Background is now CSS (`FacilityBackground.tsx`).
+- **FacilityViewport deleted**: Inlined into `FacilityGameContent.tsx`.
+- **Frontend phases renamed**: `FacilityMatchup` → `FacilityVote`; `FacilityVoteResults` added.
+- **FacilityScene uses component registry**: `MINIGAME_COMPONENTS` record mapping round_type → {Active, Results}.
+- **phaseLayouts.ts two-tier**: `SHARED_LAYOUTS` for framework phases, `ROUND_LAYOUTS[roundType][phase]` for active/results.
+- **`used_task_prompt_indices`/`last_task_prompt_category` renamed** to `used_prompt_indices`/`last_prompt_category` on `TellGameState`.
 
-`frontend/src/facility/` is a parallel diegetic rewrite — old `components/` untouched, used by join/queue screens only. `FacilityGameContent` replaces old `GameContent` in `game/[id]/page.tsx`. Key things to keep in sync:
+## Facility UI (current frontend)
 
-- **Zone table**: `zones.ts` is authoritative for panel positions. 9 zones. Changes there should update the zone table in ARCHITECTURE.md.
+`frontend/src/facility/` is the diegetic game view. Key things to keep in sync:
+
+- **Zone table**: `zones.ts` is authoritative for panel positions. 9 zones.
 - **Transition machine states**: `idle → lockdown → reconfigure → boot → idle`. `FacilityScene` hidden during lockdown/reconfigure; `TransitionOverlay` renders only in reconfigure.
-- **Rive inputs**: state machine name `"facility_sm"`, 6 character slots × 3 inputs (`char_{i}_x`, `char_{i}_state`, `char_{i}_visible`), plus 3 room inputs. `phaseLayouts.ts` is authoritative for what gets set per phase.
-- **Legacy components are NOT removed**: They're still used. Don't document them as removed.
+- **No Rive**: Background is pure CSS via `FacilityBackground.tsx`.
+- **Component registry**: `MINIGAME_COMPONENTS` in `FacilityScene.tsx` maps round_type → components. Adding a minigame requires entry here.
 
-## Common drift sources (v2)
+## Common drift sources (v3)
 
-- **Round types**: Only `TASK` and `BRAIN_TEST` in `MINIGAMES`. Selection rule: no consecutive repeat only (no player count restrictions).
-- **Phase durations**: `config.toml` is authoritative. `config.py` default fallbacks may lag.
-- **schemas/constants.py** is minimal — just three constants. Not where durations or limits live.
-- **Matchup sub-round loop**: `_start_matchup_loop` in `transitions.py`, analogous to `_start_brain_test_loop`. Uses `MatchupChallengeEvent` SSE. AI votes via generate-then-lock pattern.
-- **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` then `GameOverEvent`. Frontend handles reveal-first, score-second sequence.
-- **`total_rounds = 5`** is the game length (not a safety cap). `check_game_over()` returns winner when `round_number >= total_rounds`.
-- **`initialize_and_start_game`** is in `transitions.py` (not `actions.py`) — shared by host-start and matchmaking.
-- **Narrator fires in** `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking, generate-then-lock pattern.
-- **AI conversation history**: `_conversation_history` dict in `ai_scheduler.py`. Easy to miss in architecture docs.
-- **`StateSyncEvent` carries `scores` dict** — player_id → score. Also on `MatchupResultsEvent`, `BrainTestResultsEvent`, `GameOverEvent`.
-- **Bye player**: Odd player out in matchup rounds stored as `bye_player_id` on `RoundState`. They don't appear in a head-to-head but still accumulate score from other rounds.
+- **Task scoring is negative**: Votes received = −1 each. Easy to describe as "+1 per win" (old mechanic). Check `task.py::build_results()`.
+- **Round types**: Only `TASK` and `BRAIN_TEST` registered. Selection rule: no consecutive repeat only.
+- **`MinigameMeta` location**: `backend/minigames/base.py`, not `game_logic.py`.
+- **`score_brain_test()` location**: `backend/minigames/brain_test.py`, not `game_logic.py`.
+- **`tally_gallery_votes()` in game_logic.py**: Pure helper used by narrator context builder and task handler.
+- **`StateSyncEvent` carries `scores` dict** plus generic reconnection fields: `sub_round_index`, `sub_round_payload`, `round_results_payload`, `round_scores`.
+- **FinalReveal before GameOver**: `_do_game_over()` broadcasts `FinalRevealEvent` then `GameOverEvent`.
+- **`total_rounds = 5`** is game length (not a safety cap).
+- **`initialize_and_start_game`** in `transitions.py` — shared by host-start and matchmaking.
+- **Narrator fires in** `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking.
+- **AI conversation history**: `_conversation_history` dict in `ai_scheduler.py`.
+- **Circular import pattern**: `ai_scheduler ↔ transitions`, and `BrainTestHandler._brain_loop → do_active_complete`. All resolved via runtime imports inside async functions.

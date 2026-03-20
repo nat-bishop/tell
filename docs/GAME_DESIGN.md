@@ -4,7 +4,7 @@
 
 "Be yourself, find the AI."
 
-A group of players — some human, some AI — answer the same prompts. Then everyone votes, head-to-head, on which answer sounds more human. Highest score after 5 rounds wins. Big reveal at the end.
+A group of players — some human, some AI — answer the same prompts. Then everyone votes on which answers sound most human. Most-suspected players lose points. Highest score after 5 rounds wins. Big reveal at the end.
 
 The frame flip: humans no longer pretend to be robots. They play as themselves. The AI players are the ones performing — trying to pass as human. This is the actual Turing test, made social and competitive.
 
@@ -14,7 +14,7 @@ The question isn't "can you hide your humanity?" It's "can you tell who's faking
 
 "Is this AI?" has become a reflexive question. "Slop" was Merriam-Webster's Word of the Year 2025. Bot traffic exceeded human traffic for the first time. Dead Internet Theory went mainstream. A casual scroll through any feed now feels like a test.
 
-Human or Not (AI21 Labs, 2023) proved 15 million people wanted to play "spot the AI" — but 1:1 chat couldn't sustain engagement. Two minutes, one binary guess, no social dynamics. Tell adds the layer that makes it replayable: it's not just "detect AI," it's "judge a room while being judged." Running scores, the big reveal, and the head-to-head matchup format create the emergent stories that 1:1 detection games can't.
+Human or Not (AI21 Labs, 2023) proved 15 million people wanted to play "spot the AI" — but 1:1 chat couldn't sustain engagement. Two minutes, one binary guess, no social dynamics. Tell adds the layer that makes it replayable: it's not just "detect AI," it's "judge a room while being judged." Running scores, the big reveal, and the gallery vote format create the emergent stories that 1:1 detection games can't.
 
 ## Design Vision
 
@@ -60,19 +60,20 @@ The contrast between serif dialogue and monospace system text reinforces the the
 
 Round type is selected dynamically each round — no repeat of the previous type.
 
-Each creates different pressure. Matchup exposes voice and judgment simultaneously. Quick Draw is a speed test with a right answer — the gap between human and AI accuracy becomes visible without any social voting.
+Each creates different pressure. Gallery Vote exposes voice and judgment simultaneously — everyone is both judge and suspect. Quick Draw is a speed test with a right answer — the gap between human and AI accuracy becomes visible without social reads.
 
 ---
 
-### Matchup — Head-to-Head
+### Gallery Vote — Find the AI
 
-A constrained creative prompt. Everyone answers simultaneously. Then players are paired — all answers shown two at a time. Everyone votes on which of the two sounds more human. Winner of each head-to-head gets +1 point.
+A constrained creative prompt. Everyone answers simultaneously. Then all answers are shown at once and everyone votes for the player who sounds most human. Votes received = negative points (−1 per vote). Being suspected costs you.
 
 ```
-PROMPT (45s + 10s reading) → ACTIVE (matchup sub-round loop, 12s each) → scoring → next round
+PROMPT (45s) → ACTIVE (all answers visible, tap to vote) → RoundResultsEvent
+  → RESULTS (vote counts, 15s) → next round
 ```
 
-~60-90 seconds per round depending on player count. Short answers leave nowhere to hide — every word is evidence.
+~60-90 seconds per round. Short answers leave nowhere to hide — every word is evidence.
 
 #### The 7 Prompt Categories
 
@@ -90,15 +91,15 @@ Each category exploits a different AI blindspot or strength:
 
 42 prompts total (6 per category). No repeats, no same-category back-to-back.
 
-#### How the Matchup Works
+#### How the Gallery Vote Works
 
-Players are paired in order (player 0 vs player 1, player 2 vs player 3, etc.). Odd player out gets a bye for that matchup loop — they don't appear in a head-to-head but their score accumulates normally. Each matchup shows both answers with no labels. All players vote on which sounds more human. The side with more votes wins; winning player gets +1.
+All answers are shown at once with player aliases visible. Each player taps one answer — voting for the player who sounds most human. You cannot vote for yourself. Votes are changeable until the timer expires or all votes are in. After voting, `TaskHandler.build_results()` tallies `gallery_votes` and returns score deltas: `−1` for each vote received.
 
 #### What Makes It Fun
 
-The constraint is the detector. When you only get 5 words or 17 syllables, there's nowhere for AI to hide behind qualifications and hedging. The head-to-head format makes the comparison visceral — you're not abstractly evaluating "is this AI," you're choosing between two specific answers. The judgment is concrete. The review produces the best screenshots: a haiku grid where one haiku is clearly from a person who has actually experienced Monday mornings.
+The scoring inversion is the key: you want to be overlooked, not celebrated. The most "human-sounding" answer loses points. This creates a perverse incentive — being too creative, too polished, too AI-like all have the same cost. The gallery format (all answers visible at once) means you're comparing the whole room, not just a pair. The `FacilityVote` component shows all answers; `FacilityVoteResults` reveals the vote tallies.
 
-**Skill tested**: Format fluency, creative economy, reading answers for humanity under time pressure.
+**Skill tested**: Format fluency, creative economy, reading the room for AI tells under time pressure.
 
 ---
 
@@ -136,7 +137,7 @@ Pure correctness: `selected_index == correct_index` → 1 point per challenge. N
 
 #### The Design Tension
 
-Quick Draw is a pressure valve. After a Matchup round with social judgment, a round with no voting feels like a reprieve. But it isn't — the choices become permanent record, accumulated in running scores that everyone can see. The gap between a human who second-guesses the trick question and an AI that answers confidently wrong creates information.
+Quick Draw is a pressure valve. After a Gallery Vote round with social judgment, a round with no voting feels like a reprieve. But it isn't — the choices become permanent record, accumulated in running scores that everyone can see. The gap between a human who second-guesses the trick question and an AI that answers confidently wrong creates information.
 
 **Skill tested**: Speed, general knowledge, reading questions carefully under time pressure.
 
@@ -158,7 +159,7 @@ Two round types alternate (no consecutive repeat):
 
 | Round | Duration | What it tests |
 |-------|----------|--------------|
-| Matchup | ~60-90s | Voice, creativity, human judgment |
+| Gallery Vote | ~60-90s | Voice, creativity, reading the room |
 | Quick Draw | ~90s | Speed, knowledge, AI accuracy |
 
 The alternation prevents monotony. After judging creative answers, a round of objective questions resets the dynamic before returning to social reads.
@@ -186,7 +187,7 @@ The game is funny. This section explains why, so future design decisions preserv
 ### Three Sources of Humor
 
 1. **The answers themselves** — constrained prompts produce inherently quotable responses. A haiku about Monday mornings written in 25 seconds will be imperfect and human and funny.
-2. **The juxtaposition** — seeing answers head-to-head during matchup. One player wrote a cry for help; the AI wrote something technically perfect but soulless. The comparison is the joke.
+2. **The juxtaposition** — seeing all answers together in the gallery. One player wrote a cry for help; the AI wrote something technically perfect but soulless. The comparison is the joke.
 3. **The reveal** — "UNIT-7 was AI" after everyone voted them as the most human. The post-reveal conversation is half the entertainment.
 
 ---
@@ -203,9 +204,9 @@ Private game (host flow): create → share URL → host starts manually.
 
 Players join via URL, receive robot aliases (UNIT-7, BOT-42 — assigned, not chosen). Host starts the game. AI players appear at game start, indistinguishable from humans in the UI.
 
-### Voting (Matchup)
+### Voting (Task / Gallery Vote)
 
-Each matchup is shown for 12 seconds. All players vote 0 (left) or 1 (right) — which answer sounds more human? Vote is changeable until the sub-round ends. The winning side's player gets +1 point. Ties: no point awarded.
+All answers are shown at once during the ACTIVE phase. Each player taps one answer — voting for the player who sounds most human. Cannot vote for yourself. Vote is changeable until time expires or all votes are in. Votes received = −1 point each.
 
 ### Scores
 
@@ -238,8 +239,7 @@ The narrator knows everyone's role. It never reveals that directly — but the w
 - **Player disconnect**: Auto-skip during timed phases. Reconnect replays missed events.
 - **Host disconnect**: Next connected human promoted to host.
 - **Empty answer**: Submitted as "[no response]". Legitimate strategy.
-- **Matchup bye**: Odd player out stored as `bye_player_id` on `RoundState`. They don't appear in a head-to-head but their score accumulates normally.
-- **Vote tie in matchup**: No point awarded to either player.
+- **Gallery vote: no votes on a player**: Zero vote count shown in results. No score change for that player.
 - **Brain Test: no response to a challenge**: Shown as blank in results grid. No point.
 - **All players tie at game end**: `winner_ids` contains all tied player IDs.
 - **Matchmaking queue drop**: Player disconnecting from SSE auto-removes them from the queue.
