@@ -1,9 +1,10 @@
-"""AI player agent — generates answers, votes, brain test answers, and narration.
+"""AI player agents — all AI actions go through ai_agent with personality + history.
 
-Two agent tiers:
-  Character agents (ai_agent, narrator_agent) — personality-driven, maintain
-  message history across a game.
-  Utility agents (brain_test) — stateless one-shot calls with fixed purpose.
+ai_agent:       Character agent for all player actions (answers, votes, guesses, bets).
+                Stable system prompt (personality) via instructions=, volatile context in
+                user message. Maintains conversation history across the game.
+narrator_agent: Narrator with its own per-game history. Unchanged.
+judge_agent:    Signal judging only — system-level, not a player.
 """
 
 from __future__ import annotations
@@ -15,41 +16,14 @@ from typing import Any
 
 import structlog
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import ModelMessage
 
 from backend.api.deps import get_settings
-from backend.llm.personalities import Personality
-from backend.llm.prompts import (
-    NARRATOR_SYSTEM_PROMPT,
-    build_gallery_vote_prompt,
-    build_system_prompt,
-)
-from schemas.game_state import RoundType
+from backend.llm.prompts import NARRATOR_SYSTEM_PROMPT
 
 log = structlog.get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Deps
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class AIPlayerDeps:
-    """Context for AI player actions."""
-
-    personality: Personality
-    player_alias: str
-    current_prompt: str
-    all_answers: dict[str, str]  # alias -> answer text
-    players: list[str]  # list of aliases
-    round_number: int
-    round_type: RoundType = RoundType.TASK
-    my_answer: str | None = None
-    # Action-specific context injected by the caller
-    action_prompt: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -57,20 +31,33 @@ class AIPlayerDeps:
 # ---------------------------------------------------------------------------
 
 
-class VoteResponse(BaseModel):
+class BrainTestResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    targets: list[str] = Field(description="Player aliases you think sound most human")
+    selected: int = Field(description="Number of the option you choose")
     reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
-    @field_validator("targets")
+    @field_validator("selected")
     @classmethod
-    def check_targets(cls, v: list[str], info: ValidationInfo) -> list[str]:
-        valid = info.context
-        if valid:
-            bad = [t for t in v if t not in valid]
-            if bad:
-                raise ValueError(f"Invalid: {bad}. Choose from: {', '.join(valid)}")
+    def check_in_range(cls, v: int, info: ValidationInfo) -> int:
+        if info.context is not None and v not in info.context:
+            raise ValueError(f"Pick from: {info.context}")
+        return v
+
+
+class PlayerPickResponse(BaseModel):
+    """Shared by gallery vote and wager bet — pick a player by alias."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected: str = Field(description="Alias of the player you choose")
+    reasoning: str = Field(description="Brief reasoning (1 sentence)")
+
+    @field_validator("selected")
+    @classmethod
+    def check_valid_alias(cls, v: str, info: ValidationInfo) -> str:
+        if info.context is not None and v not in info.context:
+            raise ValueError(f"Invalid alias '{v}'. Choose from: {info.context}")
         return v
 
 
@@ -81,23 +68,54 @@ class WagerGuessResponse(BaseModel):
     reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
 
-class WagerBetResponse(BaseModel):
+class SignalGuessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    target: str = Field(description="Alias of the player whose guess you think is closest")
+    guess: str = Field(description="Your guess of the original secret phrase")
     reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
 
+class JudgmentEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    score: int = Field(description="0 = wrong, 1 = partially right, 2 = correct")
+
+    @field_validator("score")
+    @classmethod
+    def check_score_range(cls, v: int) -> int:
+        if v not in (0, 1, 2):
+            raise ValueError(f"Score must be 0, 1, or 2, got {v}")
+        return v
+
+
+class SignalJudgment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    judgments: list[JudgmentEntry] = Field(description="One score per guess, in order")
+
+
 # ---------------------------------------------------------------------------
-# Character agents — personality-driven, maintain message history
+# Deps — minimal, carries only validation context for structured output
 # ---------------------------------------------------------------------------
 
-ai_agent: Agent[AIPlayerDeps, str] = Agent(
+
+@dataclass
+class AICallContext:
+    """Runtime context for ai_agent calls. Only carries validation data."""
+
+    valid: list | None = None  # valid indices or aliases for validators
+
+
+# ---------------------------------------------------------------------------
+# Agents
+# ---------------------------------------------------------------------------
+
+ai_agent: Agent[AICallContext, str] = Agent(
     output_type=str,
-    deps_type=AIPlayerDeps,
+    deps_type=AICallContext,
     retries=2,
     model_settings={"max_tokens": 200},
-    validation_context=lambda ctx: [a for a in ctx.deps.players if a != ctx.deps.player_alias],
+    validation_context=lambda ctx: ctx.deps.valid,
 )
 
 narrator_agent: Agent[None, str] = Agent(
@@ -107,58 +125,48 @@ narrator_agent: Agent[None, str] = Agent(
     model_settings={"max_tokens": 200},
 )
 
-
-@ai_agent.instructions
-def _build_instructions(ctx: RunContext[AIPlayerDeps]) -> str:
-    """Dynamic system prompt — personality + game context."""
-    return build_system_prompt(ctx.deps)
-
-
-# ---------------------------------------------------------------------------
-# Utility agents — stateless one-shot calls
-# ---------------------------------------------------------------------------
-
-brain_test_agent: Agent[None, str] = Agent(
-    output_type=str,
-    retries=1,
-    instructions="Pick the best option. Reply with ONLY the number (0, 1, 2, or 3).",
-    model_settings={"max_tokens": 10},
+judge_agent: Agent[None, SignalJudgment] = Agent(
+    output_type=SignalJudgment,
+    retries=2,
+    instructions=(
+        "Judge whether each guess matches the original phrase in meaning.\n"
+        "Score each guess:\n"
+        "  2 = captures the same idea (close paraphrase or correct)\n"
+        "  1 = partially right (related but missing key elements)\n"
+        "  0 = wrong\n"
+        "Be generous — close paraphrases count as 2."
+    ),
+    model_settings={"max_tokens": 200},
 )
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Core runner — all player actions go through here
 # ---------------------------------------------------------------------------
 
 
-def _log_fields(deps: AIPlayerDeps) -> dict:
-    """Common structured log fields for LLM calls."""
-    return {
-        "player": deps.player_alias,
-        "personality": deps.personality.name,
-        "round": deps.round_number,
-        "round_type": deps.round_type,
-    }
-
-
 async def _run_ai_agent(
-    deps: AIPlayerDeps,
+    user_prompt: str,
     action: str,
     message_history: list[ModelMessage] | None = None,
     *,
+    instructions: str,
     output_type: type = str,
+    valid: list | None = None,
+    log_fields: dict | None = None,
 ) -> tuple[Any, list[ModelMessage]]:
-    """Run ai_agent for a character action. Logs with tiered severity, re-raises on failure."""
+    """Run ai_agent for a character action. Re-raises on failure."""
     settings = get_settings()
-    fields = _log_fields(deps)
+    fields = log_fields or {}
     log.info("llm_call_start", action=action, model=settings.ai_model, **fields)
     try:
         result: Any = await ai_agent.run(
-            deps.action_prompt,
+            user_prompt,
             model=settings.ai_model,
-            deps=deps,
+            instructions=instructions,
             output_type=output_type,
             message_history=message_history,
+            deps=AICallContext(valid=valid),
         )
         log.info("llm_call_done", action=action, output_len=len(str(result.output)), **fields)
         return result.output, result.all_messages()
@@ -173,124 +181,101 @@ async def _run_ai_agent(
         raise
 
 
-async def _run_system_call(
-    agent: Agent[None, str],
-    user_prompt: str,
-    timeout: float = 5.0,
-    *,
-    game_id: str | None = None,
-    instructions: str | None = None,
-) -> str | None:
-    """Run a stateless utility agent. Returns None on any failure."""
-    settings = get_settings()
-    log.info("llm_system_call_start", game_id=game_id)
-    try:
-        result = await asyncio.wait_for(
-            agent.run(user_prompt, model=settings.ai_model, instructions=instructions),
-            timeout=timeout,
-        )
-        log.info("llm_system_call_done", output_len=len(result.output), game_id=game_id)
-        return result.output
-    except TimeoutError:
-        log.info("llm_system_timeout", game_id=game_id)
-        return None
-    except (ModelHTTPError, ModelAPIError) as exc:
-        log.warning("llm_system_api_error", error=str(exc), game_id=game_id)
-        return None
-    except Exception:
-        log.exception("llm_system_failed", game_id=game_id)
-        return None
-
-
 # ---------------------------------------------------------------------------
-# Character-agent generate functions
+# Generate functions — one per action, all through _run_ai_agent
 # ---------------------------------------------------------------------------
 
 
 async def generate_answer(
-    deps: AIPlayerDeps,
+    user_prompt: str,
+    instructions: str,
     message_history: list[ModelMessage] | None = None,
+    *,
+    fallback: str = "hmm",
+    log_fields: dict | None = None,
 ) -> tuple[str, list[ModelMessage]]:
     """Generate an answer to a prompt in character."""
     try:
-        return await _run_ai_agent(deps, "answer", message_history)
+        return await _run_ai_agent(
+            user_prompt,
+            "answer",
+            message_history,
+            instructions=instructions,
+            log_fields=log_fields,
+        )
     except Exception:
-        return deps.personality.fallback_response, message_history or []
-
-
-async def decide_gallery_vote(
-    prompt_text: str,
-    answers_by_alias: dict[str, str],
-    *,
-    game_id: str | None = None,
-) -> str | None:
-    """Decide who to vote for in gallery vote. Returns the alias of the chosen player.
-
-    Falls back to None on timeout/failure (caller should pick random).
-    """
-    vote_prompt = build_gallery_vote_prompt(prompt_text, answers_by_alias)
-    result = await _run_system_call(
-        brain_test_agent,  # reuse simple agent
-        vote_prompt,
-        timeout=3.0,
-        game_id=game_id,
-        instructions="Pick the answer that sounds most like it was written by a human. "
-        "Reply with ONLY the alias (e.g., UNIT-7). Nothing else.",
-    )
-    if result:
-        stripped = result.strip().upper()
-        # Try to match against known aliases
-        for alias in answers_by_alias:
-            if alias.upper() in stripped or stripped in alias.upper():
-                return alias
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Utility-agent generators (no personality, no history)
-# ---------------------------------------------------------------------------
+        return fallback, message_history or []
 
 
 async def generate_brain_test_answer(
-    question: str,
-    options: list[str],
+    user_prompt: str,
+    instructions: str,
+    message_history: list[ModelMessage] | None = None,
     *,
-    game_id: str | None = None,
-) -> int:
-    """Select an option for a brain test challenge. Returns the selected index (0-3).
+    valid_indices: list[int],
+    log_fields: dict | None = None,
+) -> tuple[int, list[ModelMessage]]:
+    """Pick the best option for a brain test challenge. Auto-retries on invalid index."""
+    try:
+        result, history = await _run_ai_agent(
+            user_prompt,
+            "brain_test",
+            message_history,
+            instructions=instructions,
+            output_type=BrainTestResponse,
+            valid=valid_indices,
+            log_fields=log_fields,
+        )
+        return result.selected, history
+    except Exception:
+        return random.choice(valid_indices), message_history or []
 
-    Falls back to random selection on timeout/failure.
-    """
-    options_text = "\n".join(f"{i}. {opt}" for i, opt in enumerate(options))
-    prompt = f"Question: {question}\n\nOptions:\n{options_text}\n\nReply with ONLY the number."
 
-    result = await _run_system_call(brain_test_agent, prompt, timeout=3.0, game_id=game_id)
-    if result:
-        # Parse the number from the response
-        stripped = result.strip()
-        for ch in stripped:
-            if ch in "0123":
-                return int(ch)
-
-    # Fallback: random selection
-    return random.randint(0, len(options) - 1)
+async def decide_gallery_vote(
+    user_prompt: str,
+    instructions: str,
+    message_history: list[ModelMessage] | None = None,
+    *,
+    valid_aliases: list[str],
+    log_fields: dict | None = None,
+) -> tuple[str, list[ModelMessage]]:
+    """Vote for who sounds most human. Auto-retries on invalid alias."""
+    try:
+        result, history = await _run_ai_agent(
+            user_prompt,
+            "gallery_vote",
+            message_history,
+            instructions=instructions,
+            output_type=PlayerPickResponse,
+            valid=valid_aliases,
+            log_fields=log_fields,
+        )
+        return result.selected, history
+    except Exception:
+        return random.choice(valid_aliases), message_history or []
 
 
 async def generate_wager_guess(
-    deps: AIPlayerDeps,
+    user_prompt: str,
+    instructions: str,
     message_history: list[ModelMessage] | None = None,
     *,
     range_min: int = 0,
     range_max: int = 100,
+    log_fields: dict | None = None,
 ) -> tuple[int, list[ModelMessage]]:
     """Generate a numerical estimate for a wager question in character."""
     try:
         result, history = await _run_ai_agent(
-            deps, "wager_guess", message_history, output_type=WagerGuessResponse
+            user_prompt,
+            "wager_guess",
+            message_history,
+            instructions=instructions,
+            output_type=WagerGuessResponse,
+            log_fields=log_fields,
         )
         return result.value, history
     except Exception:
-        # Fallback: random value weighted toward center of the actual range
         center = (range_min + range_max) // 2
         spread = (range_max - range_min) // 4
         value = center + random.randint(-spread, spread)
@@ -298,41 +283,54 @@ async def generate_wager_guess(
 
 
 async def generate_wager_bet(
-    deps: AIPlayerDeps,
+    user_prompt: str,
+    instructions: str,
     message_history: list[ModelMessage] | None = None,
+    *,
+    valid_aliases: list[str],
+    log_fields: dict | None = None,
 ) -> tuple[str, list[ModelMessage]]:
-    """Choose whose guess is closest for a wager question in character.
-
-    Returns (target_alias, updated_history).
-    """
+    """Choose whose guess is closest. Auto-retries on invalid alias."""
     try:
         result, history = await _run_ai_agent(
-            deps, "wager_bet", message_history, output_type=WagerBetResponse
+            user_prompt,
+            "wager_bet",
+            message_history,
+            instructions=instructions,
+            output_type=PlayerPickResponse,
+            valid=valid_aliases,
+            log_fields=log_fields,
         )
-        return result.target, history
+        return result.selected, history
     except Exception:
-        return "", message_history or []
+        return random.choice(valid_aliases) if valid_aliases else "", message_history or []
 
 
 async def generate_signal_guess(
-    transformation: str,
-    constraint: str,
+    user_prompt: str,
+    instructions: str,
+    message_history: list[ModelMessage] | None = None,
     *,
-    game_id: str | None = None,
-) -> str | None:
-    """AI guesses the original phrase from a transformation. Returns guess or None."""
-    from backend.llm.prompts import build_signal_guess_prompt
+    log_fields: dict | None = None,
+) -> tuple[str | None, list[ModelMessage]]:
+    """Guess the original phrase from a transformation."""
+    try:
+        result, history = await _run_ai_agent(
+            user_prompt,
+            "signal_guess",
+            message_history,
+            instructions=instructions,
+            output_type=SignalGuessResponse,
+            log_fields=log_fields,
+        )
+        return result.guess, history
+    except Exception:
+        return None, message_history or []
 
-    prompt = build_signal_guess_prompt(transformation, constraint)
-    result = await _run_system_call(
-        brain_test_agent,
-        prompt,
-        timeout=3.0,
-        game_id=game_id,
-        instructions="You are guessing what secret phrase was transformed. "
-        "Reply with ONLY your guess — a short phrase describing a scene or situation.",
-    )
-    return result.strip() if result else None
+
+# ---------------------------------------------------------------------------
+# Signal judging — system-level, not a player action
+# ---------------------------------------------------------------------------
 
 
 def _fuzzy_match(guess: str, original: str) -> bool:
@@ -347,49 +345,47 @@ async def judge_signal_guesses(
     guesses: dict[str, str],
     *,
     game_id: str | None = None,
-) -> dict[str, bool]:
-    """Batch-judge all guesses for one sub-round. Returns {guesser_id: correct?}."""
+) -> dict[str, int]:
+    """Batch-judge all guesses for one sub-round. Returns {guesser_id: score (0/1/2)}."""
     if not guesses:
         return {}
 
-    # Build numbered list for LLM
     guesser_ids = list(guesses.keys())
-    guesses_text = "\n".join(f"{i + 1}. {guesses[gid]}" for i, gid in enumerate(guesser_ids))
+    guesses_list = [guesses[gid] for gid in guesser_ids]
 
-    prompt = (
-        f'The original phrase was: "{original_phrase}"\n\n'
-        f"Here are the guesses:\n{guesses_text}\n\n"
-        "For each guess, reply Y if it captures the same idea as the original phrase "
-        "(doesn't need to be exact wording), or N if not.\n"
-        f"Reply with exactly {len(guesser_ids)} letters separated by commas. "
-        "Example: Y,N,Y"
-    )
+    from backend.llm.prompts import build_signal_judge_prompt
 
-    result = await _run_system_call(
-        brain_test_agent,
-        prompt,
-        timeout=5.0,
-        game_id=game_id,
-        instructions="Judge whether each guess matches the original phrase in meaning. "
-        "Reply with ONLY Y or N for each, comma-separated.",
-    )
+    prompt = build_signal_judge_prompt(original_phrase, guesses_list)
+    settings = get_settings()
 
-    judgments: dict[str, bool] = {}
+    log.info("llm_judge_call_start", game_id=game_id, num_guesses=len(guesses_list))
+    try:
+        result = await asyncio.wait_for(
+            judge_agent.run(prompt, model=settings.ai_model),
+            timeout=5.0,
+        )
+        log.info("llm_judge_call_done", game_id=game_id)
 
-    if result:
-        # Parse Y/N response
-        parts = [p.strip().upper() for p in result.split(",")]
+        judgments: dict[str, int] = {}
         for i, gid in enumerate(guesser_ids):
-            if i < len(parts):
-                judgments[gid] = parts[i].startswith("Y")
+            if i < len(result.output.judgments):
+                judgments[gid] = result.output.judgments[i].score
             else:
-                judgments[gid] = _fuzzy_match(guesses[gid], original_phrase)
-    else:
-        # LLM failed — fall back to fuzzy match
-        for gid, guess in guesses.items():
-            judgments[gid] = _fuzzy_match(guess, original_phrase)
+                # LLM returned fewer judgments than guesses — fallback
+                judgments[gid] = 2 if _fuzzy_match(guesses[gid], original_phrase) else 0
+        return judgments
 
-    return judgments
+    except TimeoutError:
+        log.info("llm_judge_timeout", game_id=game_id)
+    except (ModelHTTPError, ModelAPIError) as exc:
+        log.warning("llm_judge_api_error", error=str(exc), game_id=game_id)
+    except Exception:
+        log.exception("llm_judge_failed", game_id=game_id)
+
+    # Full LLM failure — fall back to fuzzy match (binary: 0 or 2)
+    return {
+        gid: (2 if _fuzzy_match(guess, original_phrase) else 0) for gid, guess in guesses.items()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -417,12 +413,7 @@ async def generate_narration(
     trigger: str,
     context: str,
 ) -> str | None:
-    """Generate a narrator line for a specific game moment.
-
-    Manages its own message history internally. Serialized per game via
-    asyncio.Lock so concurrent triggers don't clobber each other's history.
-    Returns the narration text, or None on timeout/failure.
-    """
+    """Generate a narrator line for a specific game moment."""
     lock = _narrator_locks.get(game_id)
     if not lock:
         lock = asyncio.Lock()

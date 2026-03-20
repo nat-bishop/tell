@@ -89,9 +89,9 @@ class TestDoActiveComplete:
 
         assert session.state.phase == GamePhase.RESULTS
 
-        # Check scores: h1 got 3 votes = -3
+        # Check scores: h1 got 3 votes = -300
         h1 = next(p for p in session.state.players if p.id == "h1")
-        assert h1.score == -3
+        assert h1.score == -300
 
         events = _get_broadcast_events(game_id)
         event_types = [e.event_type for e in events]
@@ -171,8 +171,8 @@ class TestDoBrainTestComplete:
         # Check scores in the results event
         results_event = next(e for e in events if e.event_type == "round_results")
         assert results_event.scores is not None
-        # h1 got both right = 2
-        assert results_event.scores["h1"] == 2
+        # h1 got both right = 200
+        assert results_event.scores["h1"] == 200
 
 
 # ---------------------------------------------------------------------------

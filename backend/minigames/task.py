@@ -56,7 +56,7 @@ class TaskHandler(MinigameHandler):
         from backend.services.game_logic import tally_gallery_votes
 
         vote_counts = tally_gallery_votes(state)
-        score_deltas = {pid: -count for pid, count in vote_counts.items() if count > 0}
+        score_deltas = {pid: -100 * count for pid, count in vote_counts.items() if count > 0}
         return {"vote_counts": vote_counts}, score_deltas
 
     def build_state_sync_extras(self, state: TellGameState, player_id: str) -> dict:

@@ -55,10 +55,14 @@ backend/
     signal.py              SignalHandler + _signal_loop + _judge_all_guesses
     __init__.py            MINIGAME_REGISTRY dict + get_handler() + register()
   llm/
-    agents.py              PydanticAI: answer, vote, brain test answer, wager guess/bet,
-                           signal guess (generate_signal_guess) + judge (judge_signal_guesses), narration
-    personalities.py       5 AI personalities with system prompts + vote styles
-    prompts.py             NARRATOR_SYSTEM_PROMPT + build_* helpers
+    agents.py              PydanticAI agents: ai_agent (all player actions), judge_agent
+                           (signal judging), narrator_agent. Structured output models:
+                           BrainTestResponse, PlayerPickResponse, WagerGuessResponse,
+                           SignalGuessResponse, SignalJudgment. AICallContext deps for
+                           validation_context.
+    personalities.py       5 AI personalities with system prompts + vote strategies
+    prompts.py             Stable system prompt (get_personality_instructions) + volatile
+                           user message builders (build_*_prompt). NARRATOR_SYSTEM_PROMPT.
 
 tests/
   conftest.py     Fixtures: standard_game (4p, 2h/2ai, PROMPT), game_state/player/round_state factories
@@ -182,28 +186,28 @@ Round types are selected dynamically via `get_next_round_type(state)` — not pr
 ```
 PROMPT (45s + 5s reading) → ACTIVE (all see all answers, tap to vote) → RoundResultsEvent → RESULTS (vote counts) → next round
 ```
-All players vote for one other player who sounds most human. Votes received = negative points (`-1` per vote). Task handler (`task.py`) runs `build_results()` to tally and return score deltas.
+All players vote for one other player who sounds most human. Votes received = negative points (`-100` per vote). Task handler (`task.py`) runs `build_results()` to tally and return score deltas.
 
 **Brain Test / Quick Draw** (multiple-choice challenges, scored by correctness):
 ```
 ACTIVE (75s safety timer, 5 challenges × 12s each) → RoundResultsEvent → RESULTS (15s) → next round
 ```
-Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, +1 point).
+Each challenge broadcasts `SubRoundEvent(round_type="brain_test", ...)` with question/options. Players select an option; scoring is pure correctness (`selected_index == correct_index`, +100 points).
 
 **Wager** (numerical estimation + social betting):
 ```
 ACTIVE (100s safety, 3 questions × [GUESS 15s + BET 15s]) → RoundResultsEvent → RESULTS (15s) → next round
 ```
-Each question has two sub-rounds: GUESS (place a marker on a number line) and BET (pick whose guess is closest). Scoring: +1 for closest guess, +1 for betting on a closest guesser. Self-bet allowed. Max 2 per question, 6 total across 3 questions.
+Each question has two sub-rounds: GUESS (place a marker on a number line) and BET (pick whose guess is closest). Scoring: +100 for closest guess, +100 for betting on a closest guesser. Self-bet allowed. Max 200 per question, 600 total across 3 questions.
 
-**Signal** (Drawful-style: transform a phrase under a constraint, others guess the original):
+**Signal** (Drawful-style: 3 transmitters transform phrases, everyone else guesses):
 ```
-PROMPT (20s + 5s reading — each player gets a secret phrase + shared constraint, submits transformation)
-→ ACTIVE (120s safety timer, N sub-rounds × 12s each — one per player)
-→ LLM batch-judges all guesses (parallelized)
+PROMPT (20s + 5s reading — 3 random transmitters get secret phrases + shared constraint, submit transformations)
+→ ACTIVE (safety timer, 3 sub-rounds × 12s each — one per transmitter)
+→ LLM batch-judges all guesses with graded scoring (0/1/2), parallelized per transmitter
 → RoundResultsEvent → RESULTS (15s) → next round
 ```
-Each sub-round broadcasts `SubRoundEvent(round_type="signal", ...)` showing one player's transformation. Others guess the original phrase. Scoring: guesser +1 per correct guess; transmitter +1 if >= half of guessers got it right. Signal has a custom PROMPT component (`FacilitySignalPrompt`) that fetches per-player phrases via `GET /signal-phrase`. Guesses submitted via `POST /signal-guess`. LLM judging uses batch Y/N format with `_fuzzy_match` fallback.
+3 random transmitters are selected per signal round (tracked via `used_signal_transmitter_ids` to avoid repeats across rounds). Each sub-round broadcasts `SubRoundEvent(round_type="signal", ...)` showing one transmitter's transformation. All non-transmitters guess simultaneously. Graded scoring: judge scores each guess 0 (wrong), 1 (close), 2 (correct). Guesser gets `score * 50` points (0/50/100). Transmitter gets `sum(guesser_points) // num_guessers`. Signal has a custom PROMPT component (`FacilitySignalPrompt`) — transmitters fetch phrases via `GET /signal-phrase`, non-transmitters see a waiting screen. Guesses submitted via `POST /signal-guess` (transmitters blocked). `judge_signal_guesses()` uses `judge_agent` with `SignalJudgment` structured output; `_fuzzy_match` fallback on full LLM failure.
 
 **After 5 rounds** (`state.round_number == state.total_rounds`):
 ```
@@ -235,11 +239,12 @@ class MinigameHandler:
 
 To add a new minigame: create `backend/minigames/mytype.py`, subclass `MinigameHandler`, call `register(MyHandler())` in `backend/minigames/__init__.py`.
 
-### Scoring
-- **Task**: Each vote received = **-1 point**. `tally_gallery_votes()` in `game_logic.py`, deltas applied in `TaskHandler.build_results()`.
-- **Brain Test**: Pure correctness — `selected_index == correct_index` → +1 per challenge. `score_brain_test()` in `brain_test.py`.
-- **Wager**: +1 for closest guess, +1 for betting on a closest guesser. Self-bet allowed. Max 2 per question, 6 total across 3 questions. `score_wager()` in `wager.py`.
-- **Signal**: Guesser +1 per correct guess. Transmitter +1 if >= half of guessers got it right. LLM-judged with fuzzy match fallback.
+### Scoring (100x scale)
+All scores are integers scaled by 100 for granularity without floats.
+- **Task**: Each vote received = **-100 points**. `tally_gallery_votes()` in `game_logic.py`, deltas applied in `TaskHandler.build_results()`.
+- **Brain Test**: Pure correctness — `selected_index == correct_index` → +100 per challenge. `score_brain_test()` in `brain_test.py`.
+- **Wager**: +100 for closest guess, +100 for betting on a closest guesser. Self-bet allowed. Max 200 per question, 600 total across 3 questions. `score_wager()` in `wager.py`.
+- **Signal**: Graded judging (0/1/2). Guesser gets `score * 50` (0/50/100 per sub-round). Transmitter gets `sum(guesser_points) // num_guessers` (0-100 range). `judge_signal_guesses()` in `agents.py`, scoring in `SignalHandler.build_results()`.
 - Running scores in `Player.score` (int). `scores` dict (player_id → score) carried on `StateSyncEvent`, `RoundResultsEvent`, and `GameOverEvent`.
 - Game over after `total_rounds` (default 5). Winner = highest score; ties produce multiple `winner_ids`.
 

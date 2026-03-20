@@ -28,6 +28,14 @@ def get_player_by_id(state: TellGameState, player_id: str) -> Player | None:
     return next((p for p in state.players if p.id == player_id), None)
 
 
+def get_answer_total(state: TellGameState) -> int:
+    """How many answers are expected this prompt phase."""
+    rs = state.current_round
+    if rs and rs.round_type == RoundType.SIGNAL:
+        return len(rs.signal_player_order)
+    return len(state.players)
+
+
 def fill_missing_answers(state: TellGameState) -> None:
     """Fill NO_RESPONSE for players who haven't answered."""
     rs = state.current_round

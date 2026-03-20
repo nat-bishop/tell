@@ -15,14 +15,16 @@ from backend.api.deps import (
     get_game_repository,
     get_timer_manager,
 )
-from backend.llm.agents import (
-    AIPlayerDeps,
-    generate_answer,
-)
 from backend.llm.personalities import PERSONALITIES, Personality
 from backend.llm.prompts import (
     build_answer_prompt,
+    build_brain_test_prompt,
+    build_gallery_vote_prompt,
+    build_signal_guess_prompt,
     build_signal_transform_prompt,
+    build_wager_bet_prompt,
+    build_wager_guess_prompt,
+    get_personality_instructions,
 )
 from backend.services.game_logic import (
     fill_missing_answers,
@@ -82,55 +84,10 @@ def _set_history(game_id: str, player_id: str, history: list[ModelMessage]) -> N
         _conversation_history[game_id][player_id] = history
 
 
-# ---------------------------------------------------------------------------
-# Build deps
-# ---------------------------------------------------------------------------
-
-
-def _build_deps(game_id: str, player_id: str, action_prompt: str = "") -> AIPlayerDeps | None:
-    """Build AIPlayerDeps from current game state (read without lock — snapshot)."""
-    repo = get_game_repository()
-    session = repo.get(game_id)
-    if not session:
-        return None
-
-    state = session.state
-    player = get_player_by_id(state, player_id)
-    if not player:
-        return None
-
+def _log_fields(game_id: str, player_id: str) -> dict:
+    """Common structured log fields for AI tasks."""
     personality = get_personality(game_id, player_id)
-    all_aliases = [p.alias for p in state.players]
-
-    all_answers: dict[str, str] = {}
-    current_prompt = ""
-    round_type: RoundType = RoundType.TASK
-    my_answer: str | None = None
-
-    if state.current_round:
-        rs = state.current_round
-        current_prompt = rs.prompt_text
-        round_type = rs.round_type
-
-        player_map = {p.id: p for p in state.players}
-        for pid, answer in rs.answers.items():
-            p = player_map.get(pid)
-            if p:
-                all_answers[p.alias] = answer
-
-        my_answer = rs.answers.get(player_id)
-
-    return AIPlayerDeps(
-        personality=personality,
-        player_alias=player.alias,
-        current_prompt=current_prompt,
-        all_answers=all_answers,
-        players=all_aliases,
-        round_number=state.round_number,
-        round_type=round_type,
-        my_answer=my_answer,
-        action_prompt=action_prompt,
-    )
+    return {"player": player_id, "personality": personality.name, "game_id": game_id}
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +117,15 @@ async def on_phase_change(game_id: str, phase: GamePhase) -> None:
     tasks: list[asyncio.Task] = []
 
     if phase == GamePhase.PROMPT:
-        for player in ai_players:
+        # For signal rounds, only transmitters (players in signal_player_order) answer
+        rs = state.current_round
+        if rs and rs.round_type == RoundType.SIGNAL:
+            transmitter_ids = set(rs.signal_player_order)
+            eligible = [p for p in ai_players if p.id in transmitter_ids]
+        else:
+            eligible = ai_players
+
+        for player in eligible:
             delay = random.uniform(3, 20)
             tasks.append(asyncio.create_task(_ai_answer_task(game_id, player.id, delay)))
 
@@ -240,7 +205,7 @@ async def _run_ai_task(
 
 
 # ---------------------------------------------------------------------------
-# AI task functions — thin wrappers around _run_ai_task
+# AI task functions
 # ---------------------------------------------------------------------------
 
 
@@ -248,25 +213,40 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player answers a prompt after a delay."""
 
     async def generate() -> tuple[str, list[ModelMessage]] | None:
-        history = _get_history(game_id, player_id)
-        deps = _build_deps(game_id, player_id)
-        if not deps:
+        repo = get_game_repository()
+        session = repo.get(game_id)
+        if not session or not session.state.current_round:
             return None
 
-        if deps.round_type == RoundType.SIGNAL:
-            # Signal: transform the secret phrase under the constraint
-            repo = get_game_repository()
-            session = repo.get(game_id)
-            if not session or not session.state.current_round:
-                return None
-            rs = session.state.current_round
+        state = session.state
+        rs = state.current_round
+        player = get_player_by_id(state, player_id)
+        if not player or not rs:
+            return None
+
+        instructions = get_personality_instructions(get_personality(game_id, player_id).name)
+        history = _get_history(game_id, player_id)
+        all_aliases = [p.alias for p in state.players]
+
+        if rs.round_type == RoundType.SIGNAL:
             phrase = rs.signal_phrases.get(player_id, "")
             constraint = rs.signal_constraint
-            deps.action_prompt = build_signal_transform_prompt(phrase, constraint)
+            user_prompt = build_signal_transform_prompt(phrase, constraint)
         else:
-            deps.action_prompt = build_answer_prompt(deps)
+            user_prompt = build_answer_prompt(
+                player.alias, state.round_number, all_aliases, rs.prompt_text
+            )
 
-        return await generate_answer(deps, history)
+        from backend.llm.agents import generate_answer
+
+        fallback = get_personality(game_id, player_id).fallback_response
+        return await generate_answer(
+            user_prompt,
+            instructions,
+            history,
+            fallback=fallback,
+            log_fields=_log_fields(game_id, player_id),
+        )
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
         from backend.services.transitions import do_prompt_complete
@@ -279,8 +259,10 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
         state.current_round.answers[player_id] = answer_text
         _set_history(game_id, player_id, updated_history)
 
-        answer_count = len(state.current_round.answers)
-        total_count = len(state.players)
+        from backend.services.game_logic import get_answer_total
+
+        answer_count = len(state.current_round.answers) if state.current_round else 0
+        total_count = get_answer_total(state)
 
         await cm.broadcast(
             game_id,
@@ -297,6 +279,7 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
             player_id=player_id,
             personality=get_personality(game_id, player_id).name,
         )
+
         if answer_count >= total_count:
             get_timer_manager().cancel_timer(game_id)
             fill_missing_answers(state)
@@ -310,59 +293,76 @@ async def _ai_answer_task(game_id: str, player_id: str, delay: float) -> None:
 async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
     """AI player votes in gallery vote phase after a delay."""
 
-    async def generate() -> str | None:
-        """Try LLM vote, fall back to random."""
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
         repo = get_game_repository()
         session = repo.get(game_id)
-        if not session:
-            return None
-        state = session.state
-        if not state.current_round:
+        if not session or not session.state.current_round:
             return None
 
-        # Build lookups in a single pass
+        state = session.state
+        rs = state.current_round
+        player = get_player_by_id(state, player_id)
+        if not player or not rs:
+            return None
+
+        # Build answers by alias (exclude self)
         answers_by_alias: dict[str, str] = {}
         alias_to_id: dict[str, str] = {}
-        other_ids: list[str] = []
         for p in state.players:
             alias_to_id[p.alias] = p.id
             if p.id != player_id:
-                other_ids.append(p.id)
-                answer = state.current_round.answers.get(p.id)
+                answer = rs.answers.get(p.id)
                 if answer:
                     answers_by_alias[p.alias] = answer
 
-        if not other_ids:
+        if not answers_by_alias:
             return None
 
-        # Try LLM vote
-        try:
-            from backend.llm.agents import decide_gallery_vote
+        instructions = get_personality_instructions(get_personality(game_id, player_id).name)
+        history = _get_history(game_id, player_id)
+        personality = get_personality(game_id, player_id)
 
-            voted_alias = await decide_gallery_vote(
-                state.current_round.prompt_text,
-                answers_by_alias,
-                game_id=game_id,
-            )
-            if voted_alias:
-                voted_id = alias_to_id.get(voted_alias)
-                if voted_id and voted_id != player_id:
-                    return voted_id
-        except Exception:
-            log.warning("ai_vote_llm_fallback", game_id=game_id, player_id=player_id)
+        user_prompt = build_gallery_vote_prompt(
+            player.alias,
+            state.round_number,
+            rs.prompt_text,
+            answers_by_alias,
+            personality.vote_strategy,
+        )
+        valid_aliases = list(answers_by_alias.keys())
 
-        # Fallback: random vote (any non-self player)
-        return random.choice(other_ids)
+        from backend.llm.agents import decide_gallery_vote
+
+        voted_alias, updated_history = await decide_gallery_vote(
+            user_prompt,
+            instructions,
+            history,
+            valid_aliases=valid_aliases,
+            log_fields=_log_fields(game_id, player_id),
+        )
+
+        # Resolve alias → player_id
+        voted_id = alias_to_id.get(voted_alias)
+        if not voted_id or voted_id == player_id:
+            # Fallback: random non-self player
+            other_ids = [pid for pid in alias_to_id.values() if pid != player_id]
+            voted_id = random.choice(other_ids) if other_ids else None
+
+        if not voted_id:
+            return None
+
+        return voted_id, updated_history
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
         from backend.services.transitions import do_active_complete
 
-        voted_for_id = result
+        voted_for_id, updated_history = result
         state = session.state
         if not state.current_round:
             return
 
         state.current_round.gallery_votes[player_id] = voted_for_id
+        _set_history(game_id, player_id, updated_history)
 
         vote_count = len(state.current_round.gallery_votes)
         total = len(state.players)
@@ -383,7 +383,6 @@ async def _ai_vote_task(game_id: str, player_id: str, delay: float) -> None:
             voted_for=voted_for_id,
         )
 
-        # Early complete: all voted
         if vote_count >= total:
             get_timer_manager().cancel_timer(game_id)
             await do_active_complete(game_id, session)
@@ -438,10 +437,26 @@ async def _ai_brain_test_task(
         if player_id in ch.responses:
             return
 
-        # AI selects from options via LLM
+        player = get_player_by_id(state, player_id)
+        if not player:
+            return
+
+        instructions = get_personality_instructions(get_personality(game_id, player_id).name)
+        history = _get_history(game_id, player_id)
+        user_prompt = build_brain_test_prompt(
+            player.alias, state.round_number, ch.question, ch.options
+        )
+        valid_indices = list(range(len(ch.options)))
+
         from backend.llm.agents import generate_brain_test_answer
 
-        selected = await generate_brain_test_answer(ch.question, ch.options, game_id=game_id)
+        selected, updated_history = await generate_brain_test_answer(
+            user_prompt,
+            instructions,
+            history,
+            valid_indices=valid_indices,
+            log_fields=_log_fields(game_id, player_id),
+        )
 
         cm = get_connection_manager()
         lock = cm.get_lock(game_id)
@@ -457,6 +472,7 @@ async def _ai_brain_test_task(
             if player_id in ch.responses:
                 return
             ch.responses[player_id] = selected
+            _set_history(game_id, player_id, updated_history)
 
             log.info(
                 "ai_brain_test_answer",
@@ -504,21 +520,25 @@ async def _ai_wager_guess_task(
         if player_id in q.guesses:
             return
 
-        # Build deps and generate guess via character agent
-        action_prompt = (
-            f"Estimate: {q.question} (range {q.range_min}-{q.range_max} {q.unit}). "
-            f"Give your best numerical estimate."
-        )
-        deps = _build_deps(game_id, player_id, action_prompt)
-        if not deps:
+        player = get_player_by_id(state, player_id)
+        if not player:
             return
 
+        instructions = get_personality_instructions(get_personality(game_id, player_id).name)
         history = _get_history(game_id, player_id)
+        user_prompt = build_wager_guess_prompt(
+            player.alias, state.round_number, q.question, q.range_min, q.range_max, q.unit
+        )
 
         from backend.llm.agents import generate_wager_guess
 
         value, updated_history = await generate_wager_guess(
-            deps, history, range_min=q.range_min, range_max=q.range_max
+            user_prompt,
+            instructions,
+            history,
+            range_min=q.range_min,
+            range_max=q.range_max,
+            log_fields=_log_fields(game_id, player_id),
         )
 
         # Clamp to range
@@ -588,7 +608,11 @@ async def _ai_wager_bet_task(
         if player_id in q.bets:
             return
 
-        # Build alias map and guesses-by-alias for the prompt
+        player = get_player_by_id(state, player_id)
+        if not player:
+            return
+
+        # Build alias maps
         alias_to_id: dict[str, str] = {}
         id_to_alias: dict[str, str] = {}
         for p in state.players:
@@ -596,35 +620,35 @@ async def _ai_wager_bet_task(
             id_to_alias[p.id] = p.alias
 
         guesses_by_alias = {id_to_alias.get(pid, pid): val for pid, val in q.guesses.items()}
-        guesses_text = ", ".join(f"{alias}: {val}" for alias, val in guesses_by_alias.items())
 
-        action_prompt = (
-            f"Question: {q.question} (range {q.range_min}-{q.range_max} {q.unit}). "
-            f"Everyone's guesses: {guesses_text}. "
-            f"Whose guess is closest to the truth? Reply with the alias."
-        )
-        deps = _build_deps(game_id, player_id, action_prompt)
-        if not deps:
-            return
-
+        instructions = get_personality_instructions(get_personality(game_id, player_id).name)
         history = _get_history(game_id, player_id)
+        user_prompt = build_wager_bet_prompt(
+            player.alias,
+            state.round_number,
+            q.question,
+            q.range_min,
+            q.range_max,
+            q.unit,
+            guesses_by_alias,
+        )
+        valid_aliases = list(guesses_by_alias.keys())
 
         from backend.llm.agents import generate_wager_bet
 
-        target_alias, updated_history = await generate_wager_bet(deps, history)
+        target_alias, updated_history = await generate_wager_bet(
+            user_prompt,
+            instructions,
+            history,
+            valid_aliases=valid_aliases,
+            log_fields=_log_fields(game_id, player_id),
+        )
 
-        # Resolve alias → player_id (case-insensitive partial match)
-        target_id: str | None = None
-        if target_alias:
-            stripped = target_alias.strip().upper()
-            for alias, pid in alias_to_id.items():
-                if alias.upper() in stripped or stripped in alias.upper():
-                    target_id = pid
-                    break
+        # Resolve alias → player_id
+        target_id = alias_to_id.get(target_alias)
 
         # Validate target has a guess
         if not target_id or target_id not in q.guesses:
-            # Fallback: random player who has a guess
             guessers = list(q.guesses.keys())
             if not guessers:
                 return
@@ -669,14 +693,20 @@ async def _ai_wager_bet_task(
 
 
 async def on_signal_sub_round(game_id: str, sub_round_index: int, featured_player_id: str) -> None:
-    """Schedule AI guess tasks for a Signal sub-round."""
+    """Schedule AI guess tasks for a Signal sub-round.
+
+    All AI players who are NOT transmitters guess.
+    """
     repo = get_game_repository()
     session = repo.get(game_id)
     if not session:
         return
 
+    rs = session.state.current_round
+    transmitter_ids = set(rs.signal_player_order) if rs else set()
+
     ai_players = [
-        p for p in session.state.players if p.role == PlayerRole.AI and p.id != featured_player_id
+        p for p in session.state.players if p.role == PlayerRole.AI and p.id not in transmitter_ids
     ]
     if not ai_players:
         return
@@ -700,32 +730,57 @@ async def _ai_signal_guess_task(
 ) -> None:
     """AI player guesses the original phrase in a Signal sub-round."""
 
-    async def generate() -> str | None:
+    async def generate() -> tuple[str, list[ModelMessage]] | None:
         repo = get_game_repository()
         session = repo.get(game_id)
         if not session:
             return None
-        rs = session.state.current_round
+
+        state = session.state
+        rs = state.current_round
         if not rs or rs.current_sub_round != sub_round_index:
             return None
         existing = rs.signal_guesses.get(featured_player_id, {})
         if player_id in existing:
             return None
 
+        player = get_player_by_id(state, player_id)
+        if not player:
+            return None
+
         transformation = rs.answers.get(featured_player_id, "")
         constraint = rs.signal_constraint
+        featured_alias = next(
+            (p.alias for p in state.players if p.id == featured_player_id), featured_player_id
+        )
+
+        instructions = get_personality_instructions(get_personality(game_id, player_id).name)
+        history = _get_history(game_id, player_id)
+        user_prompt = build_signal_guess_prompt(
+            player.alias, state.round_number, transformation, featured_alias, constraint
+        )
 
         from backend.llm.agents import generate_signal_guess
 
-        return await generate_signal_guess(transformation, constraint, game_id=game_id)
+        guess, updated_history = await generate_signal_guess(
+            user_prompt,
+            instructions,
+            history,
+            log_fields=_log_fields(game_id, player_id),
+        )
+        if not guess:
+            return None
+        return guess, updated_history
 
     async def apply(cm: Any, session: Any, result: Any) -> None:
+        guess, updated_history = result
         rs = session.state.current_round
         if not rs or rs.current_sub_round != sub_round_index:
             return
         if featured_player_id not in rs.signal_guesses:
             rs.signal_guesses[featured_player_id] = {}
-        rs.signal_guesses[featured_player_id][player_id] = result
+        rs.signal_guesses[featured_player_id][player_id] = guess
+        _set_history(game_id, player_id, updated_history)
         log.info(
             "ai_signal_guess",
             game_id=game_id,

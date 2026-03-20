@@ -404,9 +404,9 @@ class TestScoreBrainTest:
             responses={"h1": 2, "h2": 0, "a1": 2},
         )
         totals = score_brain_test([ch])
-        assert totals["h1"] == 1
+        assert totals["h1"] == 100
         assert totals["h2"] == 0
-        assert totals["a1"] == 1
+        assert totals["a1"] == 100
 
     def test_multiple_challenges(self):
         ch1 = BrainTestChallenge(
@@ -424,8 +424,8 @@ class TestScoreBrainTest:
             responses={"h1": 2, "h2": 2},
         )
         totals = score_brain_test([ch1, ch2])
-        assert totals["h1"] == 2
-        assert totals["h2"] == 1
+        assert totals["h1"] == 200
+        assert totals["h2"] == 100
 
     def test_empty_challenges(self):
         totals = score_brain_test([])
@@ -467,7 +467,7 @@ class TestGalleryVoteScoring:
 
         payload, score_deltas = handler.build_results(state)
         assert payload["vote_counts"]["a1"] == 3
-        assert score_deltas["a1"] == -3
+        assert score_deltas["a1"] == -300
 
     def test_tally_gallery_votes_no_votes(self):
         """Nobody voted → all counts 0."""
@@ -492,9 +492,9 @@ class TestGalleryVoteScoring:
         }
 
         _payload, score_deltas = handler.build_results(state)
-        # Each got 1 vote = -1
+        # Each got 1 vote = -100
         for pid in ("h1", "h2", "a1", "a2"):
-            assert score_deltas[pid] == -1
+            assert score_deltas[pid] == -100
 
     def test_task_handler_build_results_all_on_one(self):
         """7 votes on one player → -7."""
@@ -507,7 +507,7 @@ class TestGalleryVoteScoring:
 
         payload, score_deltas = handler.build_results(state)
         assert payload["vote_counts"]["h1"] == 7
-        assert score_deltas["h1"] == -7
+        assert score_deltas["h1"] == -700
 
 
 # ---------------------------------------------------------------------------
@@ -519,30 +519,30 @@ class TestScoreWager:
     def test_closest_guess_scores_one(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 49, "h2": 30})
         totals = score_wager([q])
-        assert totals["h1"] == 1
+        assert totals["h1"] == 100
         assert totals.get("h2", 0) == 0
 
     def test_correct_bet_scores_one(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 49, "h2": 30}, bets={"h2": "h1"})
         totals = score_wager([q])
-        assert totals["h1"] == 1  # closest guess
-        assert totals["h2"] == 1  # correct bet
+        assert totals["h1"] == 100  # closest guess
+        assert totals["h2"] == 100  # correct bet
 
     def test_max_points_self_bet(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30}, bets={"h1": "h1"})
         totals = score_wager([q])
-        assert totals["h1"] == 2  # closest guess + self-bet
+        assert totals["h1"] == 200  # closest guess + self-bet
 
     def test_tie_in_guesses(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 48, "h2": 52})
         totals = score_wager([q])
-        assert totals["h1"] == 1
-        assert totals["h2"] == 1
+        assert totals["h1"] == 100
+        assert totals["h2"] == 100
 
     def test_bet_on_tied_closest(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 48, "h2": 52}, bets={"a1": "h2"})
         totals = score_wager([q])
-        assert totals["a1"] == 1  # bet on either tied guesser → +1
+        assert totals["a1"] == 100  # bet on either tied guesser → +100
 
     def test_no_guesses_no_scores(self):
         q = make_wager_question(correct_answer=50, guesses={})
@@ -552,7 +552,7 @@ class TestScoreWager:
     def test_no_bets_only_guess_points(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30})
         totals = score_wager([q])
-        assert totals["h1"] == 1
+        assert totals["h1"] == 100
         assert totals.get("h2", 0) == 0
 
     def test_multiple_questions_accumulate(self):
@@ -560,11 +560,11 @@ class TestScoreWager:
         q2 = make_wager_question(correct_answer=10, guesses={"h1": 20, "h2": 10}, bets={"h1": "h2"})
         q3 = make_wager_question(correct_answer=80, guesses={"h1": 80, "h2": 60}, bets={"h2": "h1"})
         totals = score_wager([q1, q2, q3])
-        # q1: h1 closest (+1) + h1 self-bet (+1) = h1:2
-        # q2: h2 closest (+1) + h1 bet on h2 (+1) = h2:1, h1:1
-        # q3: h1 closest (+1) + h2 bet on h1 (+1) = h1:1, h2:1
-        assert totals["h1"] == 4  # 2 + 1 + 1
-        assert totals["h2"] == 2  # 1 + 1
+        # q1: h1 closest (+100) + h1 self-bet (+100) = h1:200
+        # q2: h2 closest (+100) + h1 bet on h2 (+100) = h2:100, h1:100
+        # q3: h1 closest (+100) + h2 bet on h1 (+100) = h1:100, h2:100
+        assert totals["h1"] == 400  # 200 + 100 + 100
+        assert totals["h2"] == 200  # 100 + 100
 
     def test_bet_on_non_closest_scores_zero(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 50, "h2": 30}, bets={"a1": "h2"})
@@ -574,6 +574,6 @@ class TestScoreWager:
     def test_all_same_guess_all_closest(self):
         q = make_wager_question(correct_answer=50, guesses={"h1": 40, "h2": 40, "a1": 40})
         totals = score_wager([q])
-        assert totals["h1"] == 1
-        assert totals["h2"] == 1
-        assert totals["a1"] == 1
+        assert totals["h1"] == 100
+        assert totals["h2"] == 100
+        assert totals["a1"] == 100

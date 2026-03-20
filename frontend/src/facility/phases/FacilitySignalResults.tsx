@@ -5,6 +5,16 @@ import { useGameStore } from "@/hooks/useGameStore";
 import { Panel } from "@/facility/Panel";
 import { SystemText } from "@/components/SystemText";
 
+function JudgmentIcon({ score }: { score: number }) {
+  if (score >= 2) {
+    return <span className="font-system text-[0.6rem] shrink-0 tracking-wide uppercase text-cold">{"\u2713"}</span>;
+  }
+  if (score === 1) {
+    return <span className="font-system text-[0.6rem] shrink-0 tracking-wide uppercase text-dim">{"~"}</span>;
+  }
+  return <span className="font-system text-[0.6rem] shrink-0 tracking-wide uppercase text-warm">{"\u2717"}</span>;
+}
+
 export function FacilitySignalResults() {
   const roundResults = useGameStore((s) => s.roundResults);
   const roundScores = useGameStore((s) => s.roundScores);
@@ -80,20 +90,14 @@ export function FacilitySignalResults() {
                   </p>
                 </div>
 
-                {/* Guesses */}
+                {/* Guesses with graded judgments */}
                 {guessEntries.length > 0 && (
                   <div className="flex flex-col gap-1.5">
                     {guessEntries.map(([alias, guess]) => {
-                      const correct = data.judgments[alias] ?? false;
+                      const score = data.judgments[alias] ?? 0;
                       return (
                         <div key={alias} className="flex items-baseline gap-2 text-[0.85rem]">
-                          <span
-                            className={`font-system text-[0.6rem] shrink-0 tracking-wide uppercase ${
-                              correct ? "text-cold" : "text-warm"
-                            }`}
-                          >
-                            {correct ? "\u2713" : "\u2717"}
-                          </span>
+                          <JudgmentIcon score={score} />
                           <span className="font-system text-[0.6rem] text-dim tracking-wide uppercase shrink-0">
                             {alias}
                           </span>
@@ -110,10 +114,10 @@ export function FacilitySignalResults() {
                   </p>
                 )}
 
-                {/* Transmitter bonus */}
-                {data.transmitter_bonus && (
+                {/* Transmitter score */}
+                {data.transmitter_score > 0 && (
                   <p className="mt-2 font-system text-[0.55rem] text-cold tracking-wider uppercase">
-                    transmitter bonus +1
+                    transmitter +{data.transmitter_score}
                   </p>
                 )}
               </div>

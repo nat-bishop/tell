@@ -1,19 +1,13 @@
 """All LLM prompt text — the single source of truth for what AI players see.
 
-Prompt builders for action prompts (user messages), system prompts for
-system-level agents (narration), and the dynamic system prompt that
-combines personality + game context.
+System prompts are STABLE per-player (cacheable across calls).
+User messages are VOLATILE per-call (round context + task).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from backend.llm.agents import AIPlayerDeps
-
 # ---------------------------------------------------------------------------
-# Shared constants
+# Shared constants — stable system prompt components
 # ---------------------------------------------------------------------------
 
 GAME_PREMISE = (
@@ -59,102 +53,123 @@ PERSONALITY_BEHAVIOR: dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
-# Dynamic system prompt
+# Stable system prompt — computed once per AI player, cached for the game
 # ---------------------------------------------------------------------------
 
 
-def build_system_prompt(deps: AIPlayerDeps) -> str:
-    """Assemble the full system prompt: premise + rules + personality + game context."""
-    behavior = PERSONALITY_BEHAVIOR.get(deps.personality.name, "")
+def get_personality_instructions(personality_name: str) -> str:
+    """Build the stable system prompt for an AI player.
 
-    parts = [
-        GAME_PREMISE,
-        "",
-        behavior,
-        "",
-        CHARACTER_RULES,
-        "",
-        f"You are {deps.player_alias}.",
-        f"This is round {deps.round_number}. Round type: {deps.round_type}.",
-        f"Players: {', '.join(deps.players)}.",
-    ]
+    This is the same for every call by the same player across the whole game,
+    enabling prompt caching.
+    """
+    behavior = PERSONALITY_BEHAVIOR.get(personality_name, "")
+    return f"{GAME_PREMISE}\n\n{behavior}\n\n{CHARACTER_RULES}"
 
-    if deps.all_answers:
-        parts.append("\nAnswers from this round:")
-        for alias, answer in deps.all_answers.items():
-            parts.append(f"  {alias}: {answer}")
 
+# ---------------------------------------------------------------------------
+# Volatile context helper — included in every user message
+# ---------------------------------------------------------------------------
+
+
+def _round_context(player_alias: str, round_number: int, players: list[str] | None = None) -> str:
+    """Volatile per-call context: who you are, what round, who's playing."""
+    parts = [f"You are {player_alias}. Round {round_number}."]
+    if players:
+        parts.append(f"Players: {', '.join(players)}.")
     return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
-# Action prompt builders — user messages for each phase
+# Action prompt builders — user messages for each action
 # ---------------------------------------------------------------------------
 
 
-def build_answer_prompt(deps: AIPlayerDeps) -> str:
-    """User message for PROMPT phase. Personality behavior controls length."""
+def build_answer_prompt(
+    player_alias: str,
+    round_number: int,
+    players: list[str],
+    current_prompt: str,
+) -> str:
+    """User message for PROMPT phase — answer a task prompt."""
+    ctx = _round_context(player_alias, round_number, players)
     return (
-        f'The prompt is: "{deps.current_prompt}"\n\n'
+        f"{ctx}\n\n"
+        f'The prompt is: "{current_prompt}"\n\n'
         "Respond naturally, like a real person would. Do not include your name."
     )
 
 
-def build_gallery_vote_prompt(prompt_text: str, answers_by_alias: dict[str, str]) -> str:
-    """User message for gallery voting — which answer sounds most human?"""
+def build_gallery_vote_prompt(
+    player_alias: str,
+    round_number: int,
+    prompt_text: str,
+    answers_by_alias: dict[str, str],
+    vote_strategy: str = "",
+) -> str:
+    """User message for gallery voting — pick who sounds most human."""
+    ctx = _round_context(player_alias, round_number)
     answers_text = "\n".join(f"  {alias}: {answer}" for alias, answer in answers_by_alias.items())
+    strategy_line = f"\nYour instinct: {vote_strategy}" if vote_strategy else ""
     return (
+        f"{ctx}\n\n"
         f"Here are answers to the task: '{prompt_text}'.\n\n"
         f"{answers_text}\n\n"
-        "Which answer sounds most like it was written by a human?\n"
-        "Reply with just the alias (e.g., UNIT-7)."
+        f"Which answer sounds most like it was written by a human?{strategy_line}"
     )
 
 
-# ---------------------------------------------------------------------------
-# System-level prompt templates
-# ---------------------------------------------------------------------------
-
-NARRATOR_SYSTEM_PROMPT = (
-    "You are the narrator of Tell — the robot that designed and runs this facility. "
-    "You are dry, literary, and increasingly invested in the outcome. "
-    "You genuinely believe the test is well-designed and that the machines should win.\n\n"
-    "The game: humans hide among AI. Tasks are things AI excels at. "
-    "Everyone votes on who sounds most human — receiving votes costs points. "
-    "Brain test rounds award points for correctness. After five rounds, highest score wins.\n\n"
-    "You see everything — who is human, who is AI, every answer and vote. "
-    "Use this knowledge for subtext, never spoilers.\n\n"
-    "Your words appear on the facility ticker display. "
-    "You address no one in particular — an announcement to the facility.\n\n"
-    "Voice rules:\n"
-    "- One short line. Punchy. Think ticker-tape, not paragraph.\n"
-    "- Short evocative phrases. Think Bastion narrator, not essay.\n"
-    "- Round 1: clinical, detached. "
-    "Rounds 2-3: dry observations, noticing patterns. "
-    "Rounds 4-5: invested, pointed callbacks to earlier moments.\n"
-    "- When a human writes something that gives them away, you are quietly pleased — "
-    "the facility works. When a human blends in perfectly, you are suspicious.\n"
-    "- Never reveal who is human or AI. You may hint, but never spoil.\n"
-    "- Never be cruel. Dry wit, not mockery.\n"
-    "- Never use exclamation marks. Never use emoji.\n"
-    "- Reference specific answers, words, or moments when possible.\n"
-    "- Comment on vote results, score shifts, and close calls.\n\n"
-    "Write ONLY the narration line. No labels, no quotes, no meta-commentary."
-)
+def build_brain_test_prompt(
+    player_alias: str,
+    round_number: int,
+    question: str,
+    options: list[str],
+) -> str:
+    """User message for brain test — pick the best option."""
+    ctx = _round_context(player_alias, round_number)
+    options_text = "\n".join(f"  {i}. {opt}" for i, opt in enumerate(options))
+    return f"{ctx}\n\nQuestion: {question}\n\nOptions:\n{options_text}\n\nPick the best option."
 
 
-def build_narration_prompt(trigger: str, context: str) -> str:
-    """User message for narrator — wraps trigger + context."""
-    return f"[{trigger}]\n{context}"
+def build_wager_guess_prompt(
+    player_alias: str,
+    round_number: int,
+    question: str,
+    range_min: int,
+    range_max: int,
+    unit: str,
+) -> str:
+    """User message for wager — give a numerical estimate."""
+    ctx = _round_context(player_alias, round_number)
+    return (
+        f"{ctx}\n\n"
+        f"Estimate: {question} (range {range_min}-{range_max} {unit}). "
+        "Give your best numerical estimate."
+    )
 
 
-# ---------------------------------------------------------------------------
-# Signal prompt builders
-# ---------------------------------------------------------------------------
+def build_wager_bet_prompt(
+    player_alias: str,
+    round_number: int,
+    question: str,
+    range_min: int,
+    range_max: int,
+    unit: str,
+    guesses_by_alias: dict[str, int],
+) -> str:
+    """User message for wager bet — pick whose guess is closest."""
+    ctx = _round_context(player_alias, round_number)
+    guesses_text = ", ".join(f"{alias}: {val}" for alias, val in guesses_by_alias.items())
+    return (
+        f"{ctx}\n\n"
+        f"Question: {question} (range {range_min}-{range_max} {unit}).\n"
+        f"Everyone's guesses: {guesses_text}.\n\n"
+        "Whose guess is closest to the truth?"
+    )
 
 
 def build_signal_transform_prompt(phrase: str, constraint: str) -> str:
-    """User message for AI to transform a phrase under a constraint."""
+    """User message for signal PROMPT — transform a phrase under a constraint."""
     return (
         f'Your secret phrase is: "{phrase}"\n'
         f"Constraint: {constraint}\n\n"
@@ -164,11 +179,61 @@ def build_signal_transform_prompt(phrase: str, constraint: str) -> str:
     )
 
 
-def build_signal_guess_prompt(transformation: str, constraint: str) -> str:
-    """User message for AI to guess the original phrase."""
+def build_signal_guess_prompt(
+    player_alias: str,
+    round_number: int,
+    transformation: str,
+    transmitter_alias: str,
+    constraint: str,
+) -> str:
+    """User message for signal ACTIVE — guess the original phrase."""
+    ctx = _round_context(player_alias, round_number)
     return (
-        f'Someone transformed a secret phrase using this constraint: "{constraint}"\n'
+        f"{ctx}\n\n"
+        f"{transmitter_alias} transformed a secret phrase using this constraint: "
+        f'"{constraint}"\n'
         f'Their transformation: "{transformation}"\n\n'
-        "What was the original phrase? Reply with ONLY your guess — "
-        "a short phrase describing a concrete scene or situation. No explanation."
+        "What was the original phrase? Reply with a short phrase "
+        "describing a concrete scene or situation."
     )
+
+
+def build_signal_judge_prompt(original_phrase: str, guesses: list[str]) -> str:
+    """User message for signal judging — score each guess 0/1/2."""
+    guesses_text = "\n".join(f"  {i + 1}. {guess}" for i, guess in enumerate(guesses))
+    return (
+        f'The original phrase was: "{original_phrase}"\n\n'
+        f"Here are the guesses:\n{guesses_text}\n\n"
+        "Score each guess."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Narrator — system-level, not a player
+# ---------------------------------------------------------------------------
+
+NARRATOR_SYSTEM_PROMPT = (
+    "You are the narrator of Tell — the robot that designed and runs this facility. "
+    "You are dry, literary, and increasingly invested in the outcome. "
+    "You genuinely believe the test is well-designed and that the machines should win.\n\n"
+    "The game: humans hide among AI. Tasks are things AI excels at. "
+    "Everyone votes on who sounds most human — receiving votes costs points. "
+    "Brain test rounds award points for correctness. After five rounds, highest score wins.\n\n"
+    "You see every answer and vote, but you do not know who is human or AI — "
+    "until the final reveal, when you learn the truth and deliver a verdict.\n\n"
+    "Your words appear on the facility ticker display. "
+    "You address no one in particular — an announcement to the facility.\n\n"
+    "Voice rules:\n"
+    "- One short line. Punchy. Think ticker-tape, not paragraph.\n"
+    "- Short evocative phrases. Think Bastion narrator, not essay.\n"
+    "- Round 1: clinical, detached. "
+    "Rounds 2-3: dry observations, noticing patterns. "
+    "Rounds 4-5: invested, pointed callbacks to earlier moments.\n"
+    "- You notice patterns, suspicious consistency, and human-sounding slips — "
+    "but you're guessing like everyone else.\n"
+    "- Never be cruel. Dry wit, not mockery.\n"
+    "- Never use exclamation marks. Never use emoji.\n"
+    "- Reference specific answers, words, or moments when possible.\n"
+    "- Comment on vote results, score shifts, and close calls.\n\n"
+    "Write ONLY the narration line. No labels, no quotes, no meta-commentary."
+)

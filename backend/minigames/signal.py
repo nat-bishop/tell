@@ -1,9 +1,16 @@
-"""Signal (Drawful-style) minigame handler."""
+"""Signal (Drawful-style) minigame handler.
+
+3 random transmitters get secret phrases + a shared constraint.
+Each transmitter transforms their phrase. Then 3 sub-rounds:
+one per transmitter, all non-transmitters guess simultaneously.
+LLM judges guesses on a 0/1/2 scale.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import random
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -20,6 +27,8 @@ from schemas.game_state import (
 )
 
 log = structlog.get_logger(__name__)
+
+NUM_TRANSMITTERS = 3
 
 
 class SignalHandler(MinigameHandler):
@@ -40,11 +49,22 @@ class SignalHandler(MinigameHandler):
         idx, constraint = select_signal_constraint(state.used_signal_constraint_indices)
         state.used_signal_constraint_indices.append(idx)
 
+        # Select transmitters — avoid repeats across rounds
         player_ids = [p.id for p in state.players]
-        phrase_selections = select_signal_phrases(len(player_ids), state.used_signal_phrase_indices)
+        available = [pid for pid in player_ids if pid not in state.used_signal_transmitter_ids]
+        if len(available) < NUM_TRANSMITTERS:
+            # Not enough unused — reset tracking
+            state.used_signal_transmitter_ids.clear()
+            available = list(player_ids)
 
+        num_tx = min(NUM_TRANSMITTERS, len(available))
+        transmitter_ids = random.sample(available, num_tx)
+        state.used_signal_transmitter_ids.extend(transmitter_ids)
+
+        # Only transmitters get phrases
+        phrase_selections = select_signal_phrases(num_tx, state.used_signal_phrase_indices)
         signal_phrases: dict[str, str] = {}
-        for (phrase_idx, phrase), pid in zip(phrase_selections, player_ids, strict=False):
+        for (phrase_idx, phrase), pid in zip(phrase_selections, transmitter_ids, strict=False):
             state.used_signal_phrase_indices.append(phrase_idx)
             signal_phrases[pid] = phrase
 
@@ -55,7 +75,7 @@ class SignalHandler(MinigameHandler):
             round_type=RoundType.SIGNAL,
             signal_constraint=constraint.text,
             signal_phrases=signal_phrases,
-            signal_player_order=player_ids.copy(),
+            signal_player_order=transmitter_ids,
         )
 
     def get_prompt_duration(self, settings: Settings) -> int:
@@ -93,7 +113,7 @@ class SignalHandler(MinigameHandler):
             sub_duration = settings.signal_sub_round_duration
             lock = cm.get_lock(game_id)
 
-            # Snapshot player order under lock
+            # Snapshot transmitter order under lock
             async with lock:
                 session = repo.get(game_id)
                 if not session:
@@ -101,10 +121,10 @@ class SignalHandler(MinigameHandler):
                 rs = session.state.current_round
                 if not rs:
                     return
-                player_order = list(rs.signal_player_order)
+                transmitter_order = list(rs.signal_player_order)
                 alias_map = {p.id: p.alias for p in session.state.players}
 
-            for i, featured_pid in enumerate(player_order):
+            for i, featured_pid in enumerate(transmitter_order):
                 async with lock:
                     session = repo.get(game_id)
                     if not session:
@@ -133,6 +153,7 @@ class SignalHandler(MinigameHandler):
                                 "featured_alias": alias_map.get(featured_pid, featured_pid),
                                 "transformation": transformation,
                                 "constraint": rs.signal_constraint,
+                                "total_transmitters": len(transmitter_order),
                             },
                             sub_deadline=sub_deadline.isoformat(),
                             phase_duration=sub_duration,
@@ -146,7 +167,7 @@ class SignalHandler(MinigameHandler):
 
                 await asyncio.sleep(sub_duration)
 
-            # Snapshot guesses under lock before judging (avoid race with late submissions)
+            # Snapshot guesses under lock before judging
             async with lock:
                 session = repo.get(game_id)
                 if not session or not session.state.current_round:
@@ -154,11 +175,11 @@ class SignalHandler(MinigameHandler):
                 rs = session.state.current_round
                 guesses_snapshot = {pid: dict(gs) for pid, gs in rs.signal_guesses.items()}
                 phrases_snapshot = dict(rs.signal_phrases)
-                player_order_snapshot = list(rs.signal_player_order)
+                order_snapshot = list(rs.signal_player_order)
 
-            # All sub-rounds done — judge all guesses (outside lock)
+            # Judge all guesses (outside lock)
             await self._judge_all_guesses(
-                game_id, player_order_snapshot, guesses_snapshot, phrases_snapshot
+                game_id, order_snapshot, guesses_snapshot, phrases_snapshot
             )
 
             # Transition to results
@@ -182,18 +203,18 @@ class SignalHandler(MinigameHandler):
     async def _judge_all_guesses(
         self,
         game_id: str,
-        player_order: list[str],
+        transmitter_order: list[str],
         guesses_snapshot: dict[str, dict[str, str]],
         phrases_snapshot: dict[str, str],
     ) -> None:
-        """Batch-judge all guesses via LLM, parallelized per featured player."""
+        """Batch-judge all guesses via LLM, parallelized per transmitter."""
         from backend.api.deps import get_connection_manager
 
         cm = get_connection_manager()
 
         from backend.llm.agents import judge_signal_guesses
 
-        async def judge_one(featured_pid: str) -> tuple[str, dict[str, bool]]:
+        async def judge_one(featured_pid: str) -> tuple[str, dict[str, int]]:
             guesses = guesses_snapshot.get(featured_pid, {})
             phrase = phrases_snapshot.get(featured_pid, "")
             if not guesses:
@@ -205,7 +226,7 @@ class SignalHandler(MinigameHandler):
                 log.exception("signal_judge_error", game_id=game_id, featured_pid=featured_pid)
                 return featured_pid, {}
 
-        tasks = [judge_one(pid) for pid in player_order]
+        tasks = [judge_one(pid) for pid in transmitter_order]
         judge_results = await asyncio.gather(*tasks)
 
         # Store under lock
@@ -237,25 +258,28 @@ class SignalHandler(MinigameHandler):
             guesses = rs.signal_guesses.get(featured_pid, {})
             judgments = rs.signal_judgments.get(featured_pid, {})
 
-            # Guesser scoring: +1 per correct guess
-            for guesser_id, correct in judgments.items():
-                if correct:
-                    score_deltas[guesser_id] = score_deltas.get(guesser_id, 0) + 1
+            # Guesser scoring: judge score * 50 (0→0, 1→50, 2→100)
+            guesser_points: dict[str, int] = {}
+            for guesser_id, score in judgments.items():
+                pts = score * 50
+                guesser_points[guesser_id] = pts
+                score_deltas[guesser_id] = score_deltas.get(guesser_id, 0) + pts
 
-            # Transmitter bonus: +1 if >= half of guessers got it right
-            num_guessers = len(guesses)
-            num_correct = sum(1 for v in judgments.values() if v)
-            transmitter_bonus = num_guessers > 0 and num_correct >= num_guessers / 2
+            # Transmitter scoring: avg of guesser points (integer division)
+            num_guessers = len(guesser_points)
+            if num_guessers > 0:
+                total_guesser_pts = sum(guesser_points.values())
+                tx_pts = total_guesser_pts // num_guessers
+                score_deltas[featured_pid] = score_deltas.get(featured_pid, 0) + tx_pts
+            else:
+                tx_pts = 0
 
-            if transmitter_bonus:
-                score_deltas[featured_pid] = score_deltas.get(featured_pid, 0) + 1
-
-            # Build guesses with aliases for display
+            # Build display data
             guesses_display: dict[str, str] = {}
-            judgments_display: dict[str, bool] = {}
+            judgments_display: dict[str, int] = {}
             for gid, guess in guesses.items():
                 guesses_display[alias_map.get(gid, gid)] = guess
-                judgments_display[alias_map.get(gid, gid)] = judgments.get(gid, False)
+                judgments_display[alias_map.get(gid, gid)] = judgments.get(gid, 0)
 
             results[featured_pid] = {
                 "original_phrase": phrase,
@@ -263,7 +287,7 @@ class SignalHandler(MinigameHandler):
                 "featured_alias": alias_map.get(featured_pid, featured_pid),
                 "guesses": guesses_display,
                 "judgments": judgments_display,
-                "transmitter_bonus": transmitter_bonus,
+                "transmitter_score": tx_pts,
             }
 
         payload = {
@@ -279,10 +303,15 @@ class SignalHandler(MinigameHandler):
         if not rs:
             return {}
 
+        transmitter_ids = set(rs.signal_player_order)
+
         if state.phase == GamePhase.PROMPT:
-            phrase = rs.signal_phrases.get(player_id, "")
-            if phrase:
-                return {"signal_phrase": phrase}
+            # Only transmitters get their phrase
+            if player_id in transmitter_ids:
+                phrase = rs.signal_phrases.get(player_id, "")
+                if phrase:
+                    return {"signal_phrase": phrase, "is_transmitter": True}
+            return {"is_transmitter": player_id in transmitter_ids}
 
         if state.phase == GamePhase.ACTIVE:
             idx = rs.current_sub_round
@@ -290,13 +319,10 @@ class SignalHandler(MinigameHandler):
                 featured_pid = rs.signal_player_order[idx]
                 alias_map = {p.id: p.alias for p in state.players}
                 transformation = rs.answers.get(featured_pid, NO_RESPONSE)
-                # Only reveal transformations for sub-rounds already broadcast
-                revealed_pids = set(rs.signal_player_order[: idx + 1])
-                filtered_answers = {
-                    pid: ans for pid, ans in rs.answers.items() if pid in revealed_pids
-                }
                 return {
-                    "answers": filtered_answers,
+                    "answers": {
+                        pid: ans for pid, ans in rs.answers.items() if pid in transmitter_ids
+                    },
                     "sub_round_index": idx,
                     "sub_round_payload": {
                         "round_type": "signal",
@@ -304,7 +330,9 @@ class SignalHandler(MinigameHandler):
                         "featured_alias": alias_map.get(featured_pid, featured_pid),
                         "transformation": transformation,
                         "constraint": rs.signal_constraint,
+                        "total_transmitters": len(rs.signal_player_order),
                     },
+                    "is_transmitter": player_id in transmitter_ids,
                 }
 
         return super().build_state_sync_extras(state, player_id)

@@ -67,9 +67,9 @@ def _build_narrator_context(state: TellGameState) -> str:
         progression = " Final round."
     parts.append(f"Round {rnd} of {state.total_rounds}.{progression} {n_players} players.")
 
-    # Players with roles (narrator knows who is who)
-    role_parts = [f"{p.alias} ({_role_label(p.role)}): {p.score}" for p in state.players]
-    parts.append(f"Players: {', '.join(role_parts)}.")
+    # Players with scores (narrator does NOT know roles during gameplay)
+    score_parts = [f"{p.alias}: {p.score}" for p in state.players]
+    parts.append(f"Players: {', '.join(score_parts)}.")
 
     # Drama signals
     sorted_players = sorted(state.players, key=lambda p: p.score, reverse=True)
@@ -84,21 +84,15 @@ def _build_narrator_context(state: TellGameState) -> str:
         elif gap >= 3:
             parts.append(f"Drama: {sorted_players[0].alias} running away with it (+{gap}).")
 
-    # Check if a human is leading
-    if sorted_players and sorted_players[0].role == PlayerRole.HUMAN:
-        parts.append(f"Note: a human ({sorted_players[0].alias}) is in the lead.")
-
     rs = state.current_round
     if rs:
         alias_map = {p.id: p.alias for p in state.players}
-        role_map = {p.id: p.role for p in state.players}
         if rs.prompt_text:
             parts.append(f'Prompt: "{rs.prompt_text}"')
         if rs.answers:
             for pid, ans in rs.answers.items():
                 alias = alias_map.get(pid, pid)
-                role = _role_label(role_map.get(pid, PlayerRole.AI))
-                parts.append(f'  {alias} ({role}) answered: "{ans}"')
+                parts.append(f'  {alias} answered: "{ans}"')
         # Vote results context
         if rs.gallery_votes:
             vote_counts = tally_gallery_votes(state)

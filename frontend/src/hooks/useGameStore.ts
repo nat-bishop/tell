@@ -46,6 +46,7 @@ export interface StateSyncData {
   my_vote?: string | null;
   // Signal reconnection
   signal_phrase?: string | null;
+  is_transmitter?: boolean;
   // Reconnection state
   sub_round_index?: number | null;
   sub_round_payload?: SubRoundPayload | null;
@@ -124,6 +125,7 @@ export type SubRoundPayload =
       featured_alias: string;
       transformation: string;
       constraint: string;
+      total_transmitters?: number;
     };
 
 // Generic round results payload (discriminated by round_type in the event)
@@ -163,8 +165,8 @@ export type RoundResultsPayload =
         transformation: string;
         featured_alias: string;
         guesses: Record<string, string>;
-        judgments: Record<string, boolean>;
-        transmitter_bonus: boolean;
+        judgments: Record<string, number>;
+        transmitter_score: number;
       }>;
     };
 
@@ -254,6 +256,7 @@ interface GameState {
 
   // Signal
   signalPhrase: string | null;
+  isTransmitter: boolean;
 
   // Gallery vote
   votedForId: string | null;
@@ -315,6 +318,7 @@ const initialState = {
   roundResults: null as RoundResultsPayload | null,
   roundScores: null as Record<string, number> | null,
   signalPhrase: null as string | null,
+  isTransmitter: false,
   votedForId: null as string | null,
   voteCount: 0,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
@@ -346,6 +350,7 @@ export const useGameStore = create<GameState>((set) => ({
       totalRounds: data.total_rounds || 5,
       lastSeq: data.seq,
       signalPhrase: data.signal_phrase ?? null,
+      isTransmitter: data.is_transmitter ?? false,
       votedForId: data.my_vote ?? null,
       subRoundPayload: data.sub_round_payload ?? null,
       subRoundIndex: data.sub_round_index ?? 0,
@@ -405,12 +410,13 @@ export const useGameStore = create<GameState>((set) => ({
         lastSeq: data.seq,
         myAnswer: null,
         answerCount: 0,
-        totalCount: data.phase === "prompt" ? s.players.length : 0,
+        totalCount: 0,
         narrationText: stale ? null : s.narrationText,
         narrationTrigger: stale ? null : s.narrationTrigger,
         narrationReceivedAt: stale ? null : s.narrationReceivedAt,
         // Generic round state reset
         signalPhrase: null,
+        isTransmitter: false,
         subRoundPayload: null,
         subRoundIndex: 0,
         roundResults: null,

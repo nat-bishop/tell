@@ -82,7 +82,7 @@ class RoundState(BaseModel):
     signal_player_order: list[str] = Field(default_factory=list)
     signal_phrases: dict[str, str] = Field(default_factory=dict)
     signal_guesses: dict[str, dict[str, str]] = Field(default_factory=dict)
-    signal_judgments: dict[str, dict[str, bool]] = Field(default_factory=dict)
+    signal_judgments: dict[str, dict[str, int]] = Field(default_factory=dict)  # 0/1/2
 
 
 class NarratorEntry(BaseModel):
@@ -107,6 +107,7 @@ class TellGameState(BaseModel):
     last_prompt_category: str | None = None
     used_signal_phrase_indices: list[int] = Field(default_factory=list)
     used_signal_constraint_indices: list[int] = Field(default_factory=list)
+    used_signal_transmitter_ids: list[str] = Field(default_factory=list)
     winner: str | None = None
     winner_ids: list[str] = Field(default_factory=list)
     phase_deadline: datetime | None = None

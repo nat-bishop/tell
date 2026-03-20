@@ -49,15 +49,15 @@ def _build_sub_round_payload(q: WagerQuestion, q_idx: int, num_questions: int, p
 
 
 def score_wager(questions: list[WagerQuestion]) -> dict[str, int]:
-    """Score all wager questions. +1 closest guess, +1 correct bet per question."""
+    """Score all wager questions. +100 closest guess, +100 correct bet per question."""
     totals: dict[str, int] = {}
     for q in questions:
         closest = set(_get_closest_ids(q))
         for pid in closest:
-            totals[pid] = totals.get(pid, 0) + 1
+            totals[pid] = totals.get(pid, 0) + 100
         for pid, target in q.bets.items():
             if target in closest:
-                totals[pid] = totals.get(pid, 0) + 1
+                totals[pid] = totals.get(pid, 0) + 100
     return totals
 
 

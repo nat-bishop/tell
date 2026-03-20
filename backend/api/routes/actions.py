@@ -13,6 +13,7 @@ from backend.api.deps import (
 )
 from backend.services.game_logic import (
     fill_missing_answers,
+    get_answer_total,
     get_player_by_id,
 )
 from backend.services.transitions import (
@@ -158,11 +159,18 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest) -> dict[str, str
         if req.player_id in round_state.answers:
             raise HTTPException(status_code=400, detail="Already answered")
 
+        # Signal: only transmitters can submit transformations
+        if (
+            round_state.round_type == RoundType.SIGNAL
+            and req.player_id not in round_state.signal_player_order
+        ):
+            raise HTTPException(status_code=400, detail="Not a transmitter this round")
+
         answer_text = req.answer.strip() if req.answer.strip() else NO_RESPONSE
         round_state.answers[req.player_id] = answer_text
 
         answer_count = len(round_state.answers)
-        total_count = len(state.players)
+        total_count = get_answer_total(state)
 
         event = AnswerSubmittedEvent(
             seq=session.next_seq(),
@@ -430,9 +438,13 @@ async def get_signal_phrase(game_id: str, player_id: str) -> SignalPhraseRespons
     if not rs or rs.round_type != RoundType.SIGNAL:
         raise HTTPException(status_code=400, detail="Not a signal round")
 
+    # Only transmitters have phrases
+    if player_id not in rs.signal_player_order:
+        raise HTTPException(status_code=400, detail="Not a transmitter this round")
+
     phrase = rs.signal_phrases.get(player_id)
     if not phrase:
-        raise HTTPException(status_code=400, detail="Player not in this round")
+        raise HTTPException(status_code=400, detail="No phrase assigned")
 
     return SignalPhraseResponse(phrase=phrase, constraint=rs.signal_constraint)
 
@@ -471,8 +483,9 @@ async def submit_signal_guess(game_id: str, req: SubmitSignalGuessRequest) -> di
 
         featured_pid = rs.signal_player_order[req.sub_round_index]
 
-        if req.player_id == featured_pid:
-            raise HTTPException(status_code=400, detail="Cannot guess your own phrase")
+        # Transmitters cannot guess
+        if req.player_id in rs.signal_player_order:
+            raise HTTPException(status_code=400, detail="Transmitters cannot guess")
 
         guess_text = req.guess.strip()
         if not guess_text:

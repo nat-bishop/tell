@@ -17,6 +17,7 @@ export function FacilitySignalPrompt() {
     totalCount,
     myAnswer,
     signalPhrase,
+    isTransmitter,
   } = useGameStore();
 
   const [phrase, setPhrase] = useState<string | null>(signalPhrase);
@@ -25,15 +26,16 @@ export function FacilitySignalPrompt() {
 
   const hasSubmitted = submitted || myAnswer !== null;
 
-  // Fetch signal phrase on mount (or use reconnection data)
+  // Fetch signal phrase on mount (only for transmitters)
   useEffect(() => {
     if (phrase) return;
     if (!gameId || !playerId) return;
+    if (!isTransmitter) return;
 
     getSignalPhrase(gameId, playerId)
       .then((data) => setPhrase(data.phrase))
       .catch(() => {});
-  }, [gameId, playerId, phrase]);
+  }, [gameId, playerId, phrase, isTransmitter]);
 
   const handleSubmit = async () => {
     if (gameId && playerId && !hasSubmitted) {
@@ -61,48 +63,66 @@ export function FacilitySignalPrompt() {
         </div>
       </Panel>
 
-      {/* Desk terminal — phrase + transformation input */}
+      {/* Desk terminal — transmitters write, others wait */}
       <Panel zone="desk-terminal">
         <div className="flex flex-col items-center justify-center h-full gap-3">
-          {phrase && (
-            <div className="w-full max-w-md">
-              <p className="font-system text-[0.6rem] text-dim tracking-[0.15em] uppercase mb-1">
-                your secret phrase
-              </p>
-              <p className="font-literary text-[1.05rem] text-ink leading-[1.6] mb-4 p-3 border border-rule rounded-sm bg-surface">
-                {phrase}
-              </p>
-            </div>
-          )}
+          {isTransmitter ? (
+            <>
+              {phrase && (
+                <div className="w-full max-w-md">
+                  <p className="font-system text-[0.6rem] text-dim tracking-[0.15em] uppercase mb-1">
+                    your secret phrase
+                  </p>
+                  <p className="font-literary text-[1.05rem] text-ink leading-[1.6] mb-4 p-3 border border-rule rounded-sm bg-surface">
+                    {phrase}
+                  </p>
+                </div>
+              )}
 
-          {!hasSubmitted ? (
-            <div className="w-full max-w-md animate-fade-in">
-              <GameTextarea
-                value={answer}
-                onChange={setAnswer}
-                onSubmit={handleSubmit}
-                maxLength={280}
-                placeholder="transform the phrase..."
-                autoFocus
-              />
-              <div className="mt-3 flex items-center justify-between">
-                <SystemText>
-                  {answerCount} of {totalCount} answered
-                </SystemText>
-                <button onClick={handleSubmit} className="btn-action">
-                  submit &rarr;
-                </button>
-              </div>
-            </div>
+              {!hasSubmitted ? (
+                <div className="w-full max-w-md animate-fade-in">
+                  <GameTextarea
+                    value={answer}
+                    onChange={setAnswer}
+                    onSubmit={handleSubmit}
+                    maxLength={280}
+                    placeholder="transform the phrase..."
+                    autoFocus
+                  />
+                  <div className="mt-3 flex items-center justify-between">
+                    <SystemText>
+                      {answerCount} of {totalCount} answered
+                    </SystemText>
+                    <button onClick={handleSubmit} className="btn-action">
+                      submit &rarr;
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full max-w-md animate-fade-in">
+                  <div className="submitted-panel">
+                    <p className="font-literary text-[1.05rem] leading-[1.6] text-ink">
+                      {answer || myAnswer}
+                    </p>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between">
+                    <SystemText>submitted</SystemText>
+                    <SystemText>
+                      {answerCount} of {totalCount} answered
+                    </SystemText>
+                  </div>
+                </div>
+              )}
+            </>
           ) : (
-            <div className="w-full max-w-md animate-fade-in">
-              <div className="submitted-panel">
-                <p className="font-literary text-[1.05rem] leading-[1.6] text-ink">
-                  {answer || myAnswer}
-                </p>
-              </div>
-              <div className="mt-3 flex items-center justify-between">
-                <SystemText>submitted</SystemText>
+            <div className="w-full max-w-md text-center animate-fade-in">
+              <p className="font-system text-[0.65rem] text-dim tracking-[0.15em] uppercase mb-2">
+                you are a guesser this round
+              </p>
+              <p className="font-literary text-[1rem] text-ink/60 leading-[1.6]">
+                Transmitters are encoding their phrases. You will guess in the next phase.
+              </p>
+              <div className="mt-4">
                 <SystemText>
                   {answerCount} of {totalCount} answered
                 </SystemText>

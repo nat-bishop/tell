@@ -23,11 +23,11 @@ log = structlog.get_logger(__name__)
 
 
 def score_brain_test(challenges: list[BrainTestChallenge]) -> dict[str, int]:
-    """Score all challenges. 1 point per correct answer (selected_index == correct_index)."""
+    """Score all challenges. 100 points per correct answer."""
     totals: dict[str, int] = {}
     for ch in challenges:
         for pid, selected in ch.responses.items():
-            totals[pid] = totals.get(pid, 0) + (1 if selected == ch.correct_index else 0)
+            totals[pid] = totals.get(pid, 0) + (100 if selected == ch.correct_index else 0)
     return totals
 
 

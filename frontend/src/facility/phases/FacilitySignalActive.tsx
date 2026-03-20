@@ -12,15 +12,13 @@ export function FacilitySignalActive() {
   const playerId = useGameStore((s) => s.playerId);
   const subRoundPayload = useGameStore((s) => s.subRoundPayload);
   const subRoundIndex = useGameStore((s) => s.subRoundIndex);
-  const players = useGameStore((s) => s.players);
+  const isTransmitter = useGameStore((s) => s.isTransmitter);
 
   const isSignal = subRoundPayload?.round_type === "signal";
-  const featuredPlayerId = isSignal ? subRoundPayload.featured_player_id : null;
   const featuredAlias = isSignal ? subRoundPayload.featured_alias : null;
   const transformation = isSignal ? subRoundPayload.transformation : null;
   const constraint = isSignal ? subRoundPayload.constraint : null;
-
-  const isOwnPhrase = playerId === featuredPlayerId;
+  const totalTransmitters = isSignal ? (subRoundPayload.total_transmitters ?? 3) : 3;
 
   const [guess, setGuess] = useState("");
   const [lastSubmittedIndex, setLastSubmittedIndex] = useState(-1);
@@ -40,17 +38,16 @@ export function FacilitySignalActive() {
   }, [subRoundIndex, gameId, playerId]);
 
   const handleSubmit = useCallback(async () => {
-    if (!gameId || !playerId || !guess.trim() || isOwnPhrase) return;
+    if (!gameId || !playerId || !guess.trim() || isTransmitter) return;
     try {
       await submitSignalGuess(gameId, playerId, guess.trim(), subRoundIndex);
       setLastSubmittedIndex(subRoundIndex);
     } catch {
       // Silently handle — phase changed or already submitted
     }
-  }, [gameId, playerId, guess, subRoundIndex, isOwnPhrase]);
+  }, [gameId, playerId, guess, subRoundIndex, isTransmitter]);
 
   const hasSubmitted = lastSubmittedIndex === subRoundIndex;
-  const totalPlayers = players.length;
 
   if (!isSignal) {
     return (
@@ -72,7 +69,7 @@ export function FacilitySignalActive() {
           </p>
 
           <p className="font-system text-[0.55rem] text-dim tracking-[0.15em] uppercase">
-            {subRoundIndex + 1} of {totalPlayers}
+            {subRoundIndex + 1} of {totalTransmitters}
           </p>
 
           <p className="font-literary text-[1.2rem] text-ink text-center leading-[1.6] max-w-md italic">
@@ -81,13 +78,13 @@ export function FacilitySignalActive() {
         </div>
       </Panel>
 
-      {/* Center area — guess input or own-phrase message */}
+      {/* Center area — guess input or transmitter message */}
       <Panel zone="center-area">
         <div className="flex flex-col items-center justify-center h-full gap-3">
-          {isOwnPhrase ? (
+          {isTransmitter ? (
             <div className="w-full max-w-sm text-center animate-fade-in">
               <p className="font-system text-[0.75rem] text-dim tracking-wider uppercase">
-                your phrase is being guessed...
+                waiting for guesses...
               </p>
             </div>
           ) : (
