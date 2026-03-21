@@ -404,6 +404,9 @@ export const useGameStore = create<GameState>((set) => ({
         subRoundPayload = p as unknown as SubRoundPayload;
       }
 
+      // Derive isTransmitter from transmitter_ids in signal_compose payload
+      const transmitterIds = Array.isArray(p?.transmitter_ids) ? p.transmitter_ids as string[] : null;
+
       return {
         phase: data.phase,
         roundNumber: data.round_number,
@@ -420,13 +423,13 @@ export const useGameStore = create<GameState>((set) => ({
         answers: (p?.answers as Record<string, string>) ?? (isNewRound ? {} : s.answers),
         subRoundPayload,
         subRoundIndex: (p?.sub_round_index as number) ?? data.step_index,
+        isTransmitter: transmitterIds ? transmitterIds.includes(s.playerId ?? "") : (isNewRound ? false : s.isTransmitter),
         // Clear on new round
         ...(isNewRound ? {
           myAnswer: null,
           answerCount: 0,
           totalCount: 0,
           signalPhrase: null,
-          isTransmitter: false,
           roundResults: null,
           roundScores: null,
           votedForId: null,

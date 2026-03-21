@@ -97,6 +97,7 @@ class BrainTestHandler(MinigameHandler):
             return {}
         ch = rs.brain_challenges[challenge_index]
         return {
+            "round_type": "brain_test",
             "challenge_index": challenge_index,
             "challenge_type": ch.challenge_type,
             "question": ch.question,
