@@ -41,7 +41,7 @@ class TaskHandler(MinigameHandler):
             ),
         ]
 
-    async def on_step_start(self, game_id: str, step_index: int) -> None:
+    async def on_step_start(self, game_id: str, state: TellGameState, step_index: int) -> None:
         from backend.services.ai_scheduler import schedule_ai_answers, schedule_ai_votes
 
         if step_index == 0:
@@ -51,15 +51,11 @@ class TaskHandler(MinigameHandler):
             # Vote step — schedule AI votes
             await schedule_ai_votes(game_id)
 
-    async def on_step_end(self, game_id: str, step_index: int) -> None:
+    async def on_step_end(self, game_id: str, state: TellGameState, step_index: int) -> None:
         if step_index == 0:
-            # Compose step ending — fill missing answers
-            from backend.api.deps import get_game_repository
             from backend.services.game_logic import fill_missing_answers
 
-            session = get_game_repository().get(game_id)
-            if session:
-                fill_missing_answers(session.state)
+            fill_missing_answers(state)
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
         rs = state.current_round

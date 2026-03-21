@@ -417,11 +417,16 @@ async def _schedule_ai_sub_tasks(
     task_fn: Callable[..., Coroutine[Any, Any, None]],
     extra_args: tuple,
     delay_range: tuple[float, float],
+    player_filter: Callable[..., bool] | None = None,
 ) -> None:
     """Schedule per-AI-player tasks with random delays.
 
     Captures ``expected_round`` and ``expected_step`` from current state and
     appends them to each task call so ``_run_ai_task`` can detect stale tasks.
+
+    *player_filter*, when provided, is called with each AI player and must
+    return ``True`` for the player to be scheduled (e.g. Signal excludes
+    transmitters).
     """
     repo = get_game_repository()
     session = repo.get(game_id)
@@ -429,6 +434,8 @@ async def _schedule_ai_sub_tasks(
         return
     state = session.state
     ai_players = [p for p in state.players if p.role == PlayerRole.AI]
+    if player_filter:
+        ai_players = [p for p in ai_players if player_filter(p)]
     if not ai_players:
         return
     expected_round = state.round_number
@@ -729,34 +736,16 @@ async def on_signal_sub_round(game_id: str, sub_round_index: int, featured_playe
     if not session:
         return
 
-    state = session.state
-    rs = state.current_round
+    rs = session.state.current_round
     transmitter_ids = set(rs.signal_player_order) if rs else set()
 
-    ai_players = [
-        p for p in state.players if p.role == PlayerRole.AI and p.id not in transmitter_ids
-    ]
-    if not ai_players:
-        return
-
-    expected_round = state.round_number
-    expected_step = state.current_step_index
-    tasks: list[asyncio.Task] = []
-    for player in ai_players:
-        delay = random.uniform(2, 8)
-        task = asyncio.create_task(
-            _ai_signal_guess_task(
-                game_id,
-                player.id,
-                featured_player_id,
-                sub_round_index,
-                delay,
-                expected_round,
-                expected_step,
-            )
-        )
-        tasks.append(task)
-    _ai_tasks.setdefault(game_id, []).extend(tasks)
+    await _schedule_ai_sub_tasks(
+        game_id,
+        _ai_signal_guess_task,
+        (featured_player_id, sub_round_index),
+        (2, 8),
+        player_filter=lambda p: p.id not in transmitter_ids,
+    )
 
 
 async def _ai_signal_guess_task(

@@ -58,7 +58,7 @@ def _require_round(state, expected_type: RoundType | None = None):
     rs = state.current_round
     if not rs:
         raise HTTPException(status_code=400, detail="No active round")
-    if expected_type and rs.round_type != expected_type:
+    if expected_type is not None and rs.round_type != expected_type:
         raise HTTPException(status_code=400, detail="Wrong round type")
     return rs
 
@@ -423,18 +423,10 @@ async def get_signal_phrase(game_id: str, player_id: str) -> SignalPhraseRespons
 
     state = session.state
     step_name = get_step_name(state)
-    is_signal_compose = step_name == "signal_compose"
-    is_signal_task_compose = (
-        step_name == "compose"
-        and state.current_round
-        and state.current_round.round_type == RoundType.SIGNAL
-    )
-    if not is_signal_compose and not is_signal_task_compose:
+    if step_name != "signal_compose":
         raise HTTPException(status_code=400, detail="Not in signal compose step")
 
-    rs = state.current_round
-    if not rs or rs.round_type != RoundType.SIGNAL:
-        raise HTTPException(status_code=400, detail="Not a signal round")
+    rs = _require_round(state, RoundType.SIGNAL)
 
     # Only transmitters have phrases
     if player_id not in rs.signal_player_order:

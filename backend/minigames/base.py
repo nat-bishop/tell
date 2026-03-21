@@ -30,10 +30,10 @@ class MinigameHandler:
         """Return the full step sequence for this round, including results."""
         raise NotImplementedError
 
-    async def on_step_start(self, game_id: str, step_index: int) -> None:
+    async def on_step_start(self, game_id: str, state: TellGameState, step_index: int) -> None:
         """Called when a step begins. Schedule AI tasks, set up state."""
 
-    async def on_step_end(self, game_id: str, step_index: int) -> None:
+    async def on_step_end(self, game_id: str, state: TellGameState, step_index: int) -> None:
         """Called when a step expires. Cleanup (e.g. fill_missing_answers)."""
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
@@ -71,22 +71,6 @@ class MinigameHandler:
 # ---------------------------------------------------------------------------
 # Shared helpers — used by handler subclasses to reduce boilerplate
 # ---------------------------------------------------------------------------
-
-
-def get_step_context(game_id: str, step_index: int):
-    """Fetch session + round + step safely. Returns ``(session, rs, step_def)`` or ``None``."""
-    from backend.api.deps import get_game_repository
-
-    session = get_game_repository().get(game_id)
-    if not session:
-        return None
-    rs = session.state.current_round
-    if not rs:
-        return None
-    steps = session.state.round_step_defs
-    if not steps or step_index >= len(steps):
-        return None
-    return session, rs, steps[step_index]
 
 
 def get_step_info(state: TellGameState, step_index: int):

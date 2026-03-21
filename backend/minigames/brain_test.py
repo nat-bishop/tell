@@ -10,7 +10,6 @@ if TYPE_CHECKING:
 from backend.minigames.base import (
     MinigameHandler,
     StepDef,
-    get_step_context,
     get_step_info,
     parse_sub_index,
 )
@@ -73,11 +72,11 @@ class BrainTestHandler(MinigameHandler):
         )
         return steps
 
-    async def on_step_start(self, game_id: str, step_index: int) -> None:
-        ctx = get_step_context(game_id, step_index)
-        if not ctx:
+    async def on_step_start(self, game_id: str, state: TellGameState, step_index: int) -> None:
+        info = get_step_info(state, step_index)
+        if not info:
             return
-        _session, rs, step = ctx
+        rs, step = info
         challenge_index = parse_sub_index(step["name"])
         if challenge_index is None:
             return

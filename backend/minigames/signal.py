@@ -20,7 +20,6 @@ import structlog
 from backend.minigames.base import (
     MinigameHandler,
     StepDef,
-    get_step_context,
     get_step_info,
     parse_sub_index,
 )
@@ -84,7 +83,9 @@ class SignalHandler(MinigameHandler):
 
         steps: list[StepDef] = [
             StepDef(
-                name="compose", duration=settings.signal_prompt_duration, component="signal_compose"
+                name="signal_compose",
+                duration=settings.signal_prompt_duration,
+                component="signal_compose",
             ),
         ]
         for i in range(num_tx):
@@ -99,14 +100,14 @@ class SignalHandler(MinigameHandler):
         )
         return steps
 
-    async def on_step_start(self, game_id: str, step_index: int) -> None:
-        ctx = get_step_context(game_id, step_index)
-        if not ctx:
+    async def on_step_start(self, game_id: str, state: TellGameState, step_index: int) -> None:
+        info = get_step_info(state, step_index)
+        if not info:
             return
-        _session, rs, step = ctx
+        rs, step = info
         step_name = step["name"]
 
-        if step_name == "compose":
+        if step_name == "signal_compose":
             from backend.services.ai_scheduler import schedule_ai_answers
 
             await schedule_ai_answers(game_id)
@@ -121,15 +122,15 @@ class SignalHandler(MinigameHandler):
 
                     await on_signal_sub_round(game_id, tx_index, featured_pid)
 
-    async def on_step_end(self, game_id: str, step_index: int) -> None:
-        ctx = get_step_context(game_id, step_index)
-        if not ctx:
+    async def on_step_end(self, game_id: str, state: TellGameState, step_index: int) -> None:
+        info = get_step_info(state, step_index)
+        if not info:
             return
-        session, _rs, step = ctx
-        if step["name"] == "compose":
+        _rs, step = info
+        if step["name"] == "signal_compose":
             from backend.services.game_logic import fill_missing_answers
 
-            fill_missing_answers(session.state)
+            fill_missing_answers(state)
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
         info = get_step_info(state, step_index)
@@ -138,7 +139,7 @@ class SignalHandler(MinigameHandler):
         rs, step = info
         step_name = step["name"]
 
-        if step_name == "compose":
+        if step_name == "signal_compose":
             return {
                 "prompt_text": rs.prompt_text,
                 "constraint": rs.signal_constraint,
@@ -268,7 +269,7 @@ class SignalHandler(MinigameHandler):
         transmitter_ids = set(rs.signal_player_order)
         step_name = step["name"]
 
-        if step_name == "compose":
+        if step_name == "signal_compose":
             if player_id in transmitter_ids:
                 phrase = rs.signal_phrases.get(player_id, "")
                 if phrase:

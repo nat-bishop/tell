@@ -59,9 +59,9 @@ def _detect_drama(players: list) -> str | None:
     gap = sorted_players[0].score - sorted_players[1].score
     if gap == 0:
         return f"Drama: tied at the top ({sorted_players[0].alias}, {sorted_players[1].alias})."
-    if gap == 1:
+    if gap <= 100:
         return f"Drama: close race — {sorted_players[0].alias} leads by {gap}."
-    if gap >= 3:
+    if gap >= 300:
         return f"Drama: {sorted_players[0].alias} running away with it (+{gap})."
     return None
 
@@ -218,7 +218,7 @@ async def _advance_step(game_id: str, session: TellGameSession, step_index: int)
     rs = state.current_round
     if rs and not step.get("is_results"):
         handler = get_handler(rs.round_type)
-        await handler.on_step_start(game_id, step_index)
+        await handler.on_step_start(game_id, state, step_index)
 
 
 async def _handle_step_expiry(game_id: str) -> None:
@@ -256,7 +256,7 @@ async def _handle_step_expiry(game_id: str) -> None:
         log.info("step_expired", step_name=current_step["name"], step_index=step_index)
 
         # Cleanup current step
-        await handler.on_step_end(game_id, step_index)
+        await handler.on_step_end(game_id, state, step_index)
 
         if current_step.get("is_results"):
             # Results step done — game over or next round
@@ -391,7 +391,7 @@ async def try_advance_step(game_id: str, session: TellGameSession) -> None:
 
     log.info("step_early_complete", step_name=steps[step_index]["name"], step_index=step_index)
 
-    await handler.on_step_end(game_id, step_index)
+    await handler.on_step_end(game_id, state, step_index)
 
     current_step = steps[step_index]
     if current_step.get("is_results"):
