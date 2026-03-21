@@ -109,7 +109,6 @@ function NumberLine({
       <div className="relative h-8 mb-1">
         {mergedMarkers.map((mg, i) => {
           const isSelected = !!selectedMarkerId && mg.ids.includes(selectedMarkerId);
-          const isDimmed = !!selectedMarkerId && !isSelected;
           return (
             <div
               key={i}
@@ -118,8 +117,6 @@ function NumberLine({
                 left: `${toPercent(mg.value)}%`,
                 transform: "translateX(-50%)",
                 bottom: 0,
-                opacity: isDimmed ? 0.4 : 1,
-                transition: "opacity 200ms",
               }}
             >
               {mg.labels.map((label, li) => (
@@ -187,13 +184,11 @@ function NumberLine({
           ? mergedMarkers.map((mg, i) => {
               const isSelected =
                 !!selectedMarkerId && mg.ids.includes(selectedMarkerId);
-              const isDimmed = !!selectedMarkerId && !isSelected;
               return (
                 <button
                   key={i}
                   type="button"
-                  onClick={() => !isDimmed && onMarkerClick?.(mg.ids[0])}
-                  disabled={!!isDimmed}
+                  onClick={() => onMarkerClick?.(mg.ids[0])}
                   aria-label={`Bet on ${mg.labels.join(", ")}`}
                   className="absolute marker-btn"
                   style={{
@@ -205,12 +200,10 @@ function NumberLine({
                     borderRadius: "50%",
                     background: "transparent",
                     border: "none",
-                    cursor: isDimmed ? "default" : "pointer",
+                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    opacity: isDimmed ? 0.4 : 1,
-                    transition: "opacity 200ms",
                     padding: 0,
                   }}
                 >
@@ -484,7 +477,6 @@ export function FacilityWager() {
   if (isWager && subRoundPayload.phase === "bet") {
     const qi = subRoundPayload.question_index;
     const guesses = subRoundPayload.guesses || {};
-    const alreadyBet = betTargets[qi] !== undefined;
     const guessEntries = Object.entries(guesses);
 
     return (
@@ -504,7 +496,7 @@ export function FacilityWager() {
               min={subRoundPayload.range_min}
               max={subRoundPayload.range_max}
               unit={subRoundPayload.unit}
-              clickable={!alreadyBet}
+              clickable
               selectedMarkerId={betTargets[qi] ?? null}
               onMarkerClick={(id) => handleBet(id)}
               markers={guessEntries.map(([pid, val]) => ({
@@ -517,7 +509,7 @@ export function FacilityWager() {
           </div>
 
           <p className="font-system text-[0.6rem] text-dim tracking-wider uppercase">
-            {alreadyBet
+            {betTargets[qi]
               ? `bet placed on ${aliasById[betTargets[qi]] || betTargets[qi]}`
               : "whose guess is closest?"}
           </p>

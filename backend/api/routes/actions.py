@@ -182,9 +182,6 @@ async def submit_answer(game_id: str, req: SubmitAnswerRequest) -> dict[str, str
         _require_player(state, req.player_id)
         round_state = _require_round(state)
 
-        if req.player_id in round_state.answers:
-            raise HTTPException(status_code=400, detail="Already answered")
-
         # Signal: only transmitters can submit transformations
         if step_name == "signal_compose" and req.player_id not in round_state.signal_player_order:
             raise HTTPException(status_code=400, detail="Not a transmitter this round")
@@ -310,9 +307,6 @@ async def submit_brain_test_answer(
             raise HTTPException(status_code=400, detail="selected_index must be 0-3")
 
         ch = round_state.brain_challenges[req.challenge_index]
-        if req.player_id in ch.responses:
-            raise HTTPException(status_code=400, detail="Already answered")
-
         ch.responses[req.player_id] = req.selected_index
         log.info(
             "brain_test_answer",

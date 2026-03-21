@@ -49,7 +49,7 @@ function FacilityInner() {
     // Determine transition duration based on what changed
     let transitionMs = 0;
     if (roundNumber !== prevRound) {
-      transitionMs = 2000; // new round: brief overlay before preroll
+      transitionMs = 700; // new round: brief fade to preroll
     } else if (component !== prevComponent) {
       transitionMs = 700; // new component: brief fade
     }

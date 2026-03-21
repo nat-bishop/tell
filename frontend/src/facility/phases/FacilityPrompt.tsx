@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useCallback } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitAnswer } from "@/api/actions";
 import { Panel } from "@/facility/Panel";
@@ -15,20 +15,23 @@ export function FacilityPrompt() {
     promptText,
     answerCount,
     totalCount,
-    myAnswer,
   } = useGameStore();
 
   const [answer, setAnswer] = useState("");
-  const pendingRef = useRef(false);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [pending, setPending] = useState(false);
 
-  const hasSubmitted = myAnswer !== null;
-
-  const handleSubmit = async () => {
-    if (gameId && playerId && !hasSubmitted && !pendingRef.current) {
-      pendingRef.current = true;
+  const handleSubmit = useCallback(async () => {
+    if (!gameId || !playerId || !answer.trim() || pending) return;
+    setPending(true);
+    try {
       await submitAnswer(gameId, playerId, answer);
+      setHasSubmitted(true);
+    } catch {
+      // Silently handle
     }
-  };
+    setPending(false);
+  }, [gameId, playerId, answer, pending]);
 
   return (
     <>
@@ -43,43 +46,27 @@ export function FacilityPrompt() {
         </div>
       </Panel>
 
-      {/* Desk terminal — textarea input or submitted answer */}
+      {/* Desk terminal — textarea input */}
       <Panel zone="desk-terminal">
         <div className="flex flex-col items-center justify-center h-full gap-3">
-          {!hasSubmitted ? (
-            <div className="w-full max-w-md animate-fade-in">
-              <GameTextarea
-                value={answer}
-                onChange={setAnswer}
-                onSubmit={handleSubmit}
-                maxLength={280}
-                placeholder="your answer..."
-                autoFocus
-              />
-              <div className="mt-3 flex items-center justify-between">
-                <SystemText>
-                  {answerCount} of {totalCount} answered
-                </SystemText>
-                <button onClick={handleSubmit} className="btn-action">
-                  submit &rarr;
-                </button>
-              </div>
+          <div className="w-full max-w-md animate-fade-in">
+            <GameTextarea
+              value={answer}
+              onChange={setAnswer}
+              onSubmit={handleSubmit}
+              maxLength={280}
+              placeholder="your answer..."
+              autoFocus
+            />
+            <div className="mt-3 flex items-center justify-between">
+              <SystemText>
+                {hasSubmitted ? "answer submitted" : `${answerCount} of ${totalCount} answered`}
+              </SystemText>
+              <button onClick={handleSubmit} className="btn-action" disabled={pending || !answer.trim()}>
+                {hasSubmitted ? "update" : "submit"} &rarr;
+              </button>
             </div>
-          ) : (
-            <div className="w-full max-w-md animate-fade-in">
-              <div className="submitted-panel">
-                <p className="font-literary text-[1.05rem] leading-[1.6] text-ink">
-                  {answer || myAnswer}
-                </p>
-              </div>
-              <div className="mt-3 flex items-center justify-between">
-                <SystemText>submitted</SystemText>
-                <SystemText>
-                  {answerCount} of {totalCount} answered
-                </SystemText>
-              </div>
-            </div>
-          )}
+          </div>
         </div>
       </Panel>
     </>

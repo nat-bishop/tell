@@ -22,30 +22,25 @@ export function FacilityBrainTest() {
   const question = isBrainTest ? subRoundPayload.question : null;
   const options = isBrainTest ? subRoundPayload.options : [];
 
-  const [submitted, setSubmitted] = useState<Record<number, number>>({});
-  const [pendingIndex, setPendingIndex] = useState<Record<number, number>>({});
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<number, number>>({});
+  const [pendingChallenge, setPendingChallenge] = useState<number | null>(null);
 
   const handleSelect = useCallback(
     async (optionIndex: number) => {
       if (!gameId || !playerId) return;
-      if (submitted[challengeIndex] !== undefined) return;
-      if (pendingIndex[challengeIndex] !== undefined) return;
+      if (pendingChallenge === challengeIndex) return;
 
-      setPendingIndex((prev) => ({ ...prev, [challengeIndex]: optionIndex }));
+      setPendingChallenge(challengeIndex);
 
       try {
         await submitBrainTestAnswer(gameId, playerId, optionIndex, challengeIndex);
-        setSubmitted((prev) => ({ ...prev, [challengeIndex]: optionIndex }));
+        setSelectedAnswers((prev) => ({ ...prev, [challengeIndex]: optionIndex }));
       } catch {
         // API failed — unlock selection
-        setPendingIndex((prev) => {
-          const next = { ...prev };
-          delete next[challengeIndex];
-          return next;
-        });
       }
+      setPendingChallenge(null);
     },
-    [gameId, playerId, challengeIndex, submitted, pendingIndex],
+    [gameId, playerId, challengeIndex, pendingChallenge],
   );
 
   const aliasById = useMemo(() => {
@@ -117,8 +112,8 @@ export function FacilityBrainTest() {
   }
 
   // Challenge view
-  const selectedIndex = pendingIndex[challengeIndex] ?? submitted[challengeIndex] ?? null;
-  const isLocked = selectedIndex !== null;
+  const selectedIndex = selectedAnswers[challengeIndex] ?? null;
+  const isPending = pendingChallenge === challengeIndex;
 
   return (
     <>
@@ -154,11 +149,11 @@ export function FacilityBrainTest() {
                   <button
                     key={i}
                     onClick={() => handleSelect(i)}
-                    disabled={isLocked}
+                    disabled={isPending}
                     className={`px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-center transition-all ${
                       isSelected
                         ? "card-highlighted animate-vote-select text-ink"
-                        : isLocked
+                        : isPending
                           ? "card opacity-40 text-dim"
                           : "card card-interactive text-ink cursor-pointer"
                     }`}
@@ -167,9 +162,9 @@ export function FacilityBrainTest() {
                   </button>
                 );
               })}
-              {isLocked && (
+              {selectedIndex !== null && !isPending && (
                 <p className="mt-1 text-center font-system text-[0.65rem] text-dim tracking-wider uppercase animate-fade-in">
-                  submitted
+                  answered
                 </p>
               )}
             </div>
