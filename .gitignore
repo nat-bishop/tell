@@ -13,5 +13,7 @@ dist/
 .playwright-mcp/
 recordings/
 .claude/settings.local.json
+.claude/agent-memory/
+.claude/worktrees/
 .coverage
 test-screenshots/

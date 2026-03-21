@@ -23,20 +23,29 @@ export function FacilityBrainTest() {
   const options = isBrainTest ? subRoundPayload.options : [];
 
   const [submitted, setSubmitted] = useState<Record<number, number>>({});
+  const [pendingIndex, setPendingIndex] = useState<Record<number, number>>({});
 
   const handleSelect = useCallback(
     async (optionIndex: number) => {
       if (!gameId || !playerId) return;
       if (submitted[challengeIndex] !== undefined) return;
+      if (pendingIndex[challengeIndex] !== undefined) return;
+
+      setPendingIndex((prev) => ({ ...prev, [challengeIndex]: optionIndex }));
 
       try {
         await submitBrainTestAnswer(gameId, playerId, optionIndex, challengeIndex);
         setSubmitted((prev) => ({ ...prev, [challengeIndex]: optionIndex }));
       } catch {
-        // Silently handle — already submitted or phase changed
+        // API failed — unlock selection
+        setPendingIndex((prev) => {
+          const next = { ...prev };
+          delete next[challengeIndex];
+          return next;
+        });
       }
     },
-    [gameId, playerId, challengeIndex, submitted],
+    [gameId, playerId, challengeIndex, submitted, pendingIndex],
   );
 
   const aliasById = useMemo(() => {
@@ -108,7 +117,8 @@ export function FacilityBrainTest() {
   }
 
   // Challenge view
-  const alreadySubmitted = submitted[challengeIndex] !== undefined;
+  const selectedIndex = pendingIndex[challengeIndex] ?? submitted[challengeIndex] ?? null;
+  const isLocked = selectedIndex !== null;
 
   return (
     <>
@@ -137,39 +147,32 @@ export function FacilityBrainTest() {
       <Panel zone="center-area">
         <div className="flex flex-col items-center justify-center h-full gap-2">
           {question && options.length > 0 && (
-            <>
-              {alreadySubmitted ? (
-                <div className="w-full max-w-sm flex flex-col gap-2">
-                  {options.map((opt, i) => (
-                    <div
-                      key={i}
-                      className={`px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-center transition-colors ${
-                        i === submitted[challengeIndex]
-                          ? "bg-raised text-ink border border-cold/40"
-                          : "bg-surface text-dim"
-                      }`}
-                    >
-                      {opt}
-                    </div>
-                  ))}
-                  <p className="mt-1 text-center font-system text-[0.65rem] text-dim tracking-wider uppercase">
-                    submitted
-                  </p>
-                </div>
-              ) : (
-                <div className="w-full max-w-sm flex flex-col gap-2">
-                  {options.map((opt, i) => (
-                    <button
-                      key={i}
-                      onClick={() => handleSelect(i)}
-                      className="px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-ink text-center bg-surface hover:bg-raised transition-colors border border-rule hover:border-cold/40 cursor-pointer"
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
+            <div className="w-full max-w-sm flex flex-col gap-2">
+              {options.map((opt, i) => {
+                const isSelected = i === selectedIndex;
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handleSelect(i)}
+                    disabled={isLocked}
+                    className={`px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-center transition-all cursor-pointer ${
+                      isSelected
+                        ? "card-highlighted animate-vote-select text-ink"
+                        : isLocked
+                          ? "card opacity-40 text-dim pointer-events-none"
+                          : "card card-interactive text-ink"
+                    }`}
+                  >
+                    {opt}
+                  </button>
+                );
+              })}
+              {isLocked && (
+                <p className="mt-1 text-center font-system text-[0.65rem] text-dim tracking-wider uppercase animate-fade-in">
+                  submitted
+                </p>
               )}
-            </>
+            </div>
           )}
         </div>
       </Panel>
