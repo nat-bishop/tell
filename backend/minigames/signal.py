@@ -68,10 +68,9 @@ class SignalHandler(MinigameHandler):
 
         state.current_round = RoundState(
             round_number=state.round_number,
-            prompt_text=constraint.instruction,
+            prompt_text=constraint,
             prompt_category="signal",
             round_type=RoundType.SIGNAL,
-            signal_constraint=constraint.text,
             signal_phrases=signal_phrases,
             signal_player_order=transmitter_ids,
         )
@@ -143,7 +142,7 @@ class SignalHandler(MinigameHandler):
         if step_name == "signal_compose":
             return {
                 "prompt_text": rs.prompt_text,
-                "constraint": rs.signal_constraint,
+                "constraint": rs.prompt_text,
                 "transmitter_ids": rs.signal_player_order,
             }
         elif step_name.startswith("signal_guess_"):
@@ -157,7 +156,7 @@ class SignalHandler(MinigameHandler):
                     "featured_player_id": featured_pid,
                     "featured_alias": alias_map.get(featured_pid, featured_pid),
                     "transformation": transformation,
-                    "constraint": rs.signal_constraint,
+                    "constraint": rs.prompt_text,
                     "total_transmitters": len(rs.signal_player_order),
                     "sub_round_index": tx_index,
                     "transmitter_ids": rs.signal_player_order,
@@ -258,7 +257,7 @@ class SignalHandler(MinigameHandler):
             }
 
         payload = {
-            "constraint": rs.signal_constraint,
+            "constraint": rs.prompt_text,
             "results": results,
         }
         return payload, score_deltas
@@ -295,10 +294,10 @@ class SignalHandler(MinigameHandler):
                         "featured_player_id": featured_pid,
                         "featured_alias": alias_map.get(featured_pid, featured_pid),
                         "transformation": transformation,
-                        "constraint": rs.signal_constraint,
+                        "constraint": rs.prompt_text,
                         "total_transmitters": len(rs.signal_player_order),
                     },
-                    "is_transmitter": player_id in transmitter_ids,
+                    "is_transmitter": player_id == featured_pid,
                 }
 
         return super().build_state_sync_extras(state, player_id)

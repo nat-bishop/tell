@@ -237,7 +237,7 @@ async def _ai_answer_task(
 
         if rs.round_type == RoundType.SIGNAL:
             phrase = rs.signal_phrases.get(player_id, "")
-            constraint = rs.signal_constraint
+            constraint = rs.prompt_text
             user_prompt = build_signal_transform_prompt(phrase, constraint)
         else:
             user_prompt = build_answer_prompt(
@@ -729,22 +729,19 @@ async def _ai_wager_bet_task(
 async def on_signal_sub_round(game_id: str, sub_round_index: int, featured_player_id: str) -> None:
     """Schedule AI guess tasks for a Signal sub-round.
 
-    All AI players who are NOT transmitters guess.
+    All AI players except the featured transmitter guess.
     """
     repo = get_game_repository()
     session = repo.get(game_id)
     if not session:
         return
 
-    rs = session.state.current_round
-    transmitter_ids = set(rs.signal_player_order) if rs else set()
-
     await _schedule_ai_sub_tasks(
         game_id,
         _ai_signal_guess_task,
         (featured_player_id, sub_round_index),
         (2, 8),
-        player_filter=lambda p: p.id not in transmitter_ids,
+        player_filter=lambda p: p.id != featured_player_id,
     )
 
 
@@ -778,7 +775,7 @@ async def _ai_signal_guess_task(
             return None
 
         transformation = rs.answers.get(featured_player_id, "")
-        constraint = rs.signal_constraint
+        constraint = rs.prompt_text
         featured_alias = next(
             (p.alias for p in state.players if p.id == featured_player_id), featured_player_id
         )

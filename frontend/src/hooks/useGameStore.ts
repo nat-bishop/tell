@@ -404,8 +404,18 @@ export const useGameStore = create<GameState>((set) => ({
         subRoundPayload = p as unknown as SubRoundPayload;
       }
 
-      // Derive isTransmitter from transmitter_ids in signal_compose payload
+      // Derive isTransmitter: during compose, true for all transmitters;
+      // during guess sub-rounds, only true for the featured transmitter.
       const transmitterIds = Array.isArray(p?.transmitter_ids) ? p.transmitter_ids as string[] : null;
+      const featuredPid = (p?.featured_player_id as string) ?? null;
+      let isTransmitter = s.isTransmitter;
+      if (featuredPid) {
+        // Guess sub-round: only the featured transmitter is blocked
+        isTransmitter = s.playerId === featuredPid;
+      } else if (transmitterIds) {
+        // Compose step: all transmitters
+        isTransmitter = transmitterIds.includes(s.playerId ?? "");
+      }
 
       return {
         phase: data.phase,
@@ -423,7 +433,7 @@ export const useGameStore = create<GameState>((set) => ({
         answers: (p?.answers as Record<string, string>) ?? (isNewRound ? {} : s.answers),
         subRoundPayload,
         subRoundIndex: (p?.sub_round_index as number) ?? data.step_index,
-        isTransmitter: transmitterIds ? transmitterIds.includes(s.playerId ?? "") : s.isTransmitter,
+        isTransmitter,
         // Clear on new round
         ...(isNewRound ? {
           myAnswer: null,

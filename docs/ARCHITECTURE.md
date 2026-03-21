@@ -286,4 +286,4 @@ Model: `google-gla:gemini-3.1-flash-lite-preview` (configured in `config.toml`).
 
 **Wager questions**: 26 numerical estimation questions across 6 categories (`geography`, `science`, `history`, `pop_culture`, `economics`, `nature`). Each has `correct_answer`, `range_min`/`range_max`, and `unit`. `select_wager_questions(n)` picks a category-diverse mix of `n` (default 3).
 
-**Signal content**: 15 constraints (`SignalConstraint` with `text` + `instruction`) and 40 phrases (concrete everyday scenarios). Each round: one shared constraint selected via `select_signal_constraint()`, one unique phrase per player via `select_signal_phrases()`. Both track `used_indices` on `TellGameState` to avoid repeats.
+**Signal content**: 15 constraint strings (instruction text like "Describe the phrase as a breaking news headline.") and 40 phrases (concrete everyday scenarios). Each round: one shared constraint selected via `select_signal_constraint()`, one unique phrase per player via `select_signal_phrases()`. Both track `used_indices` on `TellGameState` to avoid repeats.

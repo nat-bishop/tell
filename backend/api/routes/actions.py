@@ -443,7 +443,7 @@ async def get_signal_phrase(game_id: str, player_id: str) -> SignalPhraseRespons
     if not phrase:
         raise HTTPException(status_code=400, detail="No phrase assigned")
 
-    return SignalPhraseResponse(phrase=phrase, constraint=rs.signal_constraint)
+    return SignalPhraseResponse(phrase=phrase, constraint=rs.prompt_text)
 
 
 @router.post("/{game_id}/signal-guess", response_model=StatusResponse)
@@ -478,9 +478,9 @@ async def submit_signal_guess(game_id: str, req: SubmitSignalGuessRequest) -> di
 
         featured_pid = rs.signal_player_order[tx_index]
 
-        # Transmitters cannot guess
-        if req.player_id in rs.signal_player_order:
-            raise HTTPException(status_code=400, detail="Transmitters cannot guess")
+        # Featured transmitter cannot guess on their own sub-round
+        if req.player_id == featured_pid:
+            raise HTTPException(status_code=400, detail="Cannot guess on your own sub-round")
 
         guess_text = req.guess.strip()
         if not guess_text:

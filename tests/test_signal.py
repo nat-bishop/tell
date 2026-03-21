@@ -31,7 +31,7 @@ class TestSignalSetupRound:
         assert rs is not None
         assert rs.round_type == RoundType.SIGNAL
         assert rs.prompt_category == "signal"
-        assert rs.signal_constraint != ""
+        assert rs.prompt_text != ""
         assert len(rs.signal_phrases) == NUM_TRANSMITTERS
         assert len(rs.signal_player_order) == NUM_TRANSMITTERS
 
@@ -112,7 +112,7 @@ class TestSignalBuildResults:
         )
 
         rs = state.current_round
-        rs.signal_constraint = "Only questions"
+        rs.prompt_text = "Describe the phrase using only questions. No statements allowed."
         rs.signal_player_order = ["h1", "h2", "a1"]
         rs.signal_phrases = phrases or {
             "h1": "a dog chasing a squirrel",
@@ -276,7 +276,7 @@ class TestSignalStateSyncExtras:
         )
         rs = state.current_round
         rs.signal_player_order = ["h1", "h2"]
-        rs.signal_constraint = "Only questions"
+        rs.prompt_text = "Describe the phrase using only questions. No statements allowed."
         rs.answers = {"h1": "What's running?"}
         rs.current_sub_round = 0
 

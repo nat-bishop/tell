@@ -76,7 +76,6 @@ class RoundState(BaseModel):
     # Wager
     wager_questions: list[WagerQuestion] = Field(default_factory=list)
     # Signal
-    signal_constraint: str = ""
     signal_player_order: list[str] = Field(default_factory=list)
     signal_phrases: dict[str, str] = Field(default_factory=dict)
     signal_guesses: dict[str, dict[str, str]] = Field(default_factory=dict)

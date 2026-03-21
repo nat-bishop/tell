@@ -627,72 +627,22 @@ DUEL_PROMPTS: list[DuelPrompt] = [
 # ---------------------------------------------------------------------------
 
 
-class SignalConstraint(BaseModel):
-    text: str
-    instruction: str  # what the player must do
-
-
-SIGNAL_CONSTRAINTS: list[SignalConstraint] = [
-    SignalConstraint(
-        text="Only questions",
-        instruction="Describe the phrase using only questions. No statements allowed.",
-    ),
-    SignalConstraint(
-        text="No nouns",
-        instruction="Describe the phrase without using any nouns.",
-    ),
-    SignalConstraint(
-        text="Opposite day",
-        instruction="Describe the opposite of the phrase. Everything is reversed.",
-    ),
-    SignalConstraint(
-        text="One word at a time",
-        instruction="Describe the phrase using exactly five words, separated by periods.",
-    ),
-    SignalConstraint(
-        text="As a recipe",
-        instruction="Describe the phrase as if it were a cooking recipe.",
-    ),
-    SignalConstraint(
-        text="News headline",
-        instruction="Describe the phrase as a breaking news headline.",
-    ),
-    SignalConstraint(
-        text="Movie trailer voice",
-        instruction="Describe the phrase as a dramatic movie trailer narrator would.",
-    ),
-    SignalConstraint(
-        text="Complaint letter",
-        instruction="Describe the phrase as a formal complaint letter.",
-    ),
-    SignalConstraint(
-        text="Children's story",
-        instruction="Describe the phrase as the opening of a children's book.",
-    ),
-    SignalConstraint(
-        text="Text message",
-        instruction="Describe the phrase as a casual text message to a friend. Use abbreviations.",
-    ),
-    SignalConstraint(
-        text="Nature documentary",
-        instruction="Describe the phrase as a nature documentary narrator would.",
-    ),
-    SignalConstraint(
-        text="As instructions",
-        instruction="Describe the phrase as a set of step-by-step instructions.",
-    ),
-    SignalConstraint(
-        text="Poetry",
-        instruction="Describe the phrase as a short poem (2-4 lines).",
-    ),
-    SignalConstraint(
-        text="Sports commentary",
-        instruction="Describe the phrase as live sports commentary.",
-    ),
-    SignalConstraint(
-        text="Whisper",
-        instruction="Describe the phrase as quietly and mysteriously as possible.",
-    ),
+SIGNAL_CONSTRAINTS: list[str] = [
+    "Describe the phrase using only questions. No statements allowed.",
+    "Describe the phrase without using any nouns.",
+    "Describe the opposite of the phrase. Everything is reversed.",
+    "Describe the phrase using exactly five words, separated by periods.",
+    "Describe the phrase as if it were a cooking recipe.",
+    "Describe the phrase as a breaking news headline.",
+    "Describe the phrase as a dramatic movie trailer narrator would.",
+    "Describe the phrase as a formal complaint letter.",
+    "Describe the phrase as the opening of a children's book.",
+    "Describe the phrase as a casual text message to a friend. Use abbreviations.",
+    "Describe the phrase as a nature documentary narrator would.",
+    "Describe the phrase as a set of step-by-step instructions.",
+    "Describe the phrase as a short poem (2-4 lines).",
+    "Describe the phrase as live sports commentary.",
+    "Describe the phrase as quietly and mysteriously as possible.",
 ]
 
 
@@ -740,7 +690,7 @@ SIGNAL_PHRASES: list[str] = [
 ]
 
 
-def select_signal_constraint(used_indices: list[int]) -> tuple[int, SignalConstraint]:
+def select_signal_constraint(used_indices: list[int]) -> tuple[int, str]:
     """Select a signal constraint that hasn't been used yet."""
     valid = [(i, c) for i, c in enumerate(SIGNAL_CONSTRAINTS) if i not in used_indices]
     if not valid:
