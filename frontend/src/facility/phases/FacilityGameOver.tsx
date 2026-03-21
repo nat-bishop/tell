@@ -23,6 +23,7 @@ export function FacilityGameOver() {
   const router = useRouter();
 
   const handlePlayAgain = async () => {
+    useGameStore.getState().reset();
     const res = await createGame();
     router.push(`/game/${res.game_id}`);
   };

@@ -84,10 +84,12 @@ export default function GamePage({
         const { playerId: pid, alias } = JSON.parse(stored);
         setIdentity(id, pid, alias);
         setJoined(true);
+        return;
       } catch {
         sessionStorage.removeItem(`tell-${id}`);
       }
     }
+    setJoined(false);
   }, [id, setIdentity]);
 
   useGameEvents(joined ? id : "", joined ? playerId || "" : "");

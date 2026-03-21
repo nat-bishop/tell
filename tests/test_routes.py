@@ -121,15 +121,15 @@ class TestSubmitAnswer:
         assert resp.status_code == 400
         assert "not found" in resp.json()["detail"].lower()
 
-    async def test_duplicate_answer(self, client, mock_ai):
+    async def test_answer_overwrite(self, client, mock_ai):
         game_id, session, _ = seed_game(GamePhase.ROUND)
         session.state.current_round.answers["h1"] = "already answered"
         resp = await client.post(
             f"/games/{game_id}/answer",
-            json={"player_id": "h1", "answer": "another"},
+            json={"player_id": "h1", "answer": "updated answer"},
         )
-        assert resp.status_code == 400
-        assert "already answered" in resp.json()["detail"].lower()
+        assert resp.status_code == 200
+        assert session.state.current_round.answers["h1"] == "updated answer"
 
     async def test_success(self, client, mock_ai):
         game_id, _, _ = seed_game(GamePhase.ROUND)

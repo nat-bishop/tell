@@ -64,16 +64,19 @@ export function FacilitySignalActive() {
       {/* Main screen — featured transformation */}
       <Panel zone="main-screen">
         <div className="flex flex-col items-center justify-center h-full gap-4">
-          <p className="font-system text-[0.65rem] text-cold tracking-[0.2em] uppercase">
-            {constraint} &mdash; {featuredAlias}&apos;s signal
-          </p>
-
           <p className="font-system text-[0.55rem] text-dim tracking-[0.15em] uppercase">
-            {subRoundIndex + 1} of {totalTransmitters}
+            {featuredAlias}&apos;s signal &middot; {subRoundIndex + 1} of {totalTransmitters}
           </p>
 
-          <p className="font-literary text-[1.2rem] text-ink text-center leading-[1.6] max-w-md italic">
-            {transformation}
+          <p className="font-system text-[0.6rem] text-cold tracking-[0.2em] uppercase">
+            constraint
+          </p>
+          <p className="font-literary text-[1.1rem] text-ink text-center leading-[1.6] italic">
+            {constraint}
+          </p>
+
+          <p className="font-literary text-[1rem] text-ink/70 text-center leading-[1.6] max-w-md">
+            &ldquo;{transformation}&rdquo;
           </p>
         </div>
       </Panel>
