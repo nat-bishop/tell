@@ -40,6 +40,7 @@ export interface StateSyncData {
   phase_duration: number | null;
   scores: Record<string, number>;
   total_rounds: number;
+  timers_disabled?: boolean;
   my_vote?: string | null;
   // Signal reconnection
   signal_phrase?: string | null;
@@ -256,6 +257,9 @@ interface GameState {
   votedForId: string | null;
   voteCount: number;
 
+  // Debug
+  timersDisabled: boolean;
+
   // Connection
   connectionStatus: "connected" | "reconnecting" | "disconnected";
 
@@ -316,6 +320,7 @@ const initialState = {
   isTransmitter: false,
   votedForId: null as string | null,
   voteCount: 0,
+  timersDisabled: false,
   connectionStatus: "connected" as "connected" | "reconnecting" | "disconnected",
 };
 
@@ -342,6 +347,7 @@ export const useGameStore = create<GameState>((set) => ({
       phaseDuration: data.phase_duration ?? null,
       scores: data.scores || {},
       totalRounds: data.total_rounds || 5,
+      timersDisabled: data.timers_disabled ?? false,
       lastSeq: data.seq,
       signalPhrase: data.signal_phrase ?? null,
       isTransmitter: data.is_transmitter ?? false,

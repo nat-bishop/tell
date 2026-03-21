@@ -51,13 +51,13 @@ export default function Home() {
             disabled={loading}
             className="font-system text-[0.75rem] text-dim tracking-wide transition-all hover:text-cold disabled:opacity-50"
           >
-            {loading ? "creating..." : "isolated examination"}
+            {loading ? "creating..." : "debug mode"}
           </button>
         </div>
 
         <SystemText>
-          enter test finds a game automatically &mdash; isolated examination
-          creates a link to share
+          enter test finds a game automatically &mdash; debug mode
+          creates a private game for testing
         </SystemText>
       </div>
     </Stage>

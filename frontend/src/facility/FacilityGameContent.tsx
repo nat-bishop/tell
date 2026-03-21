@@ -20,7 +20,7 @@ const FALLBACK_DURATIONS: Partial<Record<string, number>> = {
 function FacilityInner() {
   const {
     phase, phaseDeadline, phaseDuration,
-    roundNumber, component, stepName,
+    roundNumber, component, stepName, timersDisabled,
   } = useGameStore();
   const remaining = useTimer(phaseDeadline);
   const { transitionState, startTransition, snapTo } = useFacilityContext();
@@ -63,7 +63,7 @@ function FacilityInner() {
   }, [phase, roundNumber, component, stepName, startTransition, snapTo]);
 
   const total = phaseDuration ?? FALLBACK_DURATIONS[stepName ?? ""] ?? 0;
-  const hideTimer = phase === "lobby" || phase === "game_over" || component === "preroll" || transitionState !== "idle" || (component ?? "").endsWith("_results");
+  const hideTimer = phase === "lobby" || phase === "game_over" || component === "preroll" || transitionState !== "idle" || (component ?? "").endsWith("_results") || timersDisabled;
 
   return (
     <div className="facility-viewport">

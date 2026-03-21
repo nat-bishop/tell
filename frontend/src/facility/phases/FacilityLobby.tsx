@@ -23,6 +23,7 @@ export function FacilityLobby() {
   const [configOpen, setConfigOpen] = useState(false);
   const [roundSequence, setRoundSequence] = useState<string[]>([]);
   const [aiCount, setAiCount] = useState(6);
+  const [timersDisabled, setTimersDisabled] = useState(false);
 
   useEffect(() => {
     return () => clearTimeout(copyTimerRef.current);
@@ -33,6 +34,7 @@ export function FacilityLobby() {
     const config: GameConfig = {};
     if (roundSequence.length > 0) config.round_sequence = roundSequence;
     if (aiCount !== 6) config.ai_count = aiCount;
+    if (timersDisabled) config.timers_disabled = timersDisabled;
     await startGame(gameId, playerId, config);
   };
 
@@ -189,6 +191,21 @@ export function FacilityLobby() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Timers toggle */}
+                  <button
+                    onClick={() => setTimersDisabled((v) => !v)}
+                    className="flex items-center justify-center gap-2"
+                  >
+                    <span className="font-system text-[0.65rem] text-dim tracking-[0.15em] uppercase">
+                      timers
+                    </span>
+                    <span className={`font-system text-[0.65rem] tracking-wide ${
+                      timersDisabled ? "text-warm" : "text-cold"
+                    }`}>
+                      {timersDisabled ? "off" : "on"}
+                    </span>
+                  </button>
                 </div>
               )}
             </>

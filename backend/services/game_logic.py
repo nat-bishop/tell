@@ -238,6 +238,7 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
         "is_host": is_host,
         "my_answer": my_answer,
         "my_vote": my_vote,
+        "timers_disabled": state.timers_disabled,
         # Step fields
         "step_name": step_name,
         "step_index": state.current_step_index if step else None,

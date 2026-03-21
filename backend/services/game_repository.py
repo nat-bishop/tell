@@ -30,3 +30,6 @@ class GameRepository:
 
     def get(self, game_id: str) -> TellGameSession | None:
         return self._games.get(game_id)
+
+    def delete(self, game_id: str) -> bool:
+        return self._games.pop(game_id, None) is not None

@@ -154,6 +154,9 @@ async def start_game(game_id: str, req: StartGameRequest) -> dict[str, str]:
             state.forced_round_sequence = forced
             state.total_rounds = len(forced)
 
+        if req.timers_disabled:
+            state.timers_disabled = True
+
     ai_count = max(1, min(8, req.ai_count)) if req.ai_count is not None else settings.max_ai
     await initialize_and_start_game(game_id, ai_count)
 

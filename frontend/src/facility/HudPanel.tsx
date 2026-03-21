@@ -2,12 +2,27 @@
 
 import { useGameStore } from "@/hooks/useGameStore";
 import { usePlayerColors } from "./usePlayerColors";
+import { endGame, skipStep, createGame } from "@/api/actions";
+import { useRouter } from "next/navigation";
 
 export function HudPanel() {
-  const { players, phase, roundNumber, scores } = useGameStore();
+  const { players, phase, roundNumber, scores, isHost, gameId, playerId } = useGameStore();
   const colorMap = usePlayerColors();
+  const router = useRouter();
 
   if (phase === "lobby" || phase === "game_over") return null;
+
+  const handleSkip = async () => {
+    if (!gameId || !playerId) return;
+    await skipStep(gameId, playerId);
+  };
+
+  const handleEnd = async () => {
+    if (!gameId || !playerId) return;
+    await endGame(gameId, playerId);
+    const res = await createGame();
+    router.push(`/game/${res.game_id}`);
+  };
 
   return (
     <div
@@ -40,6 +55,23 @@ export function HudPanel() {
           </div>
         );
       })}
+
+      {isHost && (
+        <div className="fixed top-[6px] right-3 z-40 flex items-center gap-3">
+          <button
+            onClick={handleSkip}
+            className="font-system text-[0.6rem] text-dim tracking-wide transition-all hover:text-cold"
+          >
+            next
+          </button>
+          <button
+            onClick={handleEnd}
+            className="font-system text-[0.6rem] text-dim tracking-wide transition-all hover:text-warm"
+          >
+            end
+          </button>
+        </div>
+      )}
     </div>
   );
 }

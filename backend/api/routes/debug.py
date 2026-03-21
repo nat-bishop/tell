@@ -6,12 +6,17 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from backend.api.deps import get_game_repository, get_settings, get_timer_manager
+from backend.api.deps import (
+    get_connection_manager,
+    get_game_repository,
+    get_settings,
+    get_timer_manager,
+)
 from backend.minigames import get_handler
 from backend.services.game_logic import get_current_step
-from schemas.api_models import SeedGameRequest
+from schemas.api_models import EndGameRequest, SeedGameRequest, SkipStepRequest
 from schemas.game_state import GamePhase, PlayerRole
 
 router = APIRouter()
@@ -84,3 +89,71 @@ async def seed_game(req: SeedGameRequest) -> dict[str, str | int]:
         "player_count": len(state.players),
         "url": f"http://localhost:3500/game/{game_id}",
     }
+
+
+@router.post("/end-game/{game_id}")
+async def end_game(game_id: str, req: EndGameRequest) -> dict[str, str]:
+    """Force-end a game and clean up all resources. Host only."""
+    cm = get_connection_manager()
+    repo = get_game_repository()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        host = next((p for p in state.players if p.id == req.player_id and p.is_host), None)
+        if not host:
+            raise HTTPException(status_code=400, detail="Only the host can end the game")
+
+        # Cancel timer
+        get_timer_manager().cancel_timer(game_id)
+
+        # Cancel AI tasks
+        from backend.services.ai_scheduler import cleanup_game as ai_cleanup
+
+        ai_cleanup(game_id)
+
+        # Remove game from repo
+        repo.delete(game_id)
+
+        log.info("game_ended_by_host", game_id=game_id)
+
+    # Clean up connections (removes lock, so must be outside lock block)
+    cm.cleanup_game(game_id)
+
+    return {"status": "ended"}
+
+
+@router.post("/skip-step/{game_id}")
+async def skip_step(game_id: str, req: SkipStepRequest) -> dict[str, str]:
+    """Force-advance the current step. Host only. Reuses timer-expiry logic."""
+    repo = get_game_repository()
+    cm = get_connection_manager()
+    lock = cm.get_lock(game_id)
+
+    async with lock:
+        session = repo.get(game_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Game not found")
+
+        state = session.state
+        host = next((p for p in state.players if p.id == req.player_id and p.is_host), None)
+        if not host:
+            raise HTTPException(status_code=400, detail="Only the host can skip steps")
+
+        if state.phase != GamePhase.ROUND:
+            raise HTTPException(status_code=400, detail="Game is not in a round")
+
+    # Cancel any running timer, then trigger expiry logic
+    get_timer_manager().cancel_timer(game_id)
+
+    from backend.services.transitions import _handle_step_expiry
+
+    await _handle_step_expiry(game_id)
+
+    log.info("step_skipped_by_host", game_id=game_id)
+
+    return {"status": "skipped"}

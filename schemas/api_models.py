@@ -48,6 +48,8 @@ class StateSyncEvent(GameEvent):
     my_answer: str | None = None
     scores: dict[str, int] = Field(default_factory=dict)
     total_rounds: int = 5
+    # Debug
+    timers_disabled: bool = False
     # Gallery vote state (reconnection)
     my_vote: str | None = None
     # Signal reconnection
@@ -229,9 +231,10 @@ class StartGameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
-    # Optional lobby config (isolated examination only)
+    # Optional lobby config (debug mode only)
     round_sequence: list[str] | None = None  # e.g. ["task", "signal", "brain_test"]
     ai_count: int | None = None  # override AI count (1-8)
+    timers_disabled: bool | None = None  # disable auto-expiring timers
 
 
 class SubmitAnswerRequest(BaseModel):
@@ -249,6 +252,18 @@ class GameInfoResponse(BaseModel):
 
 
 # --- Matchmaking models ---
+
+
+class EndGameRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
+
+
+class SkipStepRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    player_id: str
 
 
 class MatchmakingJoinRequest(BaseModel):
