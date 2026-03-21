@@ -25,13 +25,18 @@ export function joinGame(
   });
 }
 
+import type { components } from "@/types/generated/api";
+
+export type GameConfig = Omit<components["schemas"]["StartGameRequest"], "player_id">;
+
 export function startGame(
   gameId: string,
   playerId: string,
+  config?: GameConfig,
 ): Promise<void> {
   return apiFetch(`/games/${gameId}/start`, {
     method: "POST",
-    body: JSON.stringify({ player_id: playerId }),
+    body: JSON.stringify({ player_id: playerId, ...config }),
   });
 }
 

@@ -113,3 +113,5 @@ class TellGameState(BaseModel):
     # Step-based round state
     current_step_index: int = 0
     round_step_defs: list[dict] = Field(default_factory=list)
+    # Debug: host-configured round sequence (empty = random)
+    forced_round_sequence: list[RoundType] = Field(default_factory=list)

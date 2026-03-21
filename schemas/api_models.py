@@ -229,6 +229,9 @@ class StartGameRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     player_id: str
+    # Optional lobby config (isolated examination only)
+    round_sequence: list[str] | None = None  # e.g. ["task", "signal", "brain_test"]
+    ai_count: int | None = None  # override AI count (1-8)
 
 
 class SubmitAnswerRequest(BaseModel):

@@ -141,7 +141,20 @@ async def start_game(game_id: str, req: StartGameRequest) -> dict[str, str]:
                 detail=f"Need at least {settings.min_humans} human players",
             )
 
-    ai_count = settings.max_ai  # always 6
+        # Apply lobby config overrides
+        if req.round_sequence is not None:
+            forced = []
+            for rt_str in req.round_sequence:
+                try:
+                    forced.append(RoundType(rt_str))
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, detail=f"Invalid round type: {rt_str}"
+                    ) from None
+            state.forced_round_sequence = forced
+            state.total_rounds = len(forced)
+
+    ai_count = max(1, min(8, req.ai_count)) if req.ai_count is not None else settings.max_ai
     await initialize_and_start_game(game_id, ai_count)
 
     return {"status": "ok"}

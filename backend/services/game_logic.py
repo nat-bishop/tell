@@ -155,7 +155,14 @@ def sanitize_players_for_client(state: TellGameState) -> list[dict]:
 
 
 def get_next_round_type(state: TellGameState) -> RoundType:
-    """Get the round type for the next round (dynamic selection)."""
+    """Get the round type for the next round.
+
+    Uses forced_round_sequence if configured, otherwise random selection.
+    """
+    round_index = len(state.round_types)
+    if state.forced_round_sequence and round_index < len(state.forced_round_sequence):
+        return state.forced_round_sequence[round_index]
+
     last = state.round_types[-1] if state.round_types else None
     return select_next_round_type(last)
 
