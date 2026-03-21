@@ -49,7 +49,8 @@
       "Bash(find /c/Users/Nat/Documents/dev/tell/recordings -name *.json)",
       "Bash(xargs python3:*)",
       "Bash(git commit:*)",
-      "Bash(game:\"\\) with native PydanticAI message_history pattern. Narrator now:*)"
+      "Bash(game:\"\\) with native PydanticAI message_history pattern. Narrator now:*)",
+      "Bash(git status:*)"
     ]
   }
 }
