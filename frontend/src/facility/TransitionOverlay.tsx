@@ -171,12 +171,8 @@ function TransitionOverlayContent() {
   const scores = useGameStore((s) => s.scores);
   const players = useGameStore((s) => s.players);
 
-  // Round start = first step of a round (compose steps, challenge_0, guess_0)
-  const isRoundStart =
-    stepName === "compose" ||
-    stepName === "signal_compose" ||
-    stepName === "challenge_0" ||
-    stepName === "guess_0";
+  // Round start = preroll step (first step of every round)
+  const isRoundStart = stepName === "preroll";
 
   const voice = getVoice(roundNumber);
 
@@ -186,7 +182,7 @@ function TransitionOverlayContent() {
 
   if (isRoundStart) {
     text = voice.roundLabel(roundNumber, roundType);
-    subtitle = voice.typeLabel(roundType);
+    // No subtitle — preroll component delivers round type + instructions
     situationLine = getSituationLine(roundNumber, totalRounds, scores, players);
   } else {
     const directive = getDirective(component, roundType);

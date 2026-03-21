@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from backend.minigames.base import MinigameHandler, StepDef
+from backend.minigames.base import MinigameHandler, StepDef, get_step_info
 from schemas.game_state import RoundState, RoundType, TellGameState
 
 if TYPE_CHECKING:
@@ -31,6 +31,7 @@ class TaskHandler(MinigameHandler):
 
     def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
         return [
+            self._preroll_step(settings),
             StepDef(name="compose", duration=settings.prompt_duration, component="compose"),
             StepDef(name="vote", duration=settings.vote_duration, component="vote"),
             StepDef(
@@ -44,45 +45,55 @@ class TaskHandler(MinigameHandler):
     async def on_step_start(self, game_id: str, state: TellGameState, step_index: int) -> None:
         from backend.services.ai_scheduler import schedule_ai_answers, schedule_ai_votes
 
-        if step_index == 0:
-            # Compose step — schedule AI answers
+        info = get_step_info(state, step_index)
+        if not info:
+            return
+        _rs, step = info
+        step_name = step["name"]
+
+        if step_name == "compose":
             await schedule_ai_answers(game_id)
-        elif step_index == 1:
-            # Vote step — schedule AI votes
+        elif step_name == "vote":
             await schedule_ai_votes(game_id)
 
     async def on_step_end(self, game_id: str, state: TellGameState, step_index: int) -> None:
-        if step_index == 0:
+        info = get_step_info(state, step_index)
+        if not info:
+            return
+        _rs, step = info
+        if step["name"] == "compose":
             from backend.services.game_logic import fill_missing_answers
 
             fill_missing_answers(state)
 
     def step_event_extras(self, state: TellGameState, step_index: int) -> dict:
-        rs = state.current_round
-        if not rs:
+        info = get_step_info(state, step_index)
+        if not info:
             return {}
-        if step_index == 0:
-            # Compose step — include prompt info
+        rs, step = info
+        step_name = step["name"]
+
+        if step_name == "compose":
             return {
                 "prompt_text": rs.prompt_text,
                 "prompt_category": rs.prompt_category,
             }
-        if step_index == 1:
-            # Vote step — include all answers
+        if step_name == "vote":
             return {"answers": rs.answers}
         return {}
 
     def check_early_complete(self, state: TellGameState, step_index: int) -> bool:
-        rs = state.current_round
-        if not rs:
+        info = get_step_info(state, step_index)
+        if not info:
             return False
-        if step_index == 0:
-            # Compose — all answers in?
+        rs, step = info
+        step_name = step["name"]
+
+        if step_name == "compose":
             from backend.services.game_logic import get_answer_total
 
             return len(rs.answers) >= get_answer_total(state)
-        if step_index == 1:
-            # Vote — all voted?
+        if step_name == "vote":
             return len(rs.gallery_votes) >= len(state.players)
         return False
 

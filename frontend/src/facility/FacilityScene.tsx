@@ -12,8 +12,10 @@ import { FacilityWager } from "@/facility/phases/FacilityWager";
 import { FacilitySignalPrompt } from "@/facility/phases/FacilitySignalPrompt";
 import { FacilitySignalActive } from "@/facility/phases/FacilitySignalActive";
 import { FacilitySignalResults } from "@/facility/phases/FacilitySignalResults";
+import { FacilityPreroll } from "@/facility/phases/FacilityPreroll";
 
 const STEP_COMPONENTS: Record<string, React.FC> = {
+  "preroll": FacilityPreroll,
   "compose": FacilityPrompt,
   "signal_compose": FacilitySignalPrompt,
   "vote": FacilityVote,

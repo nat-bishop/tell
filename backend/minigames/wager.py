@@ -93,7 +93,7 @@ class WagerHandler(MinigameHandler):
     def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
         num = settings.wager_questions
         dur = settings.wager_sub_round_duration
-        steps: list[StepDef] = []
+        steps: list[StepDef] = [self._preroll_step(settings)]
         for i in range(num):
             steps.append(StepDef(name=f"guess_{i}", duration=dur, component="wager"))
             steps.append(StepDef(name=f"bet_{i}", duration=dur, component="wager"))
@@ -117,7 +117,7 @@ class WagerHandler(MinigameHandler):
         if q_idx is None:
             return
 
-        rs.current_sub_round = step_index
+        rs.current_sub_round = q_idx
 
         if step_name.startswith("guess_"):
             from backend.services.ai_scheduler import on_wager_guess

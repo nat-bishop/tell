@@ -75,7 +75,7 @@ async def seed_game(req: SeedGameRequest) -> dict[str, str | int]:
             # Trigger on_step_start for current step
             if state.current_round:
                 handler = get_handler(state.current_round.round_type)
-                await handler.on_step_start(game_id, state.current_step_index)
+                await handler.on_step_start(game_id, state, state.current_step_index)
 
     return {
         "status": "seeded",

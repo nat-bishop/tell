@@ -258,15 +258,15 @@ class TestStateSanitization:
         assert sync["my_answer"] == "my answer"  # own answer visible
 
     def test_build_state_sync_shows_answers_in_vote(self):
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
-        # step 1 = vote
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
+        # step 2 = vote (after preroll + compose)
         state.current_round.answers = {"h1": "my answer", "h2": "other"}
 
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["answers"] == {"h1": "my answer", "h2": "other"}
 
     def test_build_state_sync_includes_my_vote_during_vote_step(self):
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
         state.current_round.gallery_votes = {"h1": "a1"}
 
         sync = build_state_sync(state, "h1", seq=1)
@@ -287,7 +287,7 @@ class TestStateSanitization:
         state, _ = make_standard_game(phase=GamePhase.ROUND)
         sync = build_state_sync(state, "h1", seq=1)
         assert sync["step_name"] == "compose"
-        assert sync["step_index"] == 0
+        assert sync["step_index"] == 1
         assert sync["component"] == "compose"
 
     def test_make_game_over_event_reveals_all(self):
@@ -408,7 +408,7 @@ class TestScoreBrainTest:
 class TestGalleryVoteScoring:
     def test_tally_gallery_votes_basic(self):
         """3 votes for player a1."""
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
         state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
 
         vote_counts = tally_gallery_votes(state)
@@ -419,7 +419,7 @@ class TestGalleryVoteScoring:
         from backend.minigames.task import TaskHandler
 
         handler = TaskHandler()
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
         state.current_round.gallery_votes = {"h1": "a1", "h2": "a1", "a2": "a1"}
 
         payload, score_deltas = handler.build_results(state)
@@ -428,7 +428,7 @@ class TestGalleryVoteScoring:
 
     def test_tally_gallery_votes_no_votes(self):
         """Nobody voted → all counts 0."""
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
         state.current_round.gallery_votes = {}
 
         vote_counts = tally_gallery_votes(state)
@@ -440,7 +440,7 @@ class TestGalleryVoteScoring:
         from backend.minigames.task import TaskHandler
 
         handler = TaskHandler()
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
         state.current_round.gallery_votes = {
             "h1": "a1",
             "h2": "a2",
@@ -458,7 +458,7 @@ class TestGalleryVoteScoring:
         from backend.minigames.task import TaskHandler
 
         handler = TaskHandler()
-        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=1)
+        state, _ = make_standard_game(phase=GamePhase.ROUND, current_step_index=2)
         other_ids = [p.id for p in state.players if p.id != "h1"]
         state.current_round.gallery_votes = dict.fromkeys(other_ids, "h1")
 

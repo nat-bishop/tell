@@ -57,25 +57,35 @@ def make_round_state(
     )
 
 
+def _preroll_step():
+    from backend.minigames.base import StepDef
+
+    return StepDef(name="preroll", duration=6, component="preroll")
+
+
 def _make_step_defs_for_round_type(round_type: RoundType) -> list[dict]:
     """Generate default step defs for a round type (used in test factories)."""
     from backend.minigames.base import StepDef
 
+    preroll = _preroll_step()
+
     if round_type == RoundType.TASK:
         steps = [
+            preroll,
             StepDef(name="compose", duration=45, component="compose"),
             StepDef(name="vote", duration=25, component="vote"),
             StepDef(name="results", duration=8, component="vote_results", is_results=True),
         ]
     elif round_type == RoundType.BRAIN_TEST:
-        steps = [
+        steps = [preroll]
+        steps.extend(
             StepDef(name=f"challenge_{i}", duration=12, component="brain_test") for i in range(5)
-        ]
+        )
         steps.append(
             StepDef(name="results", duration=15, component="brain_test_results", is_results=True)
         )
     elif round_type == RoundType.WAGER:
-        steps = []
+        steps = [preroll]
         for i in range(3):
             steps.append(StepDef(name=f"guess_{i}", duration=15, component="wager"))
             steps.append(StepDef(name=f"bet_{i}", duration=15, component="wager"))
@@ -84,6 +94,7 @@ def _make_step_defs_for_round_type(round_type: RoundType) -> list[dict]:
         )
     elif round_type == RoundType.SIGNAL:
         steps = [
+            preroll,
             StepDef(name="signal_compose", duration=20, component="signal_compose"),
             StepDef(name="signal_guess_0", duration=12, component="signal_guess"),
             StepDef(name="signal_guess_1", duration=12, component="signal_guess"),
@@ -100,8 +111,8 @@ def _step_index_for_phase(phase: GamePhase, round_type: RoundType) -> int:
     """Map old phase concept to a default step index for tests."""
     if phase == GamePhase.LOBBY or phase == GamePhase.GAME_OVER:
         return 0
-    # For ROUND phase, default to first step (compose/challenge_0/guess_0)
-    return 0
+    # For ROUND phase, default to first gameplay step (after preroll)
+    return 1
 
 
 def make_game_state(

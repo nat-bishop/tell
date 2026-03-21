@@ -22,6 +22,10 @@ class MinigameHandler:
     round_type: RoundType
     min_players: int = 2
 
+    def _preroll_step(self, settings: Settings) -> StepDef:
+        """Preroll step prepended to every round — shows round type + instructions."""
+        return StepDef(name="preroll", duration=settings.preroll_duration, component="preroll")
+
     def setup_round(self, state: TellGameState, settings: Settings) -> None:
         """Initialize round state (mutates in place)."""
         raise NotImplementedError

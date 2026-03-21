@@ -106,9 +106,9 @@ class TestSignalBuildResults:
     def _make_signal_state(self, guesses, judgments, phrases=None):
         """Build a game state with signal round data for testing build_results."""
         handler = SignalHandler()
-        # Use ROUND phase with signal_guess step (step_index=1)
+        # Use ROUND phase with signal_guess step (step_index=2, after preroll)
         state, _ = make_standard_game(
-            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=1
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=2
         )
 
         rs = state.current_round
@@ -243,9 +243,9 @@ class TestSignalPromptSelection:
 class TestSignalStateSyncExtras:
     def test_compose_step_transmitter_returns_phrase(self):
         handler = SignalHandler()
-        # Step 0 = compose for signal
+        # Step 1 = signal_compose (after preroll)
         state, _ = make_standard_game(
-            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=0
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=1
         )
         rs = state.current_round
         rs.signal_player_order = ["h1"]
@@ -258,7 +258,7 @@ class TestSignalStateSyncExtras:
     def test_compose_step_non_transmitter(self):
         handler = SignalHandler()
         state, _ = make_standard_game(
-            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=0
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=1
         )
         rs = state.current_round
         rs.signal_player_order = ["h1"]
@@ -270,9 +270,9 @@ class TestSignalStateSyncExtras:
 
     def test_guess_step_returns_sub_round(self):
         handler = SignalHandler()
-        # Step 1 = signal_guess_0
+        # Step 2 = signal_guess_0 (after preroll + signal_compose)
         state, _ = make_standard_game(
-            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=1
+            phase=GamePhase.ROUND, round_type=RoundType.SIGNAL, current_step_index=2
         )
         rs = state.current_round
         rs.signal_player_order = ["h1", "h2"]

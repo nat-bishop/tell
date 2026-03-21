@@ -114,6 +114,11 @@ class Settings:
             )
         )
 
+        # Preroll
+        self.preroll_duration: int = int(
+            os.environ.get("TELL_PREROLL_DURATION", game.get("preroll_duration", 6))
+        )
+
         # Player limits
         self.min_humans: int = int(os.environ.get("TELL_MIN_HUMANS", game.get("min_humans", 2)))
         self.max_players: int = int(os.environ.get("TELL_MAX_PLAYERS", game.get("max_players", 2)))

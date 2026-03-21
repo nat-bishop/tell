@@ -59,9 +59,10 @@ class BrainTestHandler(MinigameHandler):
     def get_steps(self, state: TellGameState, settings: Settings) -> list[StepDef]:
         num = settings.brain_test_challenges
         dur = settings.brain_test_challenge_duration
-        steps = [
+        steps: list[StepDef] = [self._preroll_step(settings)]
+        steps.extend(
             StepDef(name=f"challenge_{i}", duration=dur, component="brain_test") for i in range(num)
-        ]
+        )
         steps.append(
             StepDef(
                 name="results",

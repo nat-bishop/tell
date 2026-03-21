@@ -197,7 +197,7 @@ def build_state_sync(state: TellGameState, player_id: str, seq: int) -> dict:
         round_type = round_state.round_type
 
         # Answers visible after compose steps
-        in_compose = step_name in ("compose", "signal_compose", None)
+        in_compose = step_name in ("compose", "signal_compose", "preroll", None)
         if (state.phase == GamePhase.ROUND and not in_compose) or (
             state.phase == GamePhase.GAME_OVER
         ):

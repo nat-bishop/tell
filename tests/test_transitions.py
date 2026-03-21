@@ -51,7 +51,7 @@ class TestTryAdvanceStep:
         _state, session, _ = _make_session(
             GamePhase.ROUND,
             round_type=RoundType.TASK,
-            current_step_index=0,
+            current_step_index=1,  # compose step (after preroll)
             answers={
                 "h1": "a",
                 "h2": "b",
@@ -71,8 +71,8 @@ class TestTryAdvanceStep:
             await try_advance_step(game_id, session)
 
         # Should have advanced to vote step
-        assert session.state.current_step_index == 1
-        step = session.state.round_step_defs[1]
+        assert session.state.current_step_index == 2
+        step = session.state.round_step_defs[2]
         assert step["name"] == "vote"
 
 
@@ -88,7 +88,7 @@ class TestHandleStepExpiry:
         _state, session, _ = _make_session(
             GamePhase.ROUND,
             round_type=RoundType.TASK,
-            current_step_index=1,  # vote step
+            current_step_index=2,  # vote step (after preroll + compose)
         )
         session.state.current_round.gallery_votes = {
             "h2": "h1",
@@ -102,8 +102,8 @@ class TestHandleStepExpiry:
         await _handle_step_expiry(game_id)
 
         # Should be on results step
-        assert session.state.current_step_index == 2
-        step = session.state.round_step_defs[2]
+        assert session.state.current_step_index == 3
+        step = session.state.round_step_defs[3]
         assert step["name"] == "results"
 
         # Check scores: h1 got 3 votes = -300
@@ -127,7 +127,7 @@ class TestResultsStepExpiry:
         _state, session, _ = _make_session(
             GamePhase.ROUND,
             round_type=RoundType.TASK,
-            current_step_index=2,  # results step
+            current_step_index=3,  # results step (after preroll + compose + vote)
         )
         session.state.round_number = 2
         session.state.total_rounds = 5
@@ -144,7 +144,7 @@ class TestResultsStepExpiry:
         _state, session, _ = _make_session(
             GamePhase.ROUND,
             round_type=RoundType.TASK,
-            current_step_index=2,  # results step
+            current_step_index=3,  # results step (after preroll + compose + vote)
         )
         session.state.round_number = 5
         session.state.total_rounds = 5
@@ -170,7 +170,7 @@ class TestBrainTestStepExpiry:
         _state, session, _ = _make_session(
             GamePhase.ROUND,
             round_type=RoundType.BRAIN_TEST,
-            current_step_index=4,  # last challenge step (challenge_4)
+            current_step_index=5,  # last challenge step (challenge_4, after preroll)
         )
         session.state.current_round.brain_challenges = [
             BrainTestChallenge(
@@ -272,7 +272,7 @@ class TestStartNextRound:
         _state, session, _ = _make_session(
             GamePhase.ROUND,
             round_type=RoundType.TASK,
-            current_step_index=2,  # results
+            current_step_index=3,  # results (after preroll + compose + vote)
         )
         session.state.round_types = [RoundType.TASK]
         session.state.round_number = 1

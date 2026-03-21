@@ -214,9 +214,9 @@ async def _advance_step(game_id: str, session: TellGameSession, step_index: int)
 
     get_timer_manager().start_timer(game_id, duration, on_timer_expire)
 
-    # Notify handler
+    # Notify handler (skip preroll and results steps)
     rs = state.current_round
-    if rs and not step.get("is_results"):
+    if rs and not step.get("is_results") and step["name"] != "preroll":
         handler = get_handler(rs.round_type)
         await handler.on_step_start(game_id, state, step_index)
 
@@ -255,8 +255,9 @@ async def _handle_step_expiry(game_id: str) -> None:
         handler = get_handler(rs.round_type)
         log.info("step_expired", step_name=current_step["name"], step_index=step_index)
 
-        # Cleanup current step
-        await handler.on_step_end(game_id, state, step_index)
+        # Cleanup current step (skip preroll — nothing to clean up)
+        if current_step["name"] != "preroll":
+            await handler.on_step_end(game_id, state, step_index)
 
         if current_step.get("is_results"):
             # Results step done — game over or next round

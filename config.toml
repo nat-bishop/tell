@@ -19,6 +19,7 @@ signal_prompt_duration = 30
 signal_sub_round_duration = 18
 signal_results_duration = 15
 signal_safety_duration = 120
+preroll_duration = 6
 min_humans = 1
 max_players = 2
 min_ai = 6

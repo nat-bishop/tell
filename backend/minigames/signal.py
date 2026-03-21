@@ -82,6 +82,7 @@ class SignalHandler(MinigameHandler):
         dur = settings.signal_sub_round_duration
 
         steps: list[StepDef] = [
+            self._preroll_step(settings),
             StepDef(
                 name="signal_compose",
                 duration=settings.signal_prompt_duration,
