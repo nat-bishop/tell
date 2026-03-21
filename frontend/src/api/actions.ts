@@ -145,6 +145,22 @@ export function submitSignalGuess(
   });
 }
 
+// --- Debug ---
+
+export function endGame(gameId: string, playerId: string): Promise<void> {
+  return apiFetch(`/debug/end-game/${gameId}`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+export function skipStep(gameId: string, playerId: string): Promise<void> {
+  return apiFetch(`/debug/skip-step/${gameId}`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
 // --- Matchmaking ---
 
 export interface MatchmakingJoinResponse {

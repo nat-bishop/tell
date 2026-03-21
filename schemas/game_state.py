@@ -115,3 +115,5 @@ class TellGameState(BaseModel):
     round_step_defs: list[dict] = Field(default_factory=list)
     # Debug: host-configured round sequence (empty = random)
     forced_round_sequence: list[RoundType] = Field(default_factory=list)
+    # Debug: disable auto-expiring timers (host clicks "next" to advance)
+    timers_disabled: bool = False

@@ -208,11 +208,13 @@ async def _advance_step(game_id: str, session: TellGameSession, step_index: int)
     step = state.round_step_defs[step_index]
     duration = step["duration"]
 
-    # Start timer
-    async def on_timer_expire():
-        await _handle_step_expiry(game_id)
+    # Start timer (skip when timers disabled — host advances manually)
+    if not state.timers_disabled:
 
-    get_timer_manager().start_timer(game_id, duration, on_timer_expire)
+        async def on_timer_expire():
+            await _handle_step_expiry(game_id)
+
+        get_timer_manager().start_timer(game_id, duration, on_timer_expire)
 
     # Notify handler (skip preroll and results steps)
     rs = state.current_round
