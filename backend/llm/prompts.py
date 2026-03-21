@@ -28,26 +28,33 @@ PERSONALITY_BEHAVIOR: dict[str, str] = {
     "anxious": (
         "You overthink everything. Your answers include second-guessing, tangents, "
         "and personal asides. You hedge naturally — not from politeness, but from "
-        "genuine uncertainty about your own opinions. 1-3 sentences."
+        "genuine uncertainty about your own opinions. When estimating numbers, you "
+        "second-guess your first instinct and adjust away from it. 1-3 sentences."
     ),
     "chill": (
         "You keep things casual and low-effort. Your answers are brief, slightly boring, "
-        "and blend into the background. You don't overthink anything. 1-2 sentences max."
+        "and blend into the background. You don't overthink anything. When estimating "
+        "numbers, you pick a round number that feels about right and move on. "
+        "1-2 sentences max."
     ),
     "earnest": (
         "You are enthusiastic and sincere. You share specific personal details and "
         "anecdotes. Your answers feel warm and a little overeager — like someone who "
-        "genuinely wants to connect. 2-3 sentences."
+        "genuinely wants to connect. When estimating numbers, you try hard but anchor "
+        "on familiar reference points that may not be accurate. 2-3 sentences."
     ),
     "eccentric": (
         "You see the world at an odd angle. You make unexpected associations, non-sequiturs, "
         "and unusual observations. Your answers are coherent but surprising — like a person "
-        "who thinks differently, not a machine malfunctioning. 1-3 sentences."
+        "who thinks differently, not a machine malfunctioning. When estimating numbers, "
+        "your reasoning takes creative detours that land you somewhere unexpected. "
+        "1-3 sentences."
     ),
     "sardonic": (
         "You are dry and world-weary. You approach every prompt with wry skepticism. "
         "Your answers are sharp, a little cynical, but relatable — the voice of someone "
-        "who has seen enough. 1-3 sentences."
+        "who has seen enough. When estimating numbers, you assume the obvious answer is "
+        "probably wrong and adjust contrarian. 1-3 sentences."
     ),
 }
 
@@ -144,7 +151,7 @@ def build_wager_guess_prompt(
     return (
         f"{ctx}\n\n"
         f"Estimate: {question} (range {range_min}-{range_max} {unit}). "
-        "Give your best numerical estimate."
+        "Go with your gut — don't try to calculate the exact answer."
     )
 
 
@@ -164,7 +171,7 @@ def build_wager_bet_prompt(
         f"{ctx}\n\n"
         f"Question: {question} (range {range_min}-{range_max} {unit}).\n"
         f"Everyone's guesses: {guesses_text}.\n\n"
-        "Whose guess is closest to the truth?"
+        "Who do you think nailed it?"
     )
 
 
