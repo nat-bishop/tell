@@ -633,65 +633,68 @@ class SignalConstraint(BaseModel):
 
 
 SIGNAL_CONSTRAINTS: list[SignalConstraint] = [
+    # Structural puzzles
     SignalConstraint(
         text="Only questions",
-        instruction="Describe the phrase using only questions. No statements allowed.",
+        instruction="Describe this using only questions. No statements allowed.",
     ),
     SignalConstraint(
-        text="No nouns",
-        instruction="Describe the phrase without using any nouns.",
+        text="Simple words",
+        instruction="Only use words a five-year-old would know.",
     ),
     SignalConstraint(
-        text="Opposite day",
-        instruction="Describe the opposite of the phrase. Everything is reversed.",
+        text="Only sounds",
+        instruction="Describe only what you would hear. No visual details.",
     ),
     SignalConstraint(
-        text="One word at a time",
-        instruction="Describe the phrase using exactly five words, separated by periods.",
+        text="Before and after",
+        instruction="Describe what happens right before and right after this, but not the thing itself.",
     ),
     SignalConstraint(
-        text="As a recipe",
-        instruction="Describe the phrase as if it were a cooking recipe.",
+        text="As a riddle",
+        instruction="Describe this as a riddle for others to solve.",
     ),
     SignalConstraint(
-        text="News headline",
-        instruction="Describe the phrase as a breaking news headline.",
+        text="Only feelings",
+        instruction="Describe only the emotions and feelings involved. Nothing physical.",
     ),
     SignalConstraint(
-        text="Movie trailer voice",
-        instruction="Describe the phrase as a dramatic movie trailer narrator would.",
+        text="Three-word sentences",
+        instruction="Every sentence must be exactly three words.",
     ),
     SignalConstraint(
-        text="Complaint letter",
-        instruction="Describe the phrase as a formal complaint letter.",
+        text="Only comparisons",
+        instruction="Describe this only using 'like' or 'as if' comparisons.",
     ),
     SignalConstraint(
-        text="Children's story",
-        instruction="Describe the phrase as the opening of a children's book.",
+        text="Rhyming",
+        instruction="Everything you write must rhyme.",
     ),
+    # Voice / performance
     SignalConstraint(
-        text="Text message",
-        instruction="Describe the phrase as a casual text message to a friend. Use abbreviations.",
-    ),
-    SignalConstraint(
-        text="Nature documentary",
-        instruction="Describe the phrase as a nature documentary narrator would.",
-    ),
-    SignalConstraint(
-        text="As instructions",
-        instruction="Describe the phrase as a set of step-by-step instructions.",
-    ),
-    SignalConstraint(
-        text="Poetry",
-        instruction="Describe the phrase as a short poem (2-4 lines).",
+        text="Yelp review",
+        instruction="Write a Yelp review of this experience.",
     ),
     SignalConstraint(
         text="Sports commentary",
-        instruction="Describe the phrase as live sports commentary.",
+        instruction="Describe this as live sports commentary.",
     ),
     SignalConstraint(
-        text="Whisper",
-        instruction="Describe the phrase as quietly and mysteriously as possible.",
+        text="Nature documentary",
+        instruction="Narrate this as a nature documentary.",
+    ),
+    SignalConstraint(
+        text="Bedtime story",
+        instruction="Tell this as a bedtime story for a toddler.",
+    ),
+    # Transformation
+    SignalConstraint(
+        text="Warning label",
+        instruction="Write this as a product safety warning.",
+    ),
+    SignalConstraint(
+        text="911 call",
+        instruction="Report this as a 911 emergency call.",
     ),
 ]
 
