@@ -155,12 +155,12 @@ export function FacilityBrainTest() {
                     key={i}
                     onClick={() => handleSelect(i)}
                     disabled={isLocked}
-                    className={`px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-center transition-all cursor-pointer ${
+                    className={`px-4 py-3 min-h-[44px] rounded font-literary text-[1rem] text-center transition-all ${
                       isSelected
                         ? "card-highlighted animate-vote-select text-ink"
                         : isLocked
-                          ? "card opacity-40 text-dim pointer-events-none"
-                          : "card card-interactive text-ink"
+                          ? "card opacity-40 text-dim"
+                          : "card card-interactive text-ink cursor-pointer"
                     }`}
                   >
                     {opt}
