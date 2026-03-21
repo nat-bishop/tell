@@ -12,8 +12,8 @@ import { TransitionOverlay } from "@/facility/TransitionOverlay";
 import { FacilityBackground } from "@/facility/FacilityBackground";
 
 const FALLBACK_DURATIONS: Partial<Record<string, number>> = {
-  compose: 45,
-  vote: 25,
+  compose: 60,
+  vote: 35,
   results: 15,
 };
 
@@ -112,7 +112,7 @@ function FacilityInner() {
   }, [phase, roundNumber, component, stepName, showColdOpen, startTransition, snapTo]);
 
   const total = phaseDuration ?? FALLBACK_DURATIONS[stepName ?? ""] ?? 0;
-  const hideTimer = phase === "lobby" || phase === "game_over" || showColdOpen || transitionState !== "idle";
+  const hideTimer = phase === "lobby" || phase === "game_over" || showColdOpen || transitionState !== "idle" || (component ?? "").endsWith("_results");
 
   return (
     <div className="facility-viewport">

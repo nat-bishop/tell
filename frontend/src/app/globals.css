@@ -176,6 +176,16 @@ body::before {
   animation: vote-select 300ms ease-out;
 }
 
+/* Bet selection — slow glow pulse */
+@keyframes bet-select-glow {
+  0%, 100% { box-shadow: 0 0 8px var(--cold-glow); }
+  50% { box-shadow: 0 0 16px var(--cold-glow); }
+}
+
+.animate-bet-glow {
+  animation: bet-select-glow 2s ease-in-out infinite;
+}
+
 /* Elimination reveal animations */
 @keyframes reveal-expand {
   from { opacity: 0; letter-spacing: 0.4em; }

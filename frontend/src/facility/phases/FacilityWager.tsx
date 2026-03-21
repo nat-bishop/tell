@@ -13,12 +13,15 @@ interface NumberLineProps {
   min: number;
   max: number;
   unit: string;
-  markers?: Array<{ value: number; label: string; color: string }>;
+  markers?: Array<{ value: number; label: string; color: string; id?: string }>;
   correctAnswer?: number;
   interactive?: boolean;
   value?: number;
   onChange?: (value: number) => void;
   onCommit?: (value: number) => void;
+  clickable?: boolean;
+  selectedMarkerId?: string | null;
+  onMarkerClick?: (id: string) => void;
 }
 
 function NumberLine({
@@ -31,6 +34,9 @@ function NumberLine({
   value,
   onChange,
   onCommit,
+  clickable,
+  selectedMarkerId,
+  onMarkerClick,
 }: NumberLineProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragValueRef = useRef<number | undefined>(undefined);
@@ -79,28 +85,55 @@ function NumberLine({
 
   const toPercent = (v: number) => ((v - min) / (max - min)) * 100;
 
+  // Group markers by value so same-value guesses merge into one dot
+  const mergedMarkers = useMemo(() => {
+    if (!markers?.length) return [];
+    const groups = new Map<number, Array<(typeof markers)[0]>>();
+    for (const m of markers) {
+      const group = groups.get(m.value);
+      if (group) group.push(m);
+      else groups.set(m.value, [m]);
+    }
+    return Array.from(groups.entries()).map(([val, group]) => ({
+      value: val,
+      labels: group.map((m) => m.label),
+      ids: group.map((m) => m.id).filter((id): id is string => !!id),
+      colors: group.map((m) => m.color),
+      color: group.length > 1 ? "var(--dim)" : group[0].color,
+    }));
+  }, [markers]);
+
   return (
     <div className="w-full select-none" style={{ touchAction: "none" }}>
-      {/* Markers above */}
+      {/* Labels above */}
       <div className="relative h-8 mb-1">
-        {markers?.map((m, i) => (
-          <div
-            key={i}
-            className="absolute flex flex-col items-center"
-            style={{
-              left: `${toPercent(m.value)}%`,
-              transform: "translateX(-50%)",
-              bottom: 0,
-            }}
-          >
-            <span
-              className="font-system text-[0.55rem] tracking-wider whitespace-nowrap"
-              style={{ color: m.color }}
+        {mergedMarkers.map((mg, i) => {
+          const isSelected = !!selectedMarkerId && mg.ids.includes(selectedMarkerId);
+          const isDimmed = !!selectedMarkerId && !isSelected;
+          return (
+            <div
+              key={i}
+              className="absolute flex flex-col items-center"
+              style={{
+                left: `${toPercent(mg.value)}%`,
+                transform: "translateX(-50%)",
+                bottom: 0,
+                opacity: isDimmed ? 0.4 : 1,
+                transition: "opacity 200ms",
+              }}
             >
-              {m.label}
-            </span>
-          </div>
-        ))}
+              {mg.labels.map((label, li) => (
+                <span
+                  key={li}
+                  className="font-system text-[0.55rem] tracking-wider whitespace-nowrap leading-tight"
+                  style={{ color: isSelected ? "var(--cold)" : mg.colors[li] }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          );
+        })}
         {correctAnswer !== undefined && (
           <div
             className="absolute flex flex-col items-center"
@@ -149,25 +182,72 @@ function NumberLine({
           />
         )}
 
-        {/* Read-only markers */}
-        {markers?.map((m, i) => (
-          <div
-            key={i}
-            className="absolute"
-            style={{
-              left: `${toPercent(m.value)}%`,
-              top: "50%",
-              transform: "translate(-50%, -50%)",
-              width: "10px",
-              height: "10px",
-              borderRadius: "50%",
-              background: m.color,
-              boxShadow: `0 0 6px ${m.color}`,
-            }}
-          />
-        ))}
+        {/* Markers — clickable buttons in bet mode, plain dots otherwise */}
+        {clickable
+          ? mergedMarkers.map((mg, i) => {
+              const isSelected =
+                !!selectedMarkerId && mg.ids.includes(selectedMarkerId);
+              const isDimmed = !!selectedMarkerId && !isSelected;
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => !isDimmed && onMarkerClick?.(mg.ids[0])}
+                  disabled={!!isDimmed}
+                  aria-label={`Bet on ${mg.labels.join(", ")}`}
+                  className="absolute"
+                  style={{
+                    left: `${toPercent(mg.value)}%`,
+                    top: "50%",
+                    transform: "translate(-50%, -50%)",
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "50%",
+                    background: "transparent",
+                    border: "none",
+                    cursor: isDimmed ? "default" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: isDimmed ? 0.4 : 1,
+                    transition: "opacity 200ms",
+                    padding: 0,
+                  }}
+                >
+                  <div
+                    className={isSelected ? "animate-bet-glow" : ""}
+                    style={{
+                      width: isSelected ? "14px" : "10px",
+                      height: isSelected ? "14px" : "10px",
+                      borderRadius: "50%",
+                      background: isSelected ? "var(--cold)" : mg.color,
+                      boxShadow: isSelected
+                        ? "0 0 12px var(--cold-glow)"
+                        : `0 0 6px ${mg.color}`,
+                      transition: "all 200ms",
+                    }}
+                  />
+                </button>
+              );
+            })
+          : mergedMarkers.map((mg, i) => (
+              <div
+                key={i}
+                className="absolute"
+                style={{
+                  left: `${toPercent(mg.value)}%`,
+                  top: "50%",
+                  transform: "translate(-50%, -50%)",
+                  width: "10px",
+                  height: "10px",
+                  borderRadius: "50%",
+                  background: mg.color,
+                  boxShadow: `0 0 6px ${mg.color}`,
+                }}
+              />
+            ))}
 
-        {/* Interactive marker */}
+        {/* Interactive marker (guess drag) */}
         {interactive && value !== undefined && (
           <div
             className="absolute"
@@ -407,71 +487,44 @@ export function FacilityWager() {
     const qi = subRoundPayload.question_index;
     const guesses = subRoundPayload.guesses || {};
     const alreadyBet = betTargets[qi] !== undefined;
-
     const guessEntries = Object.entries(guesses);
 
     return (
-      <>
-        <Panel zone="main-screen">
-          <div className="flex flex-col items-center justify-center h-full gap-3">
-            <p className="font-system text-[0.6rem] text-cold tracking-[0.2em] uppercase">
+      <Panel zone="full-screen">
+        <div className="flex flex-col items-center justify-center h-full gap-5">
+          <div className="text-center">
+            <p className="font-system text-[0.6rem] text-cold tracking-[0.2em] uppercase mb-2">
               question {qi + 1} of {subRoundPayload.total_questions} — place your bet
             </p>
             <p className="font-literary text-[0.95rem] text-ink text-center leading-[1.6] max-w-md">
               {subRoundPayload.question}
             </p>
+          </div>
+
+          <div className="w-full max-w-lg">
             <NumberLine
               min={subRoundPayload.range_min}
               max={subRoundPayload.range_max}
               unit={subRoundPayload.unit}
+              clickable={!alreadyBet}
+              selectedMarkerId={betTargets[qi] ?? null}
+              onMarkerClick={(id) => handleBet(id)}
               markers={guessEntries.map(([pid, val]) => ({
                 value: val,
                 label: aliasById[pid] || pid,
                 color: playerColors[pid] || "var(--dim)",
+                id: pid,
               }))}
             />
           </div>
-        </Panel>
 
-        <Panel zone="center-area">
-          <div className="flex flex-col items-center justify-center h-full gap-2">
-            <p className="font-system text-[0.6rem] text-dim tracking-wider uppercase mb-2">
-              whose guess is closest?
-            </p>
-            <div className="w-full max-w-sm flex flex-col gap-2">
-              {guessEntries.map(([pid, val]) => {
-                const isBet = betTargets[qi] === pid;
-                return (
-                  <button
-                    key={pid}
-                    onClick={() => !alreadyBet && handleBet(pid)}
-                    disabled={alreadyBet && !isBet}
-                    className={`px-4 py-3 min-h-[44px] rounded font-literary text-[0.95rem] text-center transition-colors border ${
-                      isBet
-                        ? "bg-raised text-ink border-cold/40"
-                        : alreadyBet
-                          ? "bg-surface text-dim border-rule"
-                          : "bg-surface text-ink border-rule hover:bg-raised hover:border-cold/40 cursor-pointer"
-                    }`}
-                  >
-                    <span className="font-literary-sc text-[0.8rem] tracking-wide">
-                      {aliasById[pid] || pid}
-                    </span>
-                    <span className="ml-2 font-system text-[0.65rem] text-dim">
-                      {val} {subRoundPayload.unit}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {alreadyBet && (
-              <p className="mt-1 text-center font-system text-[0.65rem] text-dim tracking-wider uppercase">
-                bet placed
-              </p>
-            )}
-          </div>
-        </Panel>
-      </>
+          <p className="font-system text-[0.6rem] text-dim tracking-wider uppercase">
+            {alreadyBet
+              ? `bet placed on ${aliasById[betTargets[qi]] || betTargets[qi]}`
+              : "whose guess is closest?"}
+          </p>
+        </div>
+      </Panel>
     );
   }
 

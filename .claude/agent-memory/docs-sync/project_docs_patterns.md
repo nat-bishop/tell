@@ -32,9 +32,21 @@ Added alongside existing Task + BrainTest handlers:
 - **No Rive**: Background is pure CSS via `FacilityBackground.tsx`.
 - **Component registry**: `MINIGAME_COMPONENTS` in `FacilityScene.tsx` maps `round_type → {Active, Results, Prompt?}`. Signal has a `Prompt` entry.
 
-## Common drift sources (v4)
+## v5 Key Changes (AI consolidation, scoring ×100, Signal redesign)
 
-- **Task scoring is negative**: Votes received = −1 each. Easy to describe as "+1 per win" (old mechanic). Check `task.py::build_results()`.
+- **AI agent consolidation**: `brain_test_agent` removed. Single `ai_agent` handles all player actions. `judge_agent` for signal judging only. All actions go through `_run_ai_agent()`.
+- **Structured output + auto-retry**: `AICallContext` dataclass carries `valid: list | None`. `ai_agent` constructed with `validation_context=lambda ctx: ctx.deps.valid`. `field_validator` in output models (BrainTestResponse, PlayerPickResponse, SignalGuessResponse) raises if value not in `valid` — triggers PydanticAI retry (up to 2).
+- **Stable instructions / volatile user message**: `get_personality_instructions(name)` computes once per personality. Passed as `instructions=` kwarg to `ai_agent.run()`. Game context in user message.
+- **All scores ×100**: Task −100/vote; Brain Test +100/challenge; Wager +100 closest, +100 bet; Signal guesser score*50 (0/50/100), transmitter = avg of guesser points (int division).
+- **Signal redesign**: 3 random transmitters (not all players). `used_signal_transmitter_ids` tracks across rounds. Non-transmitters cannot submit answers; transmitters cannot guess. LLM judging is graded 0/1/2 (not bool). `judge_agent` output model: `SignalJudgment` with list of `JudgmentEntry(score: 0|1|2)`. Fuzzy fallback now binary 0/2.
+- **Conversation history now universal**: All player actions thread history — including brain test and signal guess (previously stateless). `_conversation_history[game_id][player_id]` populated by every `_run_ai_agent` call.
+
+## Common drift sources (v5)
+
+- **Task scoring is negative and ×100**: Votes received = −100 each. Check `task.py::build_results()`.
+- **Signal transmitters vs. all players**: Only 3 transmitters per round. `signal_player_order` = transmitter list, not all players. `used_signal_transmitter_ids` on `TellGameState` tracks repeats.
+- **Signal judging is graded 0/1/2**, not boolean. Guesser points = `score * 50`. Transmitter = integer avg of guesser points.
+- **`AICallContext` is the deps type**, not `AIPlayerDeps` (old name, removed). `validation_context` is a constructor param on `ai_agent`, not a `run()` param.
 - **Round types**: All four registered: TASK, BRAIN_TEST, WAGER, SIGNAL. Selection rule: no consecutive repeat only.
 - **`MinigameMeta` location**: `backend/minigames/base.py`, not `game_logic.py`.
 - **`score_brain_test()` location**: `backend/minigames/brain_test.py`, not `game_logic.py`.
@@ -44,7 +56,6 @@ Added alongside existing Task + BrainTest handlers:
 - **`total_rounds = 5`** is game length (not a safety cap).
 - **`initialize_and_start_game`** in `transitions.py` — shared by host-start and matchmaking.
 - **Narrator fires in** `transitions.py::_fire_narration()` as `asyncio.create_task()` — non-blocking.
-- **AI conversation history**: `_conversation_history` dict in `ai_scheduler.py`.
 - **Circular import pattern**: `ai_scheduler ↔ transitions`, `BrainTestHandler._brain_loop → do_active_complete`, `WagerHandler._wager_loop → do_active_complete`, `SignalHandler._signal_loop → do_active_complete`. All resolved via runtime imports inside async functions.
 - **Signal `_judge_all_guesses` runs outside lock**: LLM calls parallelized per featured player, then result stored under lock.
 - **Signal guesses keyed by featured_player_id → guesser_id**: Nested dict. `rs.signal_guesses[featured_pid][guesser_pid] = guess_text`.

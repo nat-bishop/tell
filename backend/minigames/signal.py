@@ -152,13 +152,14 @@ class SignalHandler(MinigameHandler):
                 alias_map = {p.id: p.alias for p in state.players}
                 transformation = rs.answers.get(featured_pid, NO_RESPONSE)
                 return {
-                    "round_type": "signal",
+                    "round_type": self.round_type,
                     "featured_player_id": featured_pid,
                     "featured_alias": alias_map.get(featured_pid, featured_pid),
                     "transformation": transformation,
                     "constraint": rs.signal_constraint,
                     "total_transmitters": len(rs.signal_player_order),
                     "sub_round_index": tx_index,
+                    "transmitter_ids": rs.signal_player_order,
                 }
         return {}
 
@@ -289,7 +290,7 @@ class SignalHandler(MinigameHandler):
                     },
                     "sub_round_index": tx_index,
                     "sub_round_payload": {
-                        "round_type": "signal",
+                        "round_type": self.round_type,
                         "featured_player_id": featured_pid,
                         "featured_alias": alias_map.get(featured_pid, featured_pid),
                         "transformation": transformation,

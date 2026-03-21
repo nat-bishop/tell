@@ -30,10 +30,12 @@ def _get_closest_ids(q: WagerQuestion) -> list[str]:
     return [pid for pid, g in q.guesses.items() if abs(g - correct) == min_dist]
 
 
-def _build_sub_round_payload(q: WagerQuestion, q_idx: int, num_questions: int, phase: str) -> dict:
+def _build_sub_round_payload(
+    q: WagerQuestion, q_idx: int, num_questions: int, phase: str, round_type: str = "wager"
+) -> dict:
     """Build the payload dict for a wager step event."""
     payload: dict = {
-        "round_type": "wager",
+        "round_type": round_type,
         "phase": phase,
         "question_index": q_idx,
         "question": q.question,
@@ -138,10 +140,11 @@ class WagerHandler(MinigameHandler):
             return {}
 
         q = rs.wager_questions[q_idx]
+        n = len(rs.wager_questions)
         if step_name.startswith("guess_"):
-            return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "guess")
+            return _build_sub_round_payload(q, q_idx, n, "guess", self.round_type)
         elif step_name.startswith("bet_"):
-            return _build_sub_round_payload(q, q_idx, len(rs.wager_questions), "bet")
+            return _build_sub_round_payload(q, q_idx, n, "bet", self.round_type)
         return {}
 
     def build_results(self, state: TellGameState) -> tuple[dict, dict[str, int]]:
@@ -183,7 +186,7 @@ class WagerHandler(MinigameHandler):
                 return {
                     "sub_round_index": state.current_step_index,
                     "sub_round_payload": _build_sub_round_payload(
-                        q, q_idx, len(rs.wager_questions), phase
+                        q, q_idx, len(rs.wager_questions), phase, self.round_type
                     ),
                 }
 
