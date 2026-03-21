@@ -628,21 +628,24 @@ DUEL_PROMPTS: list[DuelPrompt] = [
 
 
 SIGNAL_CONSTRAINTS: list[str] = [
-    "Describe the phrase using only questions. No statements allowed.",
-    "Describe the phrase without using any nouns.",
-    "Describe the opposite of the phrase. Everything is reversed.",
-    "Describe the phrase using exactly five words, separated by periods.",
-    "Describe the phrase as if it were a cooking recipe.",
-    "Describe the phrase as a breaking news headline.",
-    "Describe the phrase as a dramatic movie trailer narrator would.",
-    "Describe the phrase as a formal complaint letter.",
-    "Describe the phrase as the opening of a children's book.",
-    "Describe the phrase as a casual text message to a friend. Use abbreviations.",
-    "Describe the phrase as a nature documentary narrator would.",
-    "Describe the phrase as a set of step-by-step instructions.",
-    "Describe the phrase as a short poem (2-4 lines).",
-    "Describe the phrase as live sports commentary.",
-    "Describe the phrase as quietly and mysteriously as possible.",
+    # Structural puzzles
+    "Describe this using only questions. No statements allowed.",
+    "Only use words a five-year-old would know.",
+    "Describe only what you would hear. No visual details.",
+    "Describe what happens right before and right after this, but not the thing itself.",
+    "Describe this as a riddle for others to solve.",
+    "Describe only the emotions and feelings involved. Nothing physical.",
+    "Every sentence must be exactly three words.",
+    "Describe this only using 'like' or 'as if' comparisons.",
+    "Everything you write must rhyme.",
+    # Voice / performance
+    "Write a Yelp review of this experience.",
+    "Describe this as live sports commentary.",
+    "Narrate this as a nature documentary.",
+    "Tell this as a bedtime story for a toddler.",
+    # Transformation
+    "Write this as a product safety warning.",
+    "Report this as a 911 emergency call.",
 ]
 
 
