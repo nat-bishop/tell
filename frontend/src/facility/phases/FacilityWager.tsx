@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { useGameStore } from "@/hooks/useGameStore";
 import { submitWagerGuess, submitWagerBet } from "@/api/actions";
 import { Panel } from "@/facility/Panel";
@@ -195,7 +195,7 @@ function NumberLine({
                   onClick={() => !isDimmed && onMarkerClick?.(mg.ids[0])}
                   disabled={!!isDimmed}
                   aria-label={`Bet on ${mg.labels.join(", ")}`}
-                  className="absolute"
+                  className="absolute marker-btn"
                   style={{
                     left: `${toPercent(mg.value)}%`,
                     top: "50%",
@@ -215,7 +215,7 @@ function NumberLine({
                   }}
                 >
                   <div
-                    className={isSelected ? "animate-bet-glow" : ""}
+                    className={`marker-dot ${isSelected ? "animate-bet-glow" : ""}`}
                     style={{
                       width: isSelected ? "14px" : "10px",
                       height: isSelected ? "14px" : "10px",
@@ -224,7 +224,6 @@ function NumberLine({
                       boxShadow: isSelected
                         ? "0 0 12px var(--cold-glow)"
                         : `0 0 6px ${mg.color}`,
-                      transition: "all 200ms",
                     }}
                   />
                 </button>
@@ -233,7 +232,7 @@ function NumberLine({
           : mergedMarkers.map((mg, i) => (
               <div
                 key={i}
-                className="absolute"
+                className="absolute marker-dot"
                 style={{
                   left: `${toPercent(mg.value)}%`,
                   top: "50%",
@@ -302,10 +301,20 @@ export function FacilityWager() {
   const playerColors = usePlayerColors();
 
   const isWager = subRoundPayload?.round_type === "wager";
+  const wagerPhase = isWager ? subRoundPayload.phase : null;
+  const wagerQi = isWager ? subRoundPayload.question_index : -1;
 
-  const [guessValues, setGuessValues] = useState<Record<number, number>>({});
   const [currentGuess, setCurrentGuess] = useState<number | null>(null);
   const [betTargets, setBetTargets] = useState<Record<number, string>>({});
+
+  // Refs for auto-submit on step change
+  const submittedGuessRef = useRef(false);
+  const currentGuessRef = useRef<number | null>(null);
+
+  const handleGuessChange = useCallback((value: number) => {
+    currentGuessRef.current = value;
+    setCurrentGuess(value);
+  }, []);
 
   const aliasById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -319,14 +328,33 @@ export function FacilityWager() {
       const qi = subRoundPayload.question_index;
       try {
         await submitWagerGuess(gameId, playerId, qi, value);
-        setGuessValues((prev) => ({ ...prev, [qi]: value }));
-        setCurrentGuess(null);
+        submittedGuessRef.current = true;
       } catch {
         // Silently handle
       }
     },
     [gameId, playerId, isWager, subRoundPayload],
   );
+
+  // Auto-submit guess on step change (safety net for users who don't release pointer)
+  useEffect(() => {
+    if (!isWager || wagerPhase !== "guess") return;
+    submittedGuessRef.current = false;
+    setCurrentGuess(null);
+    const mid = Math.round(
+      (subRoundPayload!.range_min + subRoundPayload!.range_max) / 2,
+    );
+    const gId = gameId;
+    const pId = playerId;
+    const capturedQi = wagerQi;
+
+    return () => {
+      if (!submittedGuessRef.current && gId && pId) {
+        const value = currentGuessRef.current ?? mid;
+        submitWagerGuess(gId, pId, capturedQi, value).catch(() => {});
+      }
+    };
+  }, [wagerQi, wagerPhase, gameId, playerId, isWager]);
 
   const handleBet = useCallback(
     async (targetId: string) => {
@@ -382,7 +410,7 @@ export function FacilityWager() {
                     className="font-system text-[0.55rem] text-dim tracking-wider"
                   >
                     {aliasById[pid] || pid} {"→"} {aliasById[target] || target}
-                    {q.closest_ids.includes(target) ? " \u2713" : ""}
+                    {q.closest_ids.includes(target) ? " ✓" : ""}
                   </span>
                 ))}
               </div>
@@ -415,69 +443,39 @@ export function FacilityWager() {
 
   if (isWager && subRoundPayload.phase === "guess") {
     const qi = subRoundPayload.question_index;
-    const alreadySubmitted = guessValues[qi] !== undefined;
     const range_mid = Math.round(
       (subRoundPayload.range_min + subRoundPayload.range_max) / 2,
     );
 
     return (
-      <>
-        <Panel zone="main-screen">
-          <div className="flex flex-col items-center justify-center h-full gap-3">
-            <p className="font-system text-[0.6rem] text-cold tracking-[0.2em] uppercase">
+      <Panel zone="full-screen">
+        <div className="flex flex-col items-center justify-center h-full gap-5">
+          <div className="text-center">
+            <p className="font-system text-[0.6rem] text-cold tracking-[0.2em] uppercase mb-2">
               question {qi + 1} of {subRoundPayload.total_questions} — estimate
             </p>
             <p className="font-literary text-[1.15rem] text-ink text-center leading-[1.6] max-w-md">
               {subRoundPayload.question}
             </p>
           </div>
-        </Panel>
 
-        <Panel zone="center-area">
-          <div className="flex flex-col items-center justify-center h-full gap-3">
-            {alreadySubmitted ? (
-              <>
-                <NumberLine
-                  min={subRoundPayload.range_min}
-                  max={subRoundPayload.range_max}
-                  unit={subRoundPayload.unit}
-                  markers={[
-                    {
-                      value: guessValues[qi],
-                      label: `${guessValues[qi]}`,
-                      color: "var(--cold)",
-                    },
-                  ]}
-                />
-                <p className="font-system text-[0.65rem] text-dim tracking-wider uppercase">
-                  submitted: {guessValues[qi]} {subRoundPayload.unit}
-                </p>
-              </>
-            ) : (
-              <>
-                <NumberLine
-                  min={subRoundPayload.range_min}
-                  max={subRoundPayload.range_max}
-                  unit={subRoundPayload.unit}
-                  interactive
-                  value={currentGuess ?? range_mid}
-                  onChange={setCurrentGuess}
-                  onCommit={handleGuessCommit}
-                />
-                <p className="font-system text-[0.7rem] text-ink tracking-wider">
-                  {currentGuess ?? range_mid} {subRoundPayload.unit}
-                </p>
-                <button
-                  onClick={() => handleGuessCommit(currentGuess ?? range_mid)}
-                  className="px-6 py-2 min-h-[44px] rounded font-system text-[0.75rem] text-ink tracking-wider uppercase bg-surface hover:bg-raised transition-colors border border-rule hover:border-cold/40 cursor-pointer"
-                >
-                  submit guess
-                </button>
-              </>
-            )}
+          <div className="w-full max-w-lg">
+            <NumberLine
+              min={subRoundPayload.range_min}
+              max={subRoundPayload.range_max}
+              unit={subRoundPayload.unit}
+              interactive
+              value={currentGuess ?? range_mid}
+              onChange={handleGuessChange}
+              onCommit={handleGuessCommit}
+            />
           </div>
-        </Panel>
-      </>
+
+          <p className="font-system text-[0.7rem] text-ink tracking-wider">
+            {currentGuess ?? range_mid} {subRoundPayload.unit}
+          </p>
+        </div>
+      </Panel>
     );
   }
 

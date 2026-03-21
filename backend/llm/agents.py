@@ -45,13 +45,12 @@ class BrainTestResponse(BaseModel):
         return v
 
 
-class PlayerPickResponse(BaseModel):
-    """Shared by gallery vote and wager bet — pick a player by alias."""
+class AliasPickResponse(BaseModel):
+    """Pick a player by alias."""
 
     model_config = ConfigDict(extra="forbid")
 
     selected: str = Field(description="Alias of the player you choose")
-    reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
     @field_validator("selected")
     @classmethod
@@ -61,11 +60,16 @@ class PlayerPickResponse(BaseModel):
         return v
 
 
+class PlayerPickResponse(AliasPickResponse):
+    """Gallery vote — pick a player by alias with reasoning."""
+
+    reasoning: str = Field(description="Brief reasoning (1 sentence)")
+
+
 class WagerGuessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: int = Field(description="Your numerical estimate")
-    reasoning: str = Field(description="Brief reasoning (1 sentence)")
 
 
 class SignalGuessResponse(BaseModel):
@@ -297,7 +301,7 @@ async def generate_wager_bet(
             "wager_bet",
             message_history,
             instructions=instructions,
-            output_type=PlayerPickResponse,
+            output_type=AliasPickResponse,
             valid=valid_aliases,
             log_fields=log_fields,
         )

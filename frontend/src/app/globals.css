@@ -186,6 +186,15 @@ body::before {
   animation: bet-select-glow 2s ease-in-out infinite;
 }
 
+/* Number line marker hover */
+.marker-dot {
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+.marker-btn:hover .marker-dot {
+  transform: scale(1.6);
+  box-shadow: 0 0 12px var(--cold-glow);
+}
+
 /* Elimination reveal animations */
 @keyframes reveal-expand {
   from { opacity: 0; letter-spacing: 0.4em; }
