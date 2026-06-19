@@ -1,5 +1,7 @@
 # Tell
 
+![Tell — a reverse Turing test](docs/media/lobby.png)
+
 Multiplayer social deduction game — reverse Turing test. Players join a group where some are AI, some human. Everyone votes each round on who sounds most human. After 5 rounds: big reveal, highest score wins.
 
 ## Prerequisites
@@ -40,3 +42,9 @@ Run `make` to see all targets.
 
 - [Architecture](docs/ARCHITECTURE.md) — real-time system, state machine, AI scheduling
 - [Game Design](docs/GAME_DESIGN.md) — mechanics, prompts, design rationale
+
+## License
+
+© 2026 Nat Bishop. All rights reserved. This repository is published for portfolio
+and evaluation purposes only; it is not licensed for reuse, redistribution, or
+derivative works.
